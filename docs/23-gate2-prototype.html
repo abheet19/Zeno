@@ -171,7 +171,7 @@ h2{font-family:Newsreader,serif;font-size:1.4rem;font-weight:600;margin:0 0 3px;
 .cmdmain{overflow:auto;padding:16px 18px;min-width:0;position:relative}
 .cmdmain h2{font-family:Newsreader,serif;font-weight:500;font-size:23px;letter-spacing:-.012em;margin:26px 0 3px}
 .cmdmain>h2:first-of-type{margin-top:0}
-.hero{position:relative;height:clamp(340px,52vh,520px);margin:-16px -18px 22px;overflow:hidden;
+.hero{position:relative;height:clamp(430px,64vh,660px);margin:-16px -18px 22px;overflow:hidden;
  border-bottom:1px solid var(--gl-edge)}
 .fieldbox{position:absolute;inset:0}
 .hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
@@ -377,7 +377,7 @@ h2{font-family:Newsreader,serif;font-size:1.4rem;font-weight:600;margin:0 0 3px;
   .faces{margin:0 auto}
   .pre{position:static;width:auto}
   .heromast h1{font-size:26px}
-  .fieldbox{position:relative;order:2;height:270px;margin-top:12px}
+  .fieldbox{position:relative;order:2;height:340px;margin-top:12px}
   .field-tog{top:auto!important;bottom:10px}
   .caps,.pl{max-width:none!important}
 
@@ -713,6 +713,19 @@ h2{font-family:Newsreader,serif;font-size:1.4rem;font-weight:600;margin:0 0 3px;
 .selh{font-size:13px;color:var(--ink)}.selh b{color:var(--green)}
 .selx{font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:5px}
 .selpending{margin-top:12px;font-size:10.5px;color:var(--ink-3);text-align:center;padding:10px}
+
+.fieldleg{position:absolute;left:16px;bottom:34px;display:flex;gap:11px;flex-wrap:wrap;align-items:center;
+ font-size:9px;color:var(--ink-3);pointer-events:none}
+.fieldleg span{display:inline-flex;align-items:center;gap:4px}
+.fieldleg .gl{width:7px;height:7px;border-radius:50%;box-shadow:0 0 5px 1px currentColor}
+.fieldleg .gl.am{background:var(--amber);color:var(--amber)}
+.fieldleg .gl.rd{background:var(--red);color:var(--red)}
+.fieldleg .gl.cy{background:var(--cyan);color:var(--cyan)}
+.fieldleg .gl.gr{background:var(--green);color:var(--green)}
+.fieldleg .gl.wt{background:var(--ink-3);color:var(--ink-3);box-shadow:none;opacity:.6}
+.fieldleg .gl.eg{background:var(--amber);color:var(--amber);box-shadow:none}
+.fieldleg .lgd{color:var(--ink-3);opacity:.75;font-style:italic}
+@media (max-width:560px){.fieldleg{display:none}}
 </style>
 
 <div class="app">
@@ -787,25 +800,63 @@ function syncTop(){var m=document.getElementById("b-mo"),f=document.getElementBy
 function mk(s,n){return S.lock?'<span class="mk">'+"\u2588".repeat(n||10)+'</span>':s;}
 
 /* ===== Standing Field (original: bounded, centreless, matte, axonometric) ===== */
+/* The Standing Field as a NEURAL BRAIN (owner-directed):
+   the organic constellation, alive — nodes drift like neurons breathing,
+   synapses fire along the edges, attention spreads to neighbours.
+   Position is organic; GLOW = state · LINKS = relationships · FIRING = activity. */
 var N=[
- {id:"orch",l:"Zeno Orchestrator",k:"core",x:.06,y:0,z:0,d:"The single coordinating core. Owns the task graph and routes least-scoped context. Never a privileged model process."},
- {id:"work",l:"Work Agent",k:"agent",x:-.72,y:.26,z:.34,d:"Turns a WEBEXT ticket into a cited context pack. Cannot approve its own output."},
- {id:"sarah",l:"Sarah · Design",k:"agent",x:.74,y:.40,z:-.22,d:"Design agent. Raises cited defects to the internal channel — never posts externally."},
- {id:"cou",l:"Counsel",k:"agent",x:-.30,y:.60,z:.52,d:"Reads repos to cite live answers. Cannot edit code or create work alone."},
- {id:"mac",l:"This Mac",k:"dev",x:-.36,y:-.60,z:.30,d:"Work Mac. Development host for isolated synthetic builds. No employer data, no OS permission grant."},
- {id:"win",l:"Windows pilot",k:"dev",x:.42,y:-.70,z:.06,d:"Personal pilot machine. Specs unknown (B-002) — every latency target is a measurement, not a promise."},
- {id:"ph",l:"Phone",k:"dev",x:.62,y:-.32,z:.50,d:"Approval companion. One executor lease prevents double-send."},
- {id:"ba",l:"browser-add-on",k:"repo",x:-.84,y:-.10,z:-.28,d:"20 Cursor rules + AGENTS.md + CLAUDE.md. 3,309 source files."},
- {id:"pk",l:"packages",k:"repo",x:-.50,y:.60,z:-.42,d:"17,665 source files. Cross-repo changes get one plan, per-repo diffs."},
- {id:"es",l:"edit-stream",k:"repo",x:.16,y:.66,z:.40,d:"6 Cursor rules. 1,061 source files."},
- {id:"rs",l:"rest-server",k:"repo",x:.56,y:.08,z:.64,d:"5 Cursor rules. 2,719 source files."},
- {id:"jira",l:"Jira · WEBEXT/OPS",k:"src",x:-.16,y:-.30,z:-.60,d:"WEBEXT + WEBEXTOPS. A verified assignment creates a read-only Intake — never a build."},
- {id:"neo",l:"NeoSapien",k:"srcq",x:.80,y:-.06,z:-.48,d:"Undocumented vendor endpoint. Read-only, cited as supplemental, never a silent dependency."}
+ {id:"orch",l:"Zeno Orchestrator",k:"core",hx:.06,hy:0,hz:0,x:0,y:0,z:0,d:"The coordinating core — the brain's centre. Routes least-scoped context, dispatches agents, aware of everything on this map. Never a privileged model process."},
+ {id:"work",l:"Work Agent",k:"agent",hx:-.72,hy:.26,hz:.34,x:0,y:0,z:0,d:"Turns a ticket into a cited context pack and drafts fixes. Cannot approve its own output."},
+ {id:"sarah",l:"Sarah · Design",k:"agent",hx:.74,hy:.40,hz:-.22,x:0,y:0,z:0,d:"Design agent. Raises cited defects internally — never posts externally."},
+ {id:"cou",l:"Counsel",k:"agent",hx:-.30,hy:.60,hz:.52,x:0,y:0,z:0,d:"Meeting copilot agent. Reads repos to cite live answers; cannot edit code alone."},
+ {id:"mac",l:"This Mac",k:"dev",hx:-.36,hy:-.60,hz:.30,x:0,y:0,z:0,d:"Work Mac. Development host for isolated synthetic builds. No employer data, no OS permission grant."},
+ {id:"win",l:"Windows pilot",k:"dev",hx:.42,hy:-.70,hz:.06,x:0,y:0,z:0,d:"Personal pilot — RTX 3080 12GB · R7 7700X · 32GB. The product's Phase-1 runtime."},
+ {id:"ph",l:"Phone",k:"dev",hx:.62,hy:-.32,hz:.50,x:0,y:0,z:0,d:"Approval companion. One executor lease prevents double-send."},
+ {id:"ba",l:"browser-add-on",k:"repo",hx:-.84,hy:-.10,hz:-.28,x:0,y:0,z:0,d:"20 Cursor rules + AGENTS.md + CLAUDE.md. 3,309 source files."},
+ {id:"pk",l:"packages",k:"repo",hx:-.50,hy:.60,hz:-.42,x:0,y:0,z:0,d:"17,665 source files. Cross-repo changes get one plan, per-repo diffs."},
+ {id:"es",l:"edit-stream",k:"repo",hx:.16,hy:.66,hz:.40,x:0,y:0,z:0,d:"6 Cursor rules. 1,061 source files."},
+ {id:"rs",l:"rest-server",k:"repo",hx:.56,hy:.08,hz:.64,x:0,y:0,z:0,d:"5 Cursor rules. 2,719 source files."},
+ {id:"jira",l:"Jira · WEBEXT/OPS",k:"src",hx:-.16,hy:-.30,hz:-.60,x:0,y:0,z:0,d:"WEBEXT + WEBEXTOPS. A verified assignment creates a read-only Intake — never a build."},
+ {id:"neo",l:"NeoSapien",k:"srcq",hx:.80,hy:-.06,hz:-.48,x:0,y:0,z:0,d:"Undocumented vendor endpoint. Read-only, cited as supplemental, never a silent dependency."},
+ {id:"t3514",l:"WEBEXT-3514",k:"ticket",tk:"WEBEXT-3514",ops:false,hx:-.34,hy:.04,hz:.74,x:0,y:0,z:0,d:"Feature — insert/replace label. Worked by the Work Agent, touches browser-add-on. Its glow tracks the journey stepper above."},
+ {id:"t812",l:"WEBEXTOPS-812",k:"ticket",tk:"WEBEXTOPS-812",ops:true,hx:.22,hy:-.16,hz:.78,att:"active",x:0,y:0,z:0,d:"Prod bug — toolbar flicker. Repro running in a QA profile. Touches browser-add-on, from WEBEXTOPS."},
+ {id:"t5122",l:"!5122 MR",k:"ticket",tk:null,ops:false,hx:.56,hy:.50,hz:.30,att:"needs",x:0,y:0,z:0,d:"Compose-window alignment MR — CI green on 15 sites, awaiting your merge."},
+ {id:"t3488",l:"WEBEXT-3488",k:"ticket",tk:"WEBEXT-3488",ops:false,hx:-.62,hy:-.40,hz:.06,att:"blocked",x:0,y:0,z:0,d:"Sidepanel telemetry — blocked on a packages deploy. Zeno is holding, not retrying."}
 ];
+N.forEach(function(n,i){n.ph=i*2.399963;});   // golden-angle phases for organic, non-repeating drift
+/* how long each item has been waiting — older = more urgent */
+var AGE={t3514:4,t812:14,t5122:135,t3488:1440};
+N.forEach(function(n){if(AGE[n.id]!=null)n.ageMin=AGE[n.id];});
+function ageStr(m){return m==null?"":m<60?m+"m":m<1440?Math.round(m/60)+"h":Math.round(m/1440)+"d";}
+function urgOf(n){return Math.min(1,(n.ageMin||0)/720);}  // maxes out at ~12h waiting
 var E=[["orch","work"],["orch","sarah"],["orch","cou"],["orch","mac"],["orch","win"],["orch","ph"],
- ["work","ba"],["work","pk"],["work","es"],["work","rs"],["work","jira"],["work","neo"],["cou","ba"],["cou","neo"],["jira","orch"]];
+ ["work","ba"],["work","pk"],["work","es"],["work","rs"],["work","jira","eg"],["work","neo"],["cou","ba"],["cou","neo"],["jira","orch"],
+ /* ticket links: worked-by (agent) · touches (repo) · from (source) */
+ ["t3514","work"],["t3514","ba"],["t3514","jira"],
+ ["t812","work"],["t812","ba"],["t812","jira"],
+ ["t5122","sarah"],["t5122","ba"],["t5122","jira","eg"],
+ ["t3488","work"],["t3488","pk"]];
 var ACT=[["jira"],["work","ba","jira"],["orch","work"],["work","mac","ba"],["work","rs"]];
 function cv(v){return getComputedStyle(R).getPropertyValue(v).trim();}
+/* live attention per node: what glows tells you what wants you */
+function attOf(n){
+ if(n.id==="t3514") return S.j>=4?"verified":S.j>=3?"active":S.j>=2?"needs":"active";
+ if(n.id==="work")  return (S.j>=1&&S.j<=3)?"active":null;
+ return n.att||null;
+}
+function attCol(a){return a==="needs"?cv("--amber"):(a==="blocked"||a==="error")?cv("--red"):a==="active"?cv("--cyan"):a==="verified"?cv("--green"):a==="waiting"?cv("--ink-3"):null;}
+/* priority: what should grab you FIRST (higher = more urgent for YOU) */
+function attPri(a){return a==="error"?5:a==="needs"?4:a==="blocked"?3:a==="active"?2:a==="verified"?1:0;}
+/* each state breathes differently — the rhythm itself tells you the mood */
+function attPulse(a,t){
+ if(!S.motion)return 1;
+ if(a==="needs")   return 1+.26*Math.sin(t*3.4);            // urgent, quick
+ if(a==="error")   return 1+.34*Math.max(0,Math.sin(t*6.2));// sharp flash
+ if(a==="blocked") return 1+.15*Math.sin(t*1.3);            // slow, labored — "stuck"
+ if(a==="active")  return 1+.11*Math.sin(t*2.2);            // gentle working
+ return 1;                                                   // verified / waiting = calm, steady
+}
+function neighborsOf(id){var s={};for(var i=0;i<E.length;i++){var e=E[i];if(e[0]===id)s[e[1]]=1;if(e[1]===id)s[e[0]]=1;}return s;}
 function rgba(h,a){h=(h||"#888").trim();
  if(h.charAt(0)!=="#")return h;
  if(h.length===4)h="#"+h[1]+h[1]+h[2]+h[2]+h[3]+h[3];
@@ -813,13 +864,21 @@ function rgba(h,a){h=(h||"#888").trim();
  return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";}
 function nc(n){return n.k==="core"?cv("--gold"):(n.k==="agent"||n.k==="src")?cv("--cyan"):cv("--ink-3");}
 var F={c:null,x:null,rot:.62,tilt:.34,tilt0:.34,drag:0,raf:0,hov:null,W:0,H:0,mx:0,my:0};
-function proj(n){var cr=Math.cos(F.rot),sr=Math.sin(F.rot),ct=Math.cos(F.tilt),st=Math.sin(F.tilt);
- var x=n.x*cr-n.z*sr, z=n.x*sr+n.z*cr, y=n.y*ct-z*st, zz=n.y*st+z*ct, p=1/(1.85-zz*.46);
+function projPt(px,py,pz){var cr=Math.cos(F.rot),sr=Math.sin(F.rot),ct=Math.cos(F.tilt),st=Math.sin(F.tilt);
+ var x=px*cr-pz*sr, z=px*sr+pz*cr, y=py*ct-z*st, zz=py*st+z*ct, p=1/(1.85-zz*.46);
  return{x:x*p,y:y*p,d:zz,p:p};}
-function lay(){var wide=F.W>820,
- pad=Math.min(F.W*(wide?0.275:0.37),F.H*(wide?1.02:0.80)),
- cx=F.W*(wide?0.655:0.50), cy=F.H*(wide?0.50:0.47);
- N.forEach(function(n){var q=proj(n);n._=q;n.sx=cx+q.x*pad;n.sy=cy+q.y*pad;});}
+function proj(n){return projPt(n.x,n.y,n.z);}
+function lay(t){var wide=F.W>820,
+ pad=Math.min(F.W*(wide?0.27:0.34),F.H*(wide?0.88:0.72)),
+ cx=F.W*(wide?0.655:0.50), cy=F.H*(wide?0.51:0.48);
+ F._pad=pad;F._cx=cx;F._cy=cy;
+ var breathe=S.motion?(t||0):0;
+ N.forEach(function(n){
+  /* neurons drift gently around their home — alive, never chaotic */
+  n.x=n.hx+(breathe?.045*Math.sin(breathe*.29+n.ph):0);
+  n.y=n.hy+(breathe?.038*Math.sin(breathe*.22+n.ph*1.7):0);
+  n.z=n.hz+(breathe?.045*Math.cos(breathe*.26+n.ph*2.3):0);
+  var q=proj(n);n._=q;n.sx=cx+q.x*pad;n.sy=cy+q.y*pad;});}
 
 /* depth 0 = farthest, 1 = nearest */
 function dep(n){return Math.max(0,Math.min(1,(n._.d+1.05)/2.1));}
@@ -832,9 +891,11 @@ function sphere(c,n,r,col,lit){
  g.addColorStop(1,"rgba(0,0,0,.62)");
  c.beginPath();c.arc(n.sx,n.sy,r,0,7);c.fillStyle=g;c.fill();
 }
-
-function draw(){ if(!F.x||!F.W||!F.H)return; var c=F.x; c.clearRect(0,0,F.W,F.H); lay();
- var act=ACT[S.j]||[], t=performance.now()/1000, placed=[];
+function draw(){ if(!F.x||!F.W||!F.H)return; var c=F.x; c.clearRect(0,0,F.W,F.H);
+ var t=performance.now()/1000; lay(t);
+ var act=ACT[S.j]||[], placed=[];
+ var focus=S.sel||(F.hov&&F.hov.id)||null, neigh=focus?neighborsOf(focus):null;
+ var beaconId=null,bestScore=-1; N.forEach(function(n){var pr=attPri(attOf(n)); if(pr>=3){var sc=pr*100000+(n.ageMin||0); if(sc>bestScore){bestScore=sc;beaconId=n.id;}}});
  var CY=cv("--cyan"), GO=cv("--gold"), I3=cv("--ink-3"), GRN=cv("--green");
  var lightTheme=(R.getAttribute("data-theme")==="light")||
    (!R.getAttribute("data-theme")&&matchMedia("(prefers-color-scheme:light)").matches);
@@ -849,30 +910,55 @@ function draw(){ if(!F.x||!F.W||!F.H)return; var c=F.x; c.clearRect(0,0,F.W,F.H)
 
  /* edges, far-to-near, colour-graded along their length */
  E.slice().sort(function(p,q){return (g(p[0])._.d+g(p[1])._.d)-(g(q[0])._.d+g(q[1])._.d);})
- .forEach(function(e){
-  var a=g(e[0]),b=g(e[1]),da=dep(a),db=dep(b),dm=(da+db)/2;
+ .forEach(function(e2){
+  var a=g(e2[0]),b=g(e2[1]),da=dep(a),db=dep(b),dm=(da+db)/2;
   var live=act.indexOf(a.id)>=0&&act.indexOf(b.id)>=0;
   var lg=c.createLinearGradient(a.sx,a.sy,b.sx,b.sy);
   var ca=(a.k==="core"?GO:a.k==="agent"||a.k==="src"?CY:I3);
   var cb=(b.k==="core"?GO:b.k==="agent"||b.k==="src"?CY:I3);
   lg.addColorStop(0,ca);lg.addColorStop(1,cb);
-  c.globalAlpha=(live?.52:.20)+.30*dm;
-  c.strokeStyle=lg;c.lineWidth=(live?1.5:.85)+1.15*dm;
-  c.setLineDash(a.k==="srcq"||b.k==="srcq"?[3,5]:[]);
+  var conn=!focus||a.id===focus||b.id===focus;
+  c.globalAlpha=((live?.52:.20)+.30*dm)*(conn?1:.16);
+  c.strokeStyle=lg;c.lineWidth=((live?1.5:.85)+1.15*dm)*(conn?1:.7);
+  var eg=e2[2]==="eg";
+  if(eg){c.strokeStyle=cv("--amber");c.globalAlpha=(conn?.6:.18)+.12*dm;c.lineWidth=(1.1+1.0*dm)*(conn?1:.7);c.setLineDash([5,4]);}
+  else c.setLineDash(a.k==="srcq"||b.k==="srcq"?[3,5]:[]);
   c.beginPath();c.moveTo(a.sx,a.sy);c.lineTo(b.sx,b.sy);c.stroke();
-  /* one travelling packet per live edge — motion that means "this is carrying something" */
-  if(live&&S.motion){var u=(t*.42+(a.sx+b.sx)*.0013)%1;
-   var px=a.sx+(b.sx-a.sx)*u, py=a.sy+(b.sy-a.sy)*u;
-   c.setLineDash([]);c.globalAlpha=.85;
-   c.beginPath();c.arc(px,py,1.9+1.5*dm,0,7);c.fillStyle=CY;c.fill();}
+  if(eg){var mx=(a.sx+b.sx)/2,my=(a.sy+b.sy)/2;
+   c.setLineDash([]);c.globalAlpha=conn?.9:.4;c.fillStyle=cv("--amber");
+   c.font='700 8px "IBM Plex Mono",monospace';c.textAlign="center";
+   c.beginPath();c.arc(mx,my,5.5,0,7);c.fillStyle=cv("--g1");c.fill();
+   c.fillStyle=cv("--amber");c.fillText("\u26A1",mx,my+2.7);c.textAlign="left";}
  });
  c.setLineDash([]);c.globalAlpha=1;
 
- N.slice().sort(function(a,b){return a._.d-b._.d;}).forEach(function(n){
-  var d=dep(n), base=(n.k==="core"?9.6:5.9), r=base*(.46+1.08*d), on=act.indexOf(n.id)>=0&&S.motion;
-  var pu=on?1+.13*Math.sin(t*2.4):1; r*=pu;
+  N.slice().sort(function(a,b){return a._.d-b._.d;}).forEach(function(n){
+  var d=dep(n), base=(n.k==="core"?9.8:6.0), r=base*(.46+1.08*d), on=act.indexOf(n.id)>=0&&S.motion;
+  var _a=attOf(n);
+  var szf=(_a==="needs"||_a==="error")?1.16:_a==="blocked"?1.08:1;   // urgent things read bigger
+  r*=szf*attPulse(_a,t);
   var col=(n.k==="core"?GO:n.k==="agent"||n.k==="src"?CY:n.k==="srcq"?cv("--red"):I3);
   var sel=(n===F.hov||n.id===S.sel);
+  var att=attOf(n), acol=att?attCol(att):null;
+  /* spreading activation — a neuron next to a firing one warms up faintly */
+  if(!att&&!acol){for(var ai=0;ai<N.length;ai++){var m=N[ai];
+   if(m!==n&&attOf(m)&&neighborsOf(m.id)[n.id]){acol=null;
+    var sc=attCol(attOf(m)), sp2=.10+(S.motion?.05*Math.sin(t*2.7+n.ph):0);
+    var sg=c.createRadialGradient(n.sx,n.sy,1,n.sx,n.sy,r*3.4);
+    sg.addColorStop(0,rgba(sc,sp2));sg.addColorStop(1,rgba(sc,0));
+    c.globalAlpha=1;c.beginPath();c.arc(n.sx,n.sy,r*3.4,0,7);c.fillStyle=sg;c.fill();
+    break;}}}
+  var lit=!focus||n.id===focus||(neigh&&neigh[n.id]);
+  var dimf=lit?1:(att?.5:.24);
+
+  /* ATTENTION GLOW — what needs you pulses in its state colour */
+  if(acol){
+   var ap=(att==="verified"||att==="waiting"?.24:.24+.20*(attPulse(att,t)-1)/.26)*(.72+.55*urgOf(n))*dimf;
+   var abr=r*6.8;
+   var ag=c.createRadialGradient(n.sx,n.sy,r*.4,n.sx,n.sy,abr);
+   ag.addColorStop(0,rgba(acol,ap));ag.addColorStop(.5,rgba(acol,ap*.32));ag.addColorStop(1,rgba(acol,0));
+   c.globalAlpha=1;c.beginPath();c.arc(n.sx,n.sy,abr,0,7);c.fillStyle=ag;c.fill();
+  }
 
   /* bloom: strongest on the core and on whatever is live this step */
   if(n.k==="core"||on||sel){
@@ -885,23 +971,36 @@ function draw(){ if(!F.x||!F.W||!F.H)return; var c=F.x; c.clearRect(0,0,F.W,F.H)
   }
 
   /* far nodes sit back: softer, smaller, lower contrast */
-  c.globalAlpha=Math.min(1,.46+.54*d);
-  c.shadowColor=col; c.shadowBlur=(sel?16:on?12:5)*(.4+.6*d);
+  c.globalAlpha=Math.min(1,.46+.54*d)*dimf;
+  c.shadowColor=acol||col; c.shadowBlur=(sel?16:acol?11:on?12:5)*(.4+.6*d);
   sphere(c,n,r,col,sel||n.k==="core");
   c.shadowBlur=0;
 
+  /* attention ring in the state colour */
+  if(acol){c.globalAlpha=.92*dimf;c.beginPath();c.arc(n.sx,n.sy,r+3.4,0,7);
+   c.strokeStyle=acol;c.lineWidth=1.7;c.stroke();}
+
   c.beginPath();c.arc(n.sx,n.sy,r,0,7);
-  c.strokeStyle=col;c.globalAlpha=Math.min(1,(.34+.66*d))*(sel?1:.8);
+  c.strokeStyle=acol||col;c.globalAlpha=Math.min(1,(.34+.66*d))*(sel?1:.8)*dimf;
   c.lineWidth=(n.k==="core"?1.7:1.1)*(.6+.7*d);c.stroke();
 
   if(sel){c.globalAlpha=.95;c.beginPath();c.arc(n.sx,n.sy,r+7.5,0,7);
    c.strokeStyle=GO;c.lineWidth=1.4;c.stroke();}
+  /* ATTENTION BEACON — the one thing that most needs you: expanding ping + turning reticle */
+  if(n.id===beaconId){
+   c.save();c.strokeStyle=acol||cv("--amber");
+   if(S.motion){var pg=(t*.7)%1; c.globalAlpha=(1-pg)*.55;
+    c.lineWidth=1.4;c.beginPath();c.arc(n.sx,n.sy,r+5+pg*20,0,7);c.stroke();}
+   c.globalAlpha=.9;c.lineWidth=1.3;c.setLineDash([4.5,5.5]);c.lineDashOffset=S.motion?-t*13:0;
+   c.beginPath();c.arc(n.sx,n.sy,r+9,0,7);c.stroke();
+   c.restore();
+  }
   /* glassy specular: a bright arc where the light catches the sphere */
   if(sel||n.k==="core"){c.globalAlpha=Math.min(1,.5+.5*d);
    c.beginPath();c.arc(n.sx-r*.30,n.sy-r*.34,r*.62,Math.PI*1.02,Math.PI*1.55);
    c.strokeStyle="rgba(255,255,255,.55)";c.lineWidth=1.1;c.stroke();c.globalAlpha=1;}
 
-  var lab=(sel||n.k==="core"||d>0.46);
+  var lab=(sel||n.k==="core"||att||d>0.50);
   if(lab){
    var txt=S.lock?(n.k==="core"?"core":n.k):n.l;
    var fs=(8.6+3.4*d).toFixed(1);
@@ -1064,6 +1163,12 @@ function nodeCard(){
  } else if(n.k==="agent"){
   act='<button class="btn sm p" data-go="forge">Open its run in Forge</button><button class="btn sm g" data-clr="1">Close</button>';
   note='<div class="ncnote">An agent the Orchestrator dispatched. Its live run opens in <b>Forge</b>; it cannot approve its own output.</div>';
+ } else if(n.k==="ticket"){
+  var a2=attOf(n), lbl={needs:"needs you",blocked:"blocked",active:"in progress",verified:"verified"}[a2]||"tracked";
+  if(n.ageMin!=null)lbl+=" &middot; waiting "+ageStr(n.ageMin);
+  var open=(n.tk?'<button class="btn sm p" data-intake="'+n.tk+'" data-ops="'+(n.ops?1:0)+'">View intake</button>':'')+'<button class="btn sm g" data-go="forge">Open in Forge</button>';
+  act=open+'<button class="btn sm g" data-clr="1">Close</button>';
+  note='<div class="ncnote">Linked to the <b>agent working it</b> and the <b>repo it touches</b>. Status: <b>'+lbl+'</b>. Glowing means it wants your attention.</div>';
  } else if(n.k==="dev"){
   act='<button class="btn sm g" data-nav-dev="1">Manage device</button><button class="btn sm g" data-clr="1">Close</button>';
  } else {
@@ -1084,12 +1189,13 @@ function cmToday(){
   '<section class="hero">'+
    '<div class="fieldbox">'+fieldCanvas()+
     '<div class="heroveil"></div>'+
-    '<div class="hcap">The Standing Field &middot; drag to turn &middot; click a node</div>'+
+    '<div class="hcap">The Standing Field &middot; a living map &middot; drag to turn &middot; hover to trace its links</div>'+
+    '<div class="fieldleg mono"><span><i class="gl am"></i>needs you</span><span><i class="gl rd"></i>blocked / error</span><span><i class="gl cy"></i>running</span><span><i class="gl gr"></i>verified</span><span><i class="gl wt"></i>waiting</span><span><i class="gl eg"></i>&#9889; egress</span><span class="lgd">&#9678; ping = act now</span></div>'+
    '</div>'+
    '<div class="heromast">'+mastBlock()+'</div>'+
    '<div class="field-tog"><button class="ic" id="fl-t" aria-pressed="'+(S.fieldList?"true":"false")+'">'+(S.fieldList?"&#9635; field":"&#9776; list")+'</button></div>'+
    '<div class="fieldlist '+(S.fieldList?"on":"")+'" id="fl">'+N.map(function(n){
-     return '<div class="flrow" role="option" data-n="'+n.id+'" aria-selected="'+(S.sel===n.id?"true":"false")+'" tabindex="0"><span class="dot" style="border-color:'+(n.k==="core"?"var(--gold)":n.k==="dev"||n.k==="repo"?"var(--ink-3)":"var(--cyan)")+'"></span>'+(S.lock?'<span class="mk">'+"█".repeat(9)+'</span>':n.l)+'<span class="kind">'+n.k+'</span></div>';}).join('')+'</div>'+
+     return '<div class="flrow" role="option" data-n="'+n.id+'" aria-selected="'+(S.sel===n.id?"true":"false")+'" tabindex="0"><span class="dot" style="border-color:'+(n.k==="ticket"&&attCol(attOf(n))?attCol(attOf(n)):n.k==="core"?"var(--gold)":n.k==="dev"||n.k==="repo"?"var(--ink-3)":"var(--cyan)")+'"></span>'+(S.lock?'<span class="mk">'+"█".repeat(9)+'</span>':n.l)+'<span class="kind">'+n.k+'</span></div>';}).join('')+'</div>'+
    nodeCard()+
   '</section>'+
   h2+capsule+todayItems()+

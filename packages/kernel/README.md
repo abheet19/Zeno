@@ -1,8 +1,9 @@
-# @zeno/policy-kernel — slice P1-01
+# @zeno/policy-kernel — slices P1-01 + P1-02
 
-The deterministic **Policy & Approval Kernel**: the only component in Zeno allowed
-to turn a proposal into an effect. No UI, no LLM, no network. See
-`../LLD-P1-01-policy-approval-kernel.md` for the full design.
+The deterministic **Policy & Approval Kernel** (P1-01) plus the **Executor & Worktree
+Adapter** (P1-02) — the decision core, and its first real "hand" that carries out an
+approved file write (jailed, atomic, proven). No UI, no LLM, no network.
+See `../LLD-P1-01-*.md` and `../LLD-P1-02-*.md`.
 
 ## Run it
 
@@ -30,8 +31,11 @@ npm run test         # compiles, then node --test over the suite
 | `test/determinism.test.ts` | same inputs + injected world ⇒ byte-identical ledger |
 | `test/e2e.test.ts` | the full Command-capsule journeys, headless (verified / refused / unknown / T0 / T4) |
 | `test/policy.test.ts` | tier math, policy validation, expiry, error paths |
+| `test/executor.test.ts` | P1-02 jail (property), integrity, base-check, idempotency, reconcile, atomic |
+| `test/executor-e2e.test.ts` | kernel drives the executor: approve → real file change → verified; drift → untouched |
+| `test/executor-node-fs.test.ts` | the real fs adapter against an OS temp sandbox |
 
-Latest: **32 tests pass · ~2,300 generated scenarios · 99.4% line coverage · strict typecheck · lint clean.**
+Latest: **47 tests pass · ~3,000 generated scenarios · 99.6% line coverage · strict typecheck · lint clean.**
 
 ## Shape
 

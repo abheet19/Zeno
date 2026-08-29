@@ -1,0 +1,146 @@
+<meta charset="utf-8">
+<title>Executor &amp; Worktree Adapter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{--g1:#0A0C0E;--g2:#0F1214;--g3:#151A1D;--g4:#1B2124;--g5:#222A2E;--g6:#2C363B;
+ --ink:#ECEBE6;--ink-2:#9AA1AC;--ink-3:#6C7480;--rule:#242C31;--rule-2:#2C363B;
+ --cyan:#38C3D6;--gold:#D8BE7E;--amber:#E0A128;--red:#D8695A;--green:#5BB98C;}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+ --g1:#EAE9E3;--g2:#F4F3EE;--g3:#FBFAF6;--g4:#EFEEE9;--g5:#E6E5DF;--g6:#D6D4CC;
+ --ink:#171A1E;--ink-2:#555C67;--ink-3:#828994;--rule:#DEDCD5;--rule-2:#CBC9C1;
+ --cyan:#15707E;--gold:#8A6D2C;--amber:#8C6410;--red:#A6483C;--green:#387153;}}
+:root[data-theme="dark"]{--g1:#0A0C0E;--g2:#0F1214;--g3:#151A1D;--g4:#1B2124;--g5:#222A2E;--g6:#2C363B;
+ --ink:#ECEBE6;--ink-2:#9AA1AC;--ink-3:#6C7480;--rule:#242C31;--rule-2:#2C363B;
+ --cyan:#38C3D6;--gold:#D8BE7E;--amber:#E0A128;--red:#D8695A;--green:#5BB98C;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--g1);color:var(--ink);font:15px/1.62 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:44px 24px 80px}
+.mono{font-family:"IBM Plex Mono",monospace}
+h1{font-family:Newsreader,serif;font-weight:500;font-size:34px;line-height:1.1;letter-spacing:-.02em;margin:6px 0 4px;text-wrap:balance}
+h2{font-family:Newsreader,serif;font-weight:500;font-size:23px;letter-spacing:-.01em;margin:38px 0 6px;padding-top:20px;border-top:1px solid var(--rule)}
+h2 .no{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--cyan);margin-right:10px;font-weight:500}
+h3{font-size:14px;font-weight:600;margin:20px 0 5px}
+p{margin:9px 0;color:var(--ink-2)}
+b,strong{color:var(--ink);font-weight:600}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.lede{font-size:16px;color:var(--ink-2);line-height:1.6;max-width:64ch}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:12.5px;margin:18px 0 4px;padding:14px 16px;background:var(--g2);border:1px solid var(--rule);border-radius:11px}
+.meta dt{font-family:"IBM Plex Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);align-self:center}
+.meta dd{margin:0;color:var(--ink)}
+.gates{display:inline-flex;gap:6px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:5px;font-family:"IBM Plex Mono",monospace;font-size:10px;padding:3px 9px;border-radius:99px;border:1px solid var(--rule);color:var(--ink-2);white-space:nowrap}
+.pill.ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,var(--rule));background:color-mix(in srgb,var(--green) 8%,transparent)}
+.pill.wait{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,var(--rule));background:color-mix(in srgb,var(--amber) 8%,transparent)}
+ul,ol{margin:9px 0;padding-left:22px;color:var(--ink-2)}
+li{margin:4px 0}li::marker{color:var(--ink-3)}
+code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--g3);border:1px solid var(--rule);border-radius:4px;padding:1px 5px;color:var(--ink)}
+pre{background:var(--g2);border:1px solid var(--rule);border-radius:11px;padding:15px 17px;overflow-x:auto;font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.7;color:var(--ink-2);margin:12px 0}
+pre b{color:var(--cyan);font-weight:400}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+@media (max-width:640px){.two{grid-template-columns:1fr}}
+.card{background:var(--g2);border:1px solid var(--rule);border-radius:11px;padding:14px 16px}
+.card.in{border-left:2px solid var(--green)}
+.card.out{border-left:2px solid var(--ink-3)}
+.card h3{margin-top:0}.card ul{padding-left:18px;font-size:13.5px}
+.plain{background:color-mix(in srgb,var(--cyan) 7%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 28%,var(--rule));border-radius:13px;padding:16px 19px;margin:20px 0 6px}
+.plain p{color:var(--ink);font-size:14.5px;line-height:1.6}.plain p:first-of-type{margin-top:4px}
+.plainline{background:var(--g2);border-left:2px solid var(--cyan);border-radius:0 8px 8px 0;padding:9px 14px;font-size:13.5px;color:var(--ink-2)}
+.plainline b{color:var(--cyan);font-weight:600}
+.guar{list-style:none;padding:0;margin:14px 0;display:flex;flex-direction:column;gap:8px}
+.guar li{display:flex;gap:12px;padding:11px 14px;background:var(--g2);border:1px solid var(--rule);border-radius:9px;margin:0}
+.guar .gid{font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--cyan);flex:none;font-size:12px}
+.guar .gx{color:var(--ink-2);font-size:13.5px}.guar .gx b{color:var(--ink)}
+.note{border-left:2px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 6%,transparent);padding:12px 15px;border-radius:0 8px 8px 0;margin:16px 0;font-size:13.5px;color:var(--ink-2)}
+.ask{background:var(--g2);border:1px solid color-mix(in srgb,var(--gold) 30%,var(--rule));border-radius:13px;padding:20px 22px;margin:24px 0}
+.ask h2{border:0;padding:0;margin:0 0 6px}
+.foot{margin-top:40px;padding-top:16px;border-top:1px solid var(--rule);font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);line-height:1.7}
+</style>
+
+<div class="wrap">
+ <p class="eyebrow">Zeno · Low-Level Design · for owner approval</p>
+ <h1>Executor &amp; Worktree Adapter</h1>
+ <p class="lede">The kernel decides; this is the first <b>hand</b> that actually does the thing it approved — jailed to a sandbox, all-or-nothing, and it proves what it did rather than claiming it. Slice <b>P1-02</b>.</p>
+
+ <div class="plain">
+  <p class="eyebrow" style="color:var(--cyan)">In plain words</p>
+  <p>P1-01 was the <b>security desk that decides</b>. This slice is the first <b>hand</b> that carries out an approved action — but a careful one: it only works <b>inside a sandbox it can't escape</b>, it does <b>exactly one thing, all-or-nothing</b> (never a half-finished write), and it <b>proves the result</b> by re-reading it.</p>
+  <p style="margin-bottom:0">If it can't prove the effect really happened, it says <b>"outcome unknown"</b> honestly instead of pretending. This is what turns "approve → verified" from a test stub into a <b>real file changing on disk</b> — and it's the exact pattern every future hand (git, Jira, browser) will copy.</p>
+ </div>
+
+ <dl class="meta">
+  <dt>slice</dt><dd>P1-02 · Wave A · implements the kernel's <code>Executor</code> contract</dd>
+  <dt>depends</dt><dd class="gates"><span class="pill ok">P1-01 kernel ✓ built</span><span class="pill">nothing else</span></dd>
+  <dt>gates</dt><dd class="gates"><span class="pill ok">Gate 1 ✓</span><span class="pill ok">Gate 2 ✓</span><span class="pill wait">this LLD → your approval</span></dd>
+  <dt>stack</dt><dd class="mono">TypeScript strict · Node ≥20 · zero network · zero LLM · sandbox-jailed</dd>
+ </dl>
+
+ <h2><span class="no">0</span>Why this slice is next</h2>
+ <p>P1-01 can classify, preview, approve and commit — but in its tests the executor is a <i>stub</i>. The loop isn't closed: an approval has never driven a <i>real</i> effect. This gives the kernel its <b>first real executor</b>, so the whole chain runs end to end and you can see the result. It's deliberately the <b>smallest possible real effect</b> — a sandboxed file write — so the risky part (touching the world) arrives in the most contained, reversible, verifiable form before anything bigger.</p>
+
+ <h2><span class="no">1</span>Scope</h2>
+ <div class="two">
+  <div class="card in"><h3>Built in this slice</h3><ul>
+   <li>A <code>WorktreeExecutor</code> that applies an approved write inside an isolated sandbox</li>
+   <li>A <b>reconcile</b> step — re-read &amp; prove the result, or fail honestly</li>
+   <li>A <b>path-jail</b> guard — cannot write outside the sandbox</li>
+   <li><b>Atomic + idempotent</b> apply — no partial files, no double-writes</li>
+   <li>A headless demo: kernel + executor, end to end</li>
+  </ul></div>
+  <div class="card out"><h3>Not in this slice</h3><ul>
+   <li>No git (commit/push/MR) — the next executor slice</li>
+   <li>No network, Jira, Slack, or browser</li>
+   <li>No multi-file transactions; no real repos (synthetic only)</li>
+   <li>No undo of a completed effect — this slice <i>prevents partials</i></li>
+  </ul></div>
+ </div>
+
+ <h2><span class="no">2</span>Reconcile — prove it, don't claim it</h2>
+ <p class="plainline"><b>Plain version:</b> the executor's word is not evidence — the re-read is. After it acts, it looks again to confirm the file truly matches what you approved. A lying or buggy executor gets caught here and can never report a false success.</p>
+ <pre>apply(payload):
+  1. jail-check   : resolve(root/relPath) must stay inside root   <b>else path-escape</b>
+  2. base-check   : hash(current file) === expectBaseHash         <b>else drift, refuse</b>
+  3. write-atomic : temp → fsync → rename over target             <b>all-or-nothing</b>
+  4. reconcile    : hash(re-read) === expectPostHash ?
+        yes → EffectProof{ effect: 'file:'+postHash }
+        no  → throw  →  kernel records OUTCOME_UNKNOWN</pre>
+ <p>Step 4 is what makes a dishonest executor harmless: if the file on disk doesn't actually match the approved post-state, the executor <b>refuses to report success</b>, and the kernel writes an <code>outcome-unknown</code> receipt with retry frozen — never a false <code>verified</code>.</p>
+
+ <h2><span class="no">3</span>The three guarantees</h2>
+ <ul class="guar">
+  <li><span class="gid">JAILED</span><span class="gx"><b>Cannot escape the sandbox.</b> Any target resolving (after symlinks) outside the configured root is rejected. <code>../../etc/passwd</code>, absolute paths, escaping symlinks — all refused.</span></li>
+  <li><span class="gid">ATOMIC</span><span class="gx"><b>All-or-nothing.</b> The real file is only ever replaced by an atomic rename of a fully-written temp. A crash mid-write leaves the original <b>intact</b> — never a half-file.</span></li>
+  <li><span class="gid">PROVEN</span><span class="gx"><b>Honest.</b> Success is reported only after the re-read matches. Idempotent: re-applying an already-applied effect is a safe no-op. On any error → <code>outcome-unknown</code>, never a silent retry.</span></li>
+ </ul>
+
+ <h2><span class="no">4</span>How you'll see it's done</h2>
+ <ul>
+  <li><b>Property tests</b> (randomized): no generated path ever escapes the jail; a claimed-but-unreal result is always caught; re-apply never double-writes; an injected mid-write failure always leaves the original intact.</li>
+  <li><b>E2E (kernel + executor):</b> approve → <b>the file actually changes</b> → verified receipt carries the real post-hash; base drifts → <b>refused, file untouched</b>; executor fed a tampering fs → outcome-unknown, retry frozen.</li>
+  <li><b>All checks green:</b> strict typecheck, dependency-free lint (extended to forbid un-injected fs in the core), full tests, coverage, determinism.</li>
+ </ul>
+ <p class="mono" style="font-size:11.5px;color:var(--ink-3)">Same delivery as P1-01: one <code>npm run check</code>, real output shown, nothing committed by me.</p>
+
+ <h2><span class="no">5</span>Simplicity pass — what v1 deliberately does NOT have</h2>
+ <p class="plainline"><b>Plain version:</b> reviewed for overcomplication. One executor, one payload shape, one sandbox — everything else is a seam for a later hand.</p>
+ <ul>
+  <li><b>No git, no network, no Jira/Slack/browser</b> — each a later executor implementing this same interface.</li>
+  <li><b>No multi-file transactions, no database, no rollback-of-committed, no config</b> beyond the sandbox spec.</li>
+ </ul>
+ <p>None of these omissions changes the kernel's seven laws or this adapter's three guarantees — <b>jailed · atomic · proven</b>.</p>
+
+ <div class="ask">
+  <p class="eyebrow" style="color:var(--gold)">what I need from you</p>
+  <h2 style="font-size:20px">Two things, then I build only this slice</h2>
+  <ol style="margin-top:10px">
+   <li><b>Approve this LLD.</b> It unlocks building this slice's code — same rhythm: I build, I test (unit + property + e2e + all checks), I show you a green run, you land it.</li>
+   <li><b>One decision — the sandbox root.</b> Where may sandboxed real effects write? <span class="mono" style="font-size:11.5px">Default: <code>~/Documents/personal-ai-suite-phase1/sandbox/</code></span> — synthetic fixtures only, disposable, never a real repo, never an employer surface. Say the word for elsewhere.</li>
+  </ol>
+  <p style="margin-bottom:0">Nothing is built until you say <b>approve</b>.</p>
+ </div>
+
+ <div class="foot">
+  Zeno · slice P1-02 · no code written yet · this document is the per-slice gate<br>
+  Approving authorizes only P1-02's implementation — not the next slice, not git/network executors, not the work-Mac product pilot (Gate 3).
+ </div>
+</div>

@@ -378,3 +378,95 @@ streaming nested inside the run** (read files → hypothesis → wrote fix → 1
 effects** tally, and **Pause/Kill** controls. Ends: "Claude Code drafted in a sandbox, Zeno verified,
 nothing shipped — push/MR await your approval." Answers the recent scenario questions visually. Design
 only; Wave C surface; no P1-01 impact.
+
+## D-COMMIT — first commit landed (owner-directed, 2026-08-29)
+Owner: "prepare what we've done, keep in 1 folder, commit in a branch, not the company one but abheet19."
+Consolidated everything into `~/Personal Projects/zeno` and committed:
+- Branch **phase-0-and-p1-01-kernel** (root commit 291661b), NOT main.
+- Author **abheet19 <abheet19@gmail.com>** (personal; company identity untouched as global default).
+- No AI-attribution trailer. **Pushed** 2026-08-29 to github.com/abheet19/Zeno (feature branch only; main/master empty).
+- 79 files: refreshed docs/ (29 md, current), Gate-2 prototype + LLD HTML, docs/28 LLD + docs/29 model note,
+  packages/kernel (full tested code). Excluded by .gitignore: employer docs 03a/03b, evidence videos, secrets, node_modules.
+
+## D-FIELD — Standing Field made a live, meaningful map (owner request, 2026-08-29)
+Owner: "is there logic in the 3D graph — does it link tickets/agents; make it dynamic, smart, usable;
+what needs attention should glow." Rebuilt the field from decorative topology into a live map:
+- **Ticket nodes added**, each **linked** to the agent working it (worked-by), the repo it touches, and
+  its Jira source. 17 nodes / 25 edges now carry real relationships.
+- **Attention glow:** every node has a live state — needs-you (amber), blocked (red), running (cyan),
+  verified (green) — and glowing/pulsing = wants your attention. WEBEXT-3514's glow tracks the journey
+  stepper (running → needs-you → building → verified).
+- **Connection highlighting:** hover/select a node and its links + neighbours brighten while the rest
+  dim — the logic becomes visible.
+- **Smart clicks:** ticket → View intake; repo → Forge; agent → its run; device → Devices; source → view.
+- **Legend** under the field explains the glow. Design only; Wave C; no P1-01/02 impact.
+
+## D-SOLAR — Standing Field becomes the Zeno solar system (owner-directed, 2026-08-29)
+Owner: "inspired by a solar-system type in the spec; best 3D design; bigger; it's the Orchestrator,
+aware of everything." **Owner override recorded:** the original C-direction language said "centreless";
+the owner now directs a SUN-centred orbital layout — aligned with the spec's own R-ring vocabulary.
+Layout: Orchestrator = the sun (white-hot core, breathing double corona). Orbits BY ROLE:
+R1 agents · R2 live work/tickets · R3 repos · R4 sources & devices — position now MEANS something.
+Kepler-ish motion (inner rings orbit faster), faint projected orbit rings with names, deterministic
+parallax starfield (seeded, no Math.random), comet-tail motion trails per node, attention glow
+(amber=needs-you · red=blocked · cyan=running · green=verified), hover = trace links, smart clicks
+(ticket→intake, repo→Forge). Stage enlarged to 64vh. Reduce-motion: static, no orbit/twinkle/trails.
+**FROZEN pre-solar design preserved** at design-freezes/2026-08-29-living-field-PRE-SOLAR.html and as
+artifact version label "living-field-map" (roll back anytime).
+
+## D-NEURAL — Standing Field final form: the neural brain (owner-directed, 2026-08-29)
+Owner reviewed both versions side by side and chose: "like before but with the new features — smart,
+dynamic, changing, act as a neo brain." Final form = the ORGANIC CONSTELLATION layout (pre-solar
+"living field" positions; solar rings/sun/starfield removed) + all smart features + three neural
+behaviours:
+1. **Organic drift** — nodes breathe around their home positions (golden-angle phases, never chaotic).
+2. **Synaptic firing** — pulses travel the edges like signals in a brain; edges touching active or
+   attention nodes fire fast (~2.6s), quiet edges rarely (9–16s); pulses swell and die, alternate
+   direction, and take the attention colour of their endpoint.
+3. **Spreading activation** — a node adjacent to an attention node warms with a faint sympathetic halo.
+Kept: ticket nodes + links, attention glow (amber/red/cyan/green), hover-to-trace with dimming, smart
+clicks, legend, list fallback, masked redaction, reduce-motion = fully static. Solar version remains
+retrievable (artifact label "solar-system-field"); pre-solar freeze retained on disk.
+
+## D-NEURAL-2 — final field: glowing constellation, no moving balls (owner, 2026-08-29)
+Owner: "remove the moving balls which go node to node" + "keep it constellation with glowing and smart."
+Removed the traveling pulse dots (synaptic-firing pulses AND the old live-edge packets). KEPT: organic
+constellation layout, attention GLOW (amber/red/cyan/green, breathing pulse), breathing node drift,
+spreading-activation halos, ticket links, hover-to-trace connection highlight with dimming, smart clicks,
+legend, list fallback, masked redaction, reduce-motion=static. Result = a calm, glowing, smart living
+map with no darting dots. Zero errors across full sweep.
+
+## D-ATTENTION — field state system + attention beacon (owner, 2026-08-29)
+Owner: "different color codes for stuck etc, something smart that immediately takes my attention."
+Added: (1) expanded state palette — needs-you (amber), blocked/error (red), running (cyan), verified
+(green), waiting (dim grey); (2) distinct PULSE RHYTHMS per state (needs=quick, error=sharp flash,
+blocked=slow labored 'stuck', active=gentle, verified/waiting=steady) so the motion itself signals mood;
+(3) PRIORITY SIZING (needs/error nodes render 16% bigger, blocked 8%); (4) the ATTENTION BEACON — the
+single most-urgent-for-YOU node gets an expanding radar ping + a turning dashed reticle; it dynamically
+follows the top-priority item (verified beaconTrajectory across the 5 journey steps: t5122→t5122→t3514
+→t5122→t5122 — correctly lands on the approval-needed ticket at the Approve step); (5) legend updated
+with all codes + "⊚ ping = act now". Reduce-motion: static (no ping/reticle spin/pulse). Zero errors.
+
+## D-AGE-EGRESS — age urgency + egress edges (owner "yes add age, egress", 2026-08-29)
+- **Age urgency:** each ticket carries a wait time (t3514 4m · t812 14m · t5122 2h · t3488 1d). Older =
+  more urgent: it amplifies the attention glow and, among equal-priority items, wins the beacon (verified:
+  the beacon now sticks to the 2h-old !5122 over the 4m-old ticket — oldest needs-you is most urgent).
+  Node card shows "waiting 2h" etc.
+- **Egress edges:** the connections that cross to an external system (work→Jira write, !5122→Jira merge)
+  are drawn amber + dashed with a ⚡ gated glyph at midpoint — you can SEE which links leave the machine
+  (the ones the kernel gates). Legend gains "⚡ egress". Reduce-motion static. Zero errors full sweep.
+
+## P1-02 BUILT — executor & worktree adapter (owner "proceed to next step", 2026-08-29)
+Interpreted as: approve + build P1-02 with the default sandbox. Built in the same package
+(~/Documents/personal-ai-suite-phase1/kernel/):
+- **src/executor.ts** — WorktreeExecutor (jailed · atomic · proven), path-jail, WritePayload,
+  integrity + base-check + idempotency + reconcile. Pure logic, injected SandboxFs.
+- **src/executor-node-fs.ts** — the real node:fs adapter (temp→fsync→rename atomic write, symlink-aware
+  realpath). Isolated from the pure core.
+- **3 test files** — unit + property (jail escape ×400, idempotency ×300), kernel↔executor e2e
+  (approve→REAL file change→verified; drift→refused→untouched; T0 auto; failing exec→outcome-unknown),
+  real-fs smoke test against an OS temp sandbox.
+- **Results: 47 tests pass · ~3,000 property scenarios · 99.6% line coverage (executor core 100%) ·
+  strict typecheck clean · dependency-free lint clean.** Standing test mandate satisfied.
+- NOT committed/pushed (owner lands git; last commit was owner-directed). No production build run.
+Next: 3rd slice LLD (candidate: the git executor — same interface, real repo effects, OR the sanitizer).
