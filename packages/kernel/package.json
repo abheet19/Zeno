@@ -1,0 +1,18 @@
+{
+  "name": "@zeno/policy-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeno slice P1-01 — deterministic Policy & Approval Kernel. Zero network, zero LLM.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test dist/test/",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "lint": "node scripts/lint.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "typescript": "^5.6.3"
+  }
+}

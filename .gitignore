@@ -1,0 +1,34 @@
+# --- secrets: never, under any circumstance ---
+.env
+.env.*
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+ssh
+ssh.pub
+credentials*
+secrets*
+*.token
+
+# --- private design evidence: owner-supplied, unverified rights ---
+# Source videos and derived frames must never enter version control.
+evidence/
+*.mp4
+*.mov
+framehash.txt
+scene.txt
+frames.csv
+
+# --- employer-derived material: keep out of a personal repo ---
+docs/03a-context-bootstrap-report.md
+docs/03b-existing-knowledge-systems-report.md
+
+# --- noise ---
+.DS_Store
+node_modules/
+__pycache__/
+*.pyc
+dist/
+build/
+.venv/

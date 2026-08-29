@@ -1,0 +1,1779 @@
+<meta charset="utf-8">
+<title>Zeno Gate 2 Prototypes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ============ Zeno Glass tokens — B+C (from 22-direction-C §1.1) ============ */
+:root{
+  --g1:#0A0C0E; --g2:#0F1214; --g3:#151A1D; --g4:#1B2124; --g5:#222A2E; --g6:#2C363B;
+  --g7:#384349; --ink:#ECEBE6; --ink-2:#9AA1AC; --ink-3:#6C7480;
+  --rule:#242C31; --rule-2:#2C363B;
+  --cyan:#38C3D6; --cyan-dim:#1E6B76; --gold:#D8BE7E; --amber:#E0A128;
+  --red:#D8695A; --green:#5BB98C;
+  --lift:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.36);
+  --mo:1;
+  /* glass vocabulary — specular top edge, refracted body, cast shadow */
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.075),rgba(255,255,255,.022) 46%,rgba(255,255,255,.045));
+  --gl-edge:rgba(255,255,255,.10);
+  --gl-spec:rgba(255,255,255,.30);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(0,0,0,.30);
+  --gl-cast:0 18px 46px -12px rgba(0,0,0,.62),0 2px 8px rgba(0,0,0,.34);
+  --gl-blur:blur(26px) saturate(175%);
+  /* ambient ground the glass refracts */
+  --amb-1:rgba(56,195,214,.26); --amb-2:rgba(216,190,126,.17); --amb-3:rgba(91,185,140,.11);
+  --veil:radial-gradient(88% 78% at 62% 46%,transparent 40%,rgba(10,12,14,.90) 100%),linear-gradient(180deg,rgba(10,12,14,.55) 0%,transparent 22%,transparent 58%,#0A0C0E 100%);
+}
+:root[data-theme="light"]{
+  --g1:#E9E8E2; --g2:#F4F3EE; --g3:#FBFAF6; --g4:#F0EFEA; --g5:#E7E6E0; --g6:#D6D4CC;
+  --g7:#C2C0B8; --ink:#171A1E; --ink-2:#565D68; --ink-3:#868D98;
+  --rule:#DEDCD5; --rule-2:#CBC9C1;
+  --cyan:#15707E; --cyan-dim:#9BCBD3; --gold:#8A6D2C; --amber:#8C6410;
+  --red:#A6483C; --green:#387153;
+  --lift:0 1px 2px rgba(23,26,30,.05),0 12px 30px rgba(23,26,30,.08);
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.72),rgba(255,255,255,.42) 46%,rgba(255,255,255,.60));
+  --gl-edge:rgba(23,26,30,.10);
+  --gl-spec:rgba(255,255,255,.95);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(23,26,30,.06);
+  --gl-cast:0 16px 40px -14px rgba(23,26,30,.20),0 2px 6px rgba(23,26,30,.07);
+  --gl-blur:blur(24px) saturate(165%);
+  --amb-1:rgba(21,112,126,.20); --amb-2:rgba(138,109,44,.15); --amb-3:rgba(56,113,83,.10);
+  --veil:radial-gradient(92% 84% at 62% 46%,transparent 52%,rgba(233,232,226,.55) 100%),linear-gradient(180deg,rgba(233,232,226,.30) 0%,transparent 20%,transparent 62%,#E9E8E2 100%);
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --g1:#E9E8E2; --g2:#F4F3EE; --g3:#FBFAF6; --g4:#F0EFEA; --g5:#E7E6E0; --g6:#D6D4CC;
+  --g7:#C2C0B8; --ink:#171A1E; --ink-2:#565D68; --ink-3:#868D98;
+  --rule:#DEDCD5; --rule-2:#CBC9C1;
+  --cyan:#15707E; --cyan-dim:#9BCBD3; --gold:#8A6D2C; --amber:#8C6410;
+  --red:#A6483C; --green:#387153;
+  --lift:0 1px 2px rgba(23,26,30,.05),0 12px 30px rgba(23,26,30,.08);
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.72),rgba(255,255,255,.42) 46%,rgba(255,255,255,.60));
+  --gl-edge:rgba(23,26,30,.10);
+  --gl-spec:rgba(255,255,255,.95);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(23,26,30,.06);
+  --gl-cast:0 16px 40px -14px rgba(23,26,30,.20),0 2px 6px rgba(23,26,30,.07);
+  --gl-blur:blur(24px) saturate(165%);
+  --amb-1:rgba(21,112,126,.20); --amb-2:rgba(138,109,44,.15); --amb-3:rgba(56,113,83,.10);
+  --veil:radial-gradient(92% 84% at 62% 46%,transparent 52%,rgba(233,232,226,.55) 100%),linear-gradient(180deg,rgba(233,232,226,.30) 0%,transparent 20%,transparent 62%,#E9E8E2 100%);
+}}
+:root[data-reduce="1"]{--mo:0}
+:root[data-flat="1"] .l2{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:var(--g3)!important}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--g1);color:var(--ink);font:14px/1.55 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+/* Glass only refracts if there is something behind it. This is that something. */
+body::before{content:"";position:fixed;inset:-20%;z-index:0;pointer-events:none;
+ background:
+  radial-gradient(48% 42% at 18% 88%,var(--amb-1),transparent 70%),
+  radial-gradient(42% 38% at 84% 8%,var(--amb-2),transparent 72%),
+  radial-gradient(56% 46% at 62% 62%,var(--amb-3),transparent 74%);
+ filter:blur(28px);
+ animation:drift 46s ease-in-out infinite alternate}
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+ background-image:radial-gradient(rgba(255,255,255,.028) 1px,transparent 1px);background-size:3px 3px}
+@keyframes drift{
+ 0%{transform:translate3d(0,0,0) scale(1)}
+ 50%{transform:translate3d(2.2%,-1.8%,0) scale(1.06)}
+ 100%{transform:translate3d(-1.6%,2.4%,0) scale(1.03)}}
+:root[data-reduce="1"] body::before{animation:none}
+.app{position:relative;z-index:1}
+.mono{font-family:"IBM Plex Mono",monospace}
+button{font-family:inherit;color:inherit;cursor:pointer;border:0;background:none}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:3px}
+::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--g6);border-radius:5px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* Layer 2 — glass. Chrome and decision surfaces only; never behind code, diffs or transcripts. */
+.l2{position:relative;background:var(--gl-tint);
+ backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border:1px solid var(--gl-edge);border-radius:15px;
+ box-shadow:var(--gl-inner),var(--gl-cast);
+ isolation:isolate}
+/* the specular seam that makes an edge read as glass rather than as a panel */
+.l2::before{content:"";position:absolute;inset:0 0 auto;height:1px;border-radius:15px 15px 0 0;
+ background:linear-gradient(90deg,transparent,var(--gl-spec) 22%,var(--gl-spec) 78%,transparent);
+ opacity:.55;pointer-events:none;z-index:2}
+.l2::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:1;
+ background:radial-gradient(120% 80% at 12% -12%,rgba(255,255,255,.09),transparent 58%)}
+.l2>*{position:relative;z-index:3}
+/* work surfaces: opaque, luminous edge. never blur. */
+.pl{background:color-mix(in srgb,var(--g2) 88%,transparent);border:1px solid var(--rule);border-radius:11px;
+ box-shadow:0 1px 0 rgba(255,255,255,.035) inset,0 6px 18px -10px rgba(0,0,0,.5)}
+.pl.lit{border-color:color-mix(in srgb,var(--cyan) 34%,var(--rule-2))}
+
+.app{display:flex;flex-direction:column;height:100%}
+.bar{display:flex;align-items:center;gap:12px;padding:9px 15px;position:relative;z-index:4;
+ background:var(--gl-tint);backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border-bottom:1px solid var(--gl-edge);box-shadow:0 1px 0 rgba(255,255,255,.05) inset,0 10px 30px -18px rgba(0,0,0,.7);
+ flex-shrink:0;flex-wrap:wrap}
+.brand{font-family:Newsreader,serif;font-size:17px;font-weight:600;letter-spacing:-.01em;
+ display:inline-flex;align-items:center;gap:8px;padding:4px 9px 4px 7px;border-radius:9px;cursor:pointer;
+ transition:background .18s ease}
+.brand:hover{background:rgba(255,255,255,.06)}
+.brand .hmk{color:var(--cyan);font-size:13px;line-height:1}
+.brand span{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase;margin-left:5px}
+.seg{display:flex;background:rgba(255,255,255,.045);border:1px solid var(--gl-edge);border-radius:10px;padding:3px;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+.seg button{font-size:11.5px;font-weight:500;padding:5px 13px;border-radius:8px;color:var(--ink-2);
+ transition:color .18s ease,background .18s ease}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-selected="true"]{background:var(--cyan);color:var(--g1);
+ box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 3px 12px -3px color-mix(in srgb,var(--cyan) 60%,transparent)}
+.sp{flex:1}
+.ic{background:rgba(255,255,255,.05);border:1px solid var(--gl-edge);border-radius:9px;padding:5px 11px;
+ font-size:11px;color:var(--ink-2);box-shadow:inset 0 1px 0 rgba(255,255,255,.07);
+ transition:border-color .18s ease,color .18s ease,background .18s ease}
+.ic:hover{color:var(--ink);background:rgba(255,255,255,.085)}
+.ic[aria-pressed="true"]{border-color:color-mix(in srgb,var(--cyan) 55%,transparent);color:var(--cyan);
+ background:color-mix(in srgb,var(--cyan) 12%,transparent)}
+.step{display:flex;background:rgba(255,255,255,.045);border:1px solid var(--gl-edge);border-radius:10px;padding:3px;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.07)}
+.step button{font-size:10.5px;padding:4px 9px;border-radius:6px;color:var(--ink-3);display:flex;gap:5px;align-items:center}
+.step button .d{width:6px;height:6px;border-radius:50%;background:var(--g6)}
+.step button.done .d{background:var(--green)}
+.step button[aria-current="true"]{background:rgba(255,255,255,.16);color:var(--ink);border-radius:8px;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+.step button[aria-current="true"] .d{background:var(--amber)}
+
+.stage{flex:1;min-height:0;position:relative}
+.scr{position:absolute;inset:0;display:none;overflow:hidden}
+@media (max-width:900px){.scr.on{overflow-y:auto;overflow-x:hidden}}
+.scr.on{display:flex;flex-direction:column}
+.pad{padding:16px;overflow:auto;flex:1}
+
+.k{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);font-weight:600;margin:0 0 9px}
+h2{font-family:Newsreader,serif;font-size:1.4rem;font-weight:600;margin:0 0 3px;letter-spacing:-.012em}
+.sub{color:var(--ink-2);font-size:12.5px;margin:0 0 14px}
+.chip{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;padding:2.5px 7px;border-radius:4px;background:var(--g4);color:var(--ink-2);border:1px solid var(--rule);white-space:nowrap}
+.chip.cy{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 34%,var(--rule))}
+.chip.am{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 38%,var(--rule))}
+.chip.rd{color:var(--red);border-color:color-mix(in srgb,var(--red) 38%,var(--rule))}
+.chip.gr{color:var(--green);border-color:color-mix(in srgb,var(--green) 34%,var(--rule))}
+.chip.go{color:var(--gold);border-color:color-mix(in srgb,var(--gold) 38%,var(--rule))}
+.btn{border:1px solid var(--rule-2);background:var(--g4);border-radius:8px;padding:8px 14px;font-size:12px;font-weight:500}
+.btn.p{background:var(--cyan);color:var(--g1);border-color:transparent}
+.btn.g{background:transparent;color:var(--ink-2)}
+.btn.sm{padding:5px 10px;font-size:11px;border-radius:6px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ---------- COMMAND ---------- */
+.cmd{display:grid;grid-template-columns:212px 1fr;gap:0;height:100%;min-height:0}
+.rail{background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+ backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border-right:1px solid var(--gl-edge);padding:14px 11px;overflow:auto}
+.rail nav{display:flex;flex-direction:column;gap:1px}
+.rail nav button{text-align:left;font-size:12.5px;padding:7px 9px;border-radius:7px;color:var(--ink-2);display:flex;align-items:center;gap:8px;width:100%}
+.rail nav button[aria-current="true"]{background:rgba(255,255,255,.085);color:var(--ink);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.10)}
+.rail nav button{transition:background .18s ease,color .18s ease}
+.rail nav button:hover{background:rgba(255,255,255,.05);color:var(--ink)}
+.rail nav .n{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3)}
+.cmdmain{overflow:auto;padding:16px 18px;min-width:0;position:relative}
+.cmdmain h2{font-family:Newsreader,serif;font-weight:500;font-size:23px;letter-spacing:-.012em;margin:26px 0 3px}
+.cmdmain>h2:first-of-type{margin-top:0}
+.hero{position:relative;height:clamp(340px,52vh,520px);margin:-16px -18px 22px;overflow:hidden;
+ border-bottom:1px solid var(--gl-edge)}
+.fieldbox{position:absolute;inset:0}
+.hero canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab}
+/* the field fades into the page rather than ending at a border */
+.heroveil{position:absolute;inset:0;pointer-events:none;background:var(--veil)}
+.heromast{position:absolute;left:26px;top:50%;transform:translateY(-50%);right:auto;
+ pointer-events:none;max-width:31ch}
+.heromast .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.16em;
+ text-transform:uppercase;color:var(--ink-2);margin:0 0 11px}
+.heromast h1{font-family:Newsreader,serif;font-weight:500;font-size:clamp(24px,3.4vw,35px);line-height:1.14;
+ letter-spacing:-.018em;margin:0;text-wrap:balance;color:var(--ink);
+ text-shadow:0 2px 22px color-mix(in srgb,var(--g1) 85%,transparent)}
+.heromast .sub2{font-size:12.5px;color:var(--ink-2);margin:9px 0 0;max-width:34ch;line-height:1.5}
+.hchips{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px;pointer-events:auto}
+.hchip{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:10px;
+ padding:5px 10px;border-radius:8px;color:var(--ink-2);
+ background:rgba(255,255,255,.05);border:1px solid var(--gl-edge);
+ backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.hchip b{color:var(--ink);font-weight:600}
+.hchip i{width:6px;height:6px;border-radius:50%;background:var(--ink-3);flex:none}
+.hchip.am i{background:var(--amber)} .hchip.cy i{background:var(--cyan)} .hchip.gr i{background:var(--green)}
+.hcap{position:absolute;left:20px;bottom:14px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+ letter-spacing:.13em;text-transform:uppercase;color:var(--ink-2);opacity:.9;pointer-events:none}
+#field{position:absolute;inset:0;display:block;touch-action:none;cursor:grab}
+.field-hd{position:absolute;left:12px;top:10px;z-index:2;pointer-events:none}
+.field-tog{position:absolute;right:10px;top:9px;z-index:3;display:flex;gap:5px}
+.nodecard{position:absolute;left:12px;bottom:12px;z-index:3;width:290px;padding:13px 15px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);margin-top:7px}
+.legend i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:-1px}
+.fieldlist{display:none;padding:34px 12px 12px}
+.fieldlist.on{display:block}
+.flrow{display:flex;gap:10px;padding:7px 9px;border-radius:7px;align-items:center;font-size:12px;cursor:pointer}
+.flrow:hover{background:var(--g4)}
+.flrow[aria-selected="true"]{background:var(--g5)}
+.flrow .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;border:1.5px solid var(--cyan)}
+.flrow .kind{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+
+.item{backdrop-filter:blur(10px) saturate(140%);-webkit-backdrop-filter:blur(10px) saturate(140%);padding:11px 13px;display:flex;gap:11px;margin-bottom:8px;align-items:flex-start}
+.item .b{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.05em;text-transform:uppercase;padding:2px 6px;border-radius:3px;background:var(--g5);color:var(--ink-2);white-space:nowrap;margin-top:1px}
+.item .t{font-weight:600;font-size:13px}
+.item .m{color:var(--ink-3);font-size:11.5px;margin-top:2px}
+.item .w{color:var(--ink-2);font-size:11.5px;margin-top:5px;font-style:italic}
+
+/* capsule */
+.caps{max-width:590px;padding:0;overflow:hidden}
+.caps .hd{padding:13px 16px;border-bottom:1px solid var(--rule-2)}
+.caps .bd{padding:14px 16px}
+.diff{background:var(--g1);border:1px solid var(--rule);border-radius:7px;padding:10px 12px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;line-height:1.75;overflow-x:auto;margin:9px 0;white-space:pre}
+.diff .a{color:var(--green)}.diff .r{color:var(--red)}.diff .c{color:var(--ink-3)}
+.note{font-size:11.5px;color:var(--ink-2);margin-top:10px;display:flex;gap:8px;padding-left:2px}
+.note::before{content:"";width:3px;background:var(--amber);border-radius:2px;flex-shrink:0}
+.acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+.masked{padding:18px;text-align:center;color:var(--ink-3);font-size:12.5px}
+
+/* ---------- FORGE (six regions) ---------- */
+.forge{display:grid;grid-template-columns:186px 1fr 300px;grid-template-rows:1fr var(--fdrawer,150px) 26px;height:100%;min-height:0}
+.forge>.rgA{grid-column:1;grid-row:1/3}
+.forge>.rgB{grid-column:2;grid-row:1}
+.forge>.rgD{grid-column:2;grid-row:2}
+.forge>.rgC{grid-column:3;grid-row:1/3}
+.forge>.rgE{grid-column:1/-1;grid-row:3}
+@media (max-width:1000px) and (min-width:901px){.forge{grid-template-columns:160px 1fr 250px}}
+.rgA{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));
+ backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border-right:1px solid var(--gl-edge);overflow:hidden;padding:10px 8px;
+ display:flex;flex-direction:column;min-height:0}
+.panbody{flex:1;overflow:auto;min-height:0;margin:0 -2px;padding:0 2px}
+.panbar{flex:none;border-top:1px solid var(--rule);margin-top:8px;padding-top:7px}
+.panbar .tree{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+.panbar .tree button{padding:4px 5px;font-size:10px}
+.rgB{background:var(--g2);overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.rgC{background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));
+ backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border-left:1px solid var(--gl-edge);overflow:auto;display:flex;flex-direction:column}
+.rgD{position:relative;background:var(--g2);
+ border-top:1px solid var(--gl-edge);border-left:1px solid var(--rule);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.04);overflow:auto;padding:14px 12px 9px}
+.fdrag{position:absolute;top:0;left:0;right:0;height:9px;cursor:ns-resize;z-index:6;
+ display:flex;align-items:center;justify-content:center}
+.fdrag::before{content:"";width:34px;height:3px;border-radius:2px;background:var(--g6);transition:background .15s ease}
+.fdrag:hover::before,.fdrag.grab::before{background:var(--cyan)}
+.drawhd{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.drawhd .sp{flex:1}
+.drawcol{background:none;border:1px solid var(--rule);border-radius:6px;padding:2px 8px;font-size:10px;color:var(--ink-3)}
+.drawcol:hover{color:var(--ink);border-color:var(--rule-2)}
+:root[data-drawer="min"] .forge{--fdrawer:34px!important}
+:root[data-drawer="min"] .rgD .drawbody{display:none}
+.rgE{grid-column:1/-1;background:rgba(255,255,255,.045);
+ backdrop-filter:var(--gl-blur);-webkit-backdrop-filter:var(--gl-blur);
+ border-top:1px solid var(--gl-edge);display:flex;align-items:center;gap:12px;padding:0 12px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);overflow-x:auto;white-space:nowrap}
+.rgE b{color:var(--ink-2);font-weight:500}
+.tabs{display:flex;gap:1px;padding:6px 8px 0;border-bottom:1px solid var(--rule);flex-shrink:0;align-items:center}
+.tabs .tb{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);padding:6px 11px;border-radius:7px 7px 0 0;cursor:pointer}
+.tabs .tb[aria-selected="true"]{background:var(--g3);color:var(--ink)}
+.code{font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.8;padding:12px 0;overflow:auto;flex:1;background:var(--g3)}
+.code .row{padding:0 14px;display:flex;gap:12px}
+.code .row.add{background:color-mix(in srgb,var(--green) 11%,transparent)}
+.code .row.hl{background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.code .ln{color:var(--ink-3);width:26px;text-align:right;flex-shrink:0;user-select:none}
+.kw{color:var(--cyan)}.st{color:var(--gold)}.cm{color:var(--ink-3)}
+.tree{font-size:12px}
+.tree .d{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.06em;text-transform:uppercase;margin:9px 0 4px;padding-left:4px}
+.tree button{display:flex;gap:7px;padding:4px 7px;border-radius:6px;font-size:12px;color:var(--ink-2);width:100%;text-align:left}
+.tree button:hover{background:var(--g4)}
+.tree button[aria-current="true"]{background:var(--g4);color:var(--ink)}
+.insp-tabs{display:flex;gap:1px;padding:8px 8px 0;border-bottom:1px solid var(--rule)}
+.insp-tabs button{font-size:11px;padding:5px 9px;border-radius:6px 6px 0 0;color:var(--ink-3)}
+.insp-tabs button[aria-selected="true"]{background:var(--g3);color:var(--ink)}
+.insp-bd{padding:11px;overflow:auto;flex:1;font-size:12px;background:var(--g2)}
+.ev{display:flex;gap:9px;font-size:11.5px;margin-bottom:8px}
+.ev .tm{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);width:36px;flex-shrink:0;padding-top:2px}
+.ev .tx{color:var(--ink-2)} .ev .tx b{color:var(--ink);font-weight:600}
+.ev.act .tx b{color:var(--cyan)}
+.msg{margin-bottom:10px}
+.msg .who{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px}
+.msg .bub{background:var(--g4);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.5}
+.msg.me .bub{background:var(--g5)}
+.cite{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--cyan);margin-top:5px;cursor:pointer;display:inline-block}
+.cite:hover{text-decoration:underline}
+.compose{border-top:1px solid var(--rule);padding:9px;display:flex;gap:6px;flex-shrink:0}
+.compose input{flex:1;background:var(--g1);border:1px solid var(--rule-2);border-radius:8px;padding:8px 10px;color:var(--ink);font:inherit;font-size:12px}
+.mdl{display:flex;gap:7px;align-items:center;padding:7px 9px;background:var(--g4);border:1px solid var(--rule);border-radius:8px;font-size:11.5px;cursor:pointer;margin-bottom:9px}
+.mpop{position:absolute;z-index:20;width:290px;padding:12px;right:14px;top:96px;display:none}
+.mpop.on{display:block}
+.mrow{display:flex;justify-content:space-between;padding:5px 0;font-size:11.5px;border-bottom:1px solid var(--rule)}
+.mrow:last-child{border:0}
+.mrow .lb{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:10px}
+
+/* ---------- COUNSEL ---------- */
+.cn{position:relative;height:100%;overflow:hidden;
+ background:linear-gradient(155deg,color-mix(in srgb,var(--g2) 80%,transparent),color-mix(in srgb,var(--g1) 86%,transparent));
+ display:flex;flex-direction:column;justify-content:flex-end}
+.cn::before{content:"";position:absolute;inset:-12%;pointer-events:none;filter:blur(30px);
+ background:
+  radial-gradient(34% 30% at 50% 12%,color-mix(in srgb,var(--cyan) 22%,transparent),transparent 72%),
+  radial-gradient(30% 26% at 26% 58%,color-mix(in srgb,var(--gold) 15%,transparent),transparent 74%),
+  radial-gradient(30% 26% at 76% 46%,color-mix(in srgb,var(--green) 11%,transparent),transparent 74%);
+ animation:cnamb 34s ease-in-out infinite alternate}
+@keyframes cnamb{0%{transform:translate3d(0,0,0) scale(1)}100%{transform:translate3d(2.4%,-2%,0) scale(1.07)}}
+:root[data-reduce="1"] .cn::before{animation:none}
+.cn>*{position:relative}
+.faces{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 16px 18px;max-width:600px;margin:auto auto 0}
+.face{aspect-ratio:4/3;background:var(--g3);border:1px solid var(--rule);border-radius:9px;display:flex;align-items:flex-end;padding:8px;font-size:11px;color:var(--ink-3)}
+.face.spk{border-color:color-mix(in srgb,var(--cyan) 45%,var(--rule))}
+.ov{position:absolute;left:50%;transform:translateX(-50%);top:14px;bottom:auto;
+ width:min(480px,calc(100% - 24px));max-height:calc(100% - 24px);
+ display:flex;flex-direction:column;overflow:hidden;border-radius:17px;
+ background:linear-gradient(160deg,color-mix(in srgb,var(--g1) 40%,transparent),color-mix(in srgb,var(--g1) 24%,transparent) 52%,color-mix(in srgb,var(--g1) 36%,transparent));
+ backdrop-filter:blur(36px) saturate(195%);-webkit-backdrop-filter:blur(36px) saturate(195%);
+ border:1px solid rgba(255,255,255,.14);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -1px 0 rgba(0,0,0,.22),0 22px 54px -16px rgba(0,0,0,.55)}
+.ov.drop{animation:ovdrop .34s cubic-bezier(.22,1,.36,1) both}
+@keyframes ovdrop{from{opacity:0;transform:translate(-50%,-10px) scale(.985)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+:root[data-reduce="1"] .ov.drop{animation:none}
+.ov .hd{border-radius:17px 17px 0 0}
+.ov .hd{padding:11px 14px;border-bottom:1px solid rgba(255,255,255,.09);background:transparent;display:flex;align-items:center;gap:8px;flex-shrink:0}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);flex-shrink:0}
+.ov .bd{padding:12px 13px;overflow:auto;flex:1}
+.scenes{display:flex;gap:4px;margin-bottom:10px}
+.scenes button{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;padding:4px 8px;border-radius:6px;border:1px solid var(--rule);background:var(--g4);color:var(--ink-2)}
+.scenes button[aria-selected="true"]{background:var(--cyan);color:var(--g1);border-color:transparent}
+.tr{background:var(--g1);border:1px solid var(--rule);border-radius:8px;padding:9px 11px;font-size:12px;line-height:1.5}
+.tr .who{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:3px}
+.assist{width:100%;margin-top:10px;padding:10px;border-radius:8px;background:var(--gold);color:var(--g1);font-weight:600;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:7px}
+.ans{margin-top:11px;padding:12px;border-radius:11px;background:color-mix(in srgb,var(--g1) 26%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 34%,rgba(255,255,255,.12));box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.say{font-family:Newsreader,serif;font-size:15px;line-height:1.45;margin:5px 0 0}
+.ans ul{margin:8px 0 0;padding-left:16px}
+.ans li{font-size:11.5px;color:var(--ink-2);margin-bottom:3px}
+.conf{display:flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);margin-top:8px}
+.ask{display:flex;gap:6px;margin-top:11px;flex-shrink:0}
+.ask input{flex:1;background:color-mix(in srgb,var(--g1) 28%,transparent);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:8px 10px;color:var(--ink);font:inherit;font-size:12px}
+.thread{margin-top:9px;display:flex;flex-direction:column;gap:7px}
+.q{font-size:11.5px;background:rgba(255,255,255,.07);border-radius:8px 8px 3px 8px;padding:7px 9px;align-self:flex-end;max-width:86%}
+.a{font-size:11.5px;color:var(--ink-2);background:color-mix(in srgb,var(--g1) 24%,transparent);border:1px solid rgba(255,255,255,.08);border-radius:8px 8px 8px 3px;padding:7px 9px;align-self:flex-start;max-width:90%}
+.hint{font-size:11px;color:var(--ink-3);line-height:1.5;margin-top:10px}
+.mk{font-family:"IBM Plex Mono",monospace;color:var(--ink-3);letter-spacing:-1px;opacity:.5;font-size:11px}
+.item.mkd .m{color:var(--ink-3)}
+.pre{position:absolute;left:16px;bottom:16px;width:272px;padding:13px 15px;background:linear-gradient(160deg,color-mix(in srgb,var(--g1) 38%,transparent),color-mix(in srgb,var(--g1) 24%,transparent));backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);border:1px solid rgba(255,255,255,.12)}
+.prow{display:flex;justify-content:space-between;font-size:11.5px;padding:4px 0;border-bottom:1px solid var(--rule)}
+.prow:last-child{border:0}
+.foot{flex-shrink:0;padding:7px 14px;background:var(--g2);border-top:1px solid var(--rule);font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);display:flex;gap:14px;flex-wrap:wrap}
+
+/* ============ narrow viewports: the artifact panel, a split window, a phone ============ */
+@media (max-width:900px){
+  .bar{gap:8px;padding:7px 10px}
+  .brand{font-size:15px}
+  .seg button{padding:5px 10px}
+  .step{order:3;width:100%;overflow-x:auto}
+  .step button{white-space:nowrap}
+
+  /* COMMAND: rail becomes a horizontal strip above the work column */
+  .cmd{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .rail{border-right:0;border-bottom:1px solid var(--rule);padding:8px 10px;overflow:hidden;min-width:0}
+  .rail>.k{display:none}
+  .rail nav{flex-direction:row;gap:5px;overflow-x:auto;padding-bottom:3px}
+  .rail nav button{white-space:nowrap;flex:none;width:auto;padding:5px 10px;font-size:11.5px;background:var(--g3);border:1px solid var(--rule)}
+  .rail nav .n{margin-left:5px}
+  .rail .legend{display:none}
+  .cmdmain{padding:12px;min-width:0;overflow-x:hidden}
+  .hero{height:auto;margin:-12px -12px 16px;display:flex;flex-direction:column;overflow:visible}
+  .heromast{position:static;order:1;padding:14px 13px 0;max-width:none;left:auto;top:auto;right:auto;transform:none}
+  .faces{margin:0 auto}
+  .pre{position:static;width:auto}
+  .heromast h1{font-size:26px}
+  .fieldbox{position:relative;order:2;height:270px;margin-top:12px}
+  .field-tog{top:auto!important;bottom:10px}
+  .caps,.pl{max-width:none!important}
+
+  /* FORGE: one column, each region stacked and labelled */
+  .forge{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-auto-rows:auto;overflow:auto;height:auto}
+  .forge>.rgA,.forge>.rgB,.forge>.rgC,.forge>.rgD,.forge>.rgE{grid-column:1;grid-row:auto}
+  .forge>.rgD{--fdrawer:none}
+  .fdrag{display:none}
+  .rgA{border-right:0;border-bottom:1px solid var(--rule);max-height:230px}
+  .rgB{min-height:270px}
+  .rgC{border-left:0;border-top:1px solid var(--rule);display:flex;max-height:340px}
+  .rgD{max-height:150px}
+
+  /* COUNSEL: the overlay stops floating and becomes the column */
+  .cn{overflow:auto}
+  .faces{grid-template-columns:repeat(3,1fr);padding:10px;max-width:none}
+  .face{min-height:60px}
+  .ov{position:static;width:auto;margin:0 10px 10px;max-height:none}
+  .pre{position:static;width:auto;margin:0 10px 12px}
+}
+@media (max-width:560px){
+  .faces{grid-template-columns:1fr 1fr}
+  .fieldbox{height:230px}
+  .seg button{padding:4px 8px;font-size:11px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.bind{font-size:10px;line-height:1.65;color:var(--ink-3);background:var(--g4);border:1px solid var(--rule);
+ border-radius:6px;padding:8px 10px;margin-top:10px}
+.rcpt{margin-top:11px;border:1px solid color-mix(in srgb,var(--green) 34%,var(--rule));border-radius:7px;
+ padding:10px 11px;background:color-mix(in srgb,var(--green) 6%,transparent)}
+.rcpt.bad{border-color:color-mix(in srgb,var(--amber) 40%,var(--rule));background:color-mix(in srgb,var(--amber) 6%,transparent)}
+.rcpt .mono{font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.7;color:var(--ink-2)}
+.seal{font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;color:var(--green);margin-bottom:6px;
+ animation:seal var(--dur-2,.34s) ease-out both}
+.seal.bad{color:var(--amber)}
+@keyframes seal{from{opacity:0;transform:translateY(2px)}to{opacity:1;transform:none}}
+:root[data-reduce="1"] .seal{animation:none}
+.dtog{display:inline-flex;align-items:center;gap:6px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+ color:var(--ink-3);margin-left:2px;cursor:pointer}
+.dtog input{accent-color:var(--amber);width:12px;height:12px}
+.caps.ap-commit{border-color:color-mix(in srgb,var(--amber) 40%,var(--rule))}
+.caps.ap-verified{border-color:color-mix(in srgb,var(--green) 32%,var(--rule))}
+.pw{font-size:11.5px;color:var(--ink-2)}
+.frow{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:5px}
+.frow:hover{background:var(--g4)}
+.frow .nm{flex:1;color:var(--ink);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .h{font-size:9px;color:var(--ink-3);flex:none}
+.pw .sub2{font-size:10.5px;color:var(--ink-3);line-height:1.5;padding:0 6px 7px}
+.pw .warn{margin-top:9px;border-left:2px solid var(--amber);background:color-mix(in srgb,var(--amber) 7%,transparent);
+ padding:8px 10px;border-radius:0 5px 5px 0;font-size:10.5px;line-height:1.55}
+.pw .warn b{color:var(--amber);display:block;margin-bottom:3px;font-size:10px;letter-spacing:.03em;text-transform:uppercase}
+.pw .hint{margin-top:10px;font-size:10px;color:var(--ink-3);line-height:1.55;padding:0 6px}
+.pw .acts{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+
+/* Counsel — live feed, compact */
+.feed{display:flex;flex-direction:column;gap:4px;background:color-mix(in srgb,var(--g1) 20%,transparent);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:7px}
+.trline{display:flex;gap:8px;align-items:baseline;font-size:12px;line-height:1.45;color:var(--ink-3);
+ padding:6px 9px;border-radius:8px;background:transparent;transition:background .2s ease,color .2s ease}
+.trline .who{font-family:"IBM Plex Mono",monospace;font-size:8.5px;letter-spacing:.07em;text-transform:uppercase;flex:none;color:var(--ink-3);width:64px}
+.trline .tx{flex:1}
+.trline{color:var(--ink-2)}
+.trline .tx{text-shadow:0 1px 9px var(--g1)}
+.trline.now{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.11);color:var(--ink);
+ animation:trin .3s ease-out both}
+.trline.now .who{color:var(--cyan)}
+.trline .qm{flex:none;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--cyan);
+ border:1px solid color-mix(in srgb,var(--cyan) 45%,var(--rule));border-radius:50%;width:15px;height:15px;
+ display:inline-flex;align-items:center;justify-content:center}
+@keyframes trin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+:root[data-reduce="1"] .trline.now{animation:none}
+.ansq{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase;
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hint.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lpill{position:absolute;left:50%;top:18px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;
+ padding:11px 20px;border-radius:99px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink);white-space:nowrap;
+ background:linear-gradient(160deg,color-mix(in srgb,var(--g1) 38%,transparent),color-mix(in srgb,var(--g1) 24%,transparent));
+ backdrop-filter:blur(34px) saturate(190%);-webkit-backdrop-filter:blur(34px) saturate(190%);
+ border:1px solid rgba(255,255,255,.14);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 16px 40px -14px rgba(0,0,0,.5)}
+.lpill .dot{animation:lp 2.2s ease-in-out infinite}
+@keyframes lp{0%,100%{opacity:1}50%{opacity:.35}}
+:root[data-reduce="1"] .lpill .dot{animation:none}
+.lphint{position:absolute;left:50%;top:64px;transform:translateX(-50%);font-size:10.5px;color:var(--ink-3);
+ max-width:40ch;text-align:center;line-height:1.5}
+
+/* Command — nav views, home variants, settings */
+.h2row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.segl{display:flex;gap:2px;background:rgba(255,255,255,.045);border:1px solid var(--gl-edge);border-radius:9px;padding:2px;flex:none}
+.segl button{font-size:11px;padding:5px 12px;border-radius:7px;color:var(--ink-2)}
+.segl button[aria-selected="true"]{background:var(--cyan);color:var(--g1)}
+.set{display:flex;flex-direction:column;max-width:640px}
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 2px;border-bottom:1px solid var(--rule)}
+.setrow>div:first-child{min-width:0}
+.setrow b{font-size:13px}
+.setrow .sub2{font-size:11.5px;color:var(--ink-3);margin-top:2px;line-height:1.45}
+.aggrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:11px;max-width:900px}
+.agc{padding:13px 14px}
+.agh{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.agm{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);margin-top:5px}
+.agr{font-size:11.5px;color:var(--ink-2);margin-top:7px;line-height:1.45}
+
+/* Forge — editor chrome */
+.crumbs{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--ink-3);padding:7px 12px;
+ background:rgba(255,255,255,.035);border-bottom:1px solid var(--gl-edge);flex-shrink:0}
+.crumbs b{color:var(--ink);font-weight:600}
+.crumbs i{font-style:normal;color:var(--ink-3);opacity:.6}
+.tabs{background:rgba(255,255,255,.02);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.tabs .tb{display:inline-flex;align-items:center;gap:6px}
+.tabs .tb[aria-selected="true"]{box-shadow:inset 0 -2px 0 var(--cyan)}
+.fdot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.edwrap{display:flex;flex:1;min-height:0}
+.edwrap .code{flex:1}
+.code .row.hl{box-shadow:inset 2px 0 0 var(--gold)}
+.code .row.add{box-shadow:inset 2px 0 0 var(--green)}
+.mini{position:relative;width:30px;flex:none;background:var(--g2);border-left:1px solid var(--rule)}
+.mini i{position:absolute;left:6px;right:6px;height:2px;border-radius:1px;background:var(--g6)}
+.mini i.vp{height:14%;left:2px;right:2px;background:transparent;border:1px solid var(--g7);border-radius:3px}
+@media (max-width:1100px){.mini{display:none}}
+.insp-tabs button[aria-selected="true"]{box-shadow:inset 0 -2px 0 var(--cyan);background:transparent}
+.meter{display:inline-block;width:52px;height:4px;border-radius:2px;background:var(--g5);overflow:hidden;vertical-align:middle}
+.meter i{display:block;height:100%;background:var(--cyan);border-radius:2px}
+
+/* masked mode veils Forge work surfaces without pretending they stopped */
+:root[data-lock="1"] #s-forge .code,:root[data-lock="1"] #s-forge .insp-bd,
+:root[data-lock="1"] #s-forge .rgD,:root[data-lock="1"] #s-forge .panbody,
+:root[data-lock="1"] #s-forge .tabs,:root[data-lock="1"] #s-forge .mini{filter:blur(9px) saturate(60%);pointer-events:none;user-select:none}
+.fglock{position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:30;display:flex;align-items:center;gap:8px;
+ padding:9px 16px;border-radius:99px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-2);white-space:nowrap}
+.wsrow{display:flex;flex-direction:column;align-items:flex-start;width:100%;text-align:left;padding:7px 9px;border-radius:7px;gap:1px}
+.wsrow:hover{background:var(--g4)}
+.wsrow[aria-selected="true"]{background:rgba(255,255,255,.07);box-shadow:inset 2px 0 0 var(--cyan)}
+.wsrow b{font-size:12px;font-weight:600}
+.wsrow span{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+.wsrow.ghost b{color:var(--ink-2)}
+
+.itop{display:flex;align-items:baseline;gap:9px;justify-content:space-between}
+.ist{flex:none;font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.05em;text-transform:uppercase;
+ padding:2px 8px;border-radius:99px;color:var(--ink-3);background:var(--g4);border:1px solid var(--rule);white-space:nowrap}
+.ist.am{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,var(--rule));background:color-mix(in srgb,var(--amber) 9%,transparent)}
+.ist.cy{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 38%,var(--rule));background:color-mix(in srgb,var(--cyan) 9%,transparent)}
+.ist.gr{color:var(--green);border-color:color-mix(in srgb,var(--green) 36%,var(--rule));background:color-mix(in srgb,var(--green) 9%,transparent)}
+.ist.rd{color:var(--red);border-color:color-mix(in srgb,var(--red) 40%,var(--rule));background:color-mix(in srgb,var(--red) 9%,transparent)}
+.tally{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-3);flex-wrap:wrap;margin-bottom:6px}
+.tally span:not(.sep){font-weight:600}.tally .am{color:var(--amber)}.tally .cy{color:var(--cyan)}.tally .rd{color:var(--red)}
+.tally .sep{width:1px;height:11px;background:var(--rule-2);margin:0 3px}
+
+.ncnote{margin-top:9px;font-size:11px;line-height:1.5;color:var(--ink-3);
+ padding:8px 10px;border-left:2px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 6%,transparent);border-radius:0 6px 6px 0}
+.ncnote b{color:var(--ink-2)}
+
+/* Forge — parallel runs / best-output selection */
+.runsp{display:flex;flex-direction:column;gap:9px;font-size:12px}
+.rhead b{font-size:13px}
+.rhead .sub2{font-size:11px;color:var(--ink-3);margin-top:2px;line-height:1.45}
+.run{background:var(--g2);border:1px solid var(--rule);border-radius:10px;padding:11px 12px}
+.run.win{border-color:color-mix(in srgb,var(--green) 40%,var(--rule));box-shadow:inset 2px 0 0 var(--green)}
+.rh{display:flex;align-items:center;gap:9px;margin-bottom:7px}
+.rid{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:12px;color:var(--ink)}
+.rappr{font-size:11.5px;color:var(--ink-2)}
+.rmeta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.rnote{font-size:11.5px;color:var(--ink-2);line-height:1.5}
+
+.route{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:10.5px;color:var(--ink-2);
+ padding:7px 9px;background:color-mix(in srgb,var(--cyan) 6%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 22%,var(--rule));border-radius:8px}
+
+/* Forge agent chat — Claude-Code-style rich output */
+.msg .who .mchip{font-family:"IBM Plex Mono",monospace;font-size:8.5px;color:var(--ink-3);background:var(--g4);
+ border:1px solid var(--rule);border-radius:4px;padding:1px 5px;margin-left:6px;text-transform:none;letter-spacing:0}
+.think{font-size:11px;color:var(--ink-3);font-style:italic;margin:0 0 6px;padding-left:9px;border-left:2px solid var(--rule-2)}
+.tool{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-2);background:var(--g3);
+ border:1px solid var(--rule);border-radius:7px;padding:5px 9px;margin-bottom:7px;display:flex;align-items:center;gap:7px}
+.tool .th{color:var(--cyan)} .tool .ok{color:var(--green);margin-left:auto}
+.codeblk{margin:8px 0;border:1px solid var(--rule);border-radius:8px;overflow:hidden;background:var(--g1)}
+.codeblk .cbhd{font-size:9px;color:var(--ink-3);padding:4px 10px;border-bottom:1px solid var(--rule);text-transform:uppercase;letter-spacing:.05em}
+.codeblk pre{margin:0;padding:9px 11px;font-family:"IBM Plex Mono",monospace;font-size:11px;line-height:1.6;color:var(--ink);background:none;border:0;white-space:pre;overflow-x:auto}
+.codeblk .cm{color:var(--ink-3)}
+.mdul{margin:7px 0 2px;padding-left:17px}.mdul li{font-size:12px;color:var(--ink-2);margin:2px 0}
+.streaming{color:var(--ink-3)}
+.dots{display:inline-flex;gap:3px;margin-right:6px}
+.dots i{width:5px;height:5px;border-radius:50%;background:var(--cyan);animation:blink 1.2s infinite both}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+:root[data-reduce="1"] .dots i{animation:none;opacity:.7}
+.qstrip{font-size:10px;color:var(--amber);padding:6px 10px;border-top:1px solid var(--rule);
+ background:color-mix(in srgb,var(--amber) 7%,transparent);display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.qmsg{background:var(--g3);border:1px solid var(--rule);border-radius:5px;padding:1px 7px;color:var(--ink-2);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.compose .attach{background:var(--g3);border:1px solid var(--rule);border-radius:8px;padding:6px 9px;color:var(--ink-3);font-size:13px}
+.compose .attach:hover{color:var(--ink)}
+.crow{display:flex;align-items:center;gap:8px;padding:6px 9px 9px;font-size:9.5px}
+
+.selrule{font-size:11px;color:var(--ink-2);line-height:1.5;padding:8px 10px;background:var(--g2);
+ border:1px solid var(--rule);border-radius:8px}
+.selrule b{color:var(--ink)}
+.automode{background:color-mix(in srgb,var(--cyan) 7%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 26%,var(--rule));
+ border-radius:9px;padding:9px 11px;margin-bottom:9px}
+.automode .amh{display:flex;align-items:center;font-size:12.5px}
+.automode .amx{font-size:11px;color:var(--ink-2);line-height:1.5;margin-top:4px}
+
+/* Command — Ask Zeno (system-wide chat) */
+.askv{display:flex;flex-direction:column;height:100%;min-height:0;padding:16px 18px}
+.askhead{flex:none}
+.askhead h2{margin:0}
+.askhead .sub{max-width:66ch}
+.athread{flex:1;overflow-y:auto;min-height:0;padding:14px 2px;display:flex;flex-direction:column;gap:14px;max-width:760px}
+.amsg{display:flex;flex-direction:column;gap:4px}
+.amsg.you{align-items:flex-end}
+.amsg .awho{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase}
+.amsg .ab{font-size:13.5px;line-height:1.55;padding:11px 14px;border-radius:13px;max-width:88%}
+.amsg.you .ab{background:var(--g5);border-radius:13px 13px 4px 13px}
+.amsg.z .ab{background:var(--g2);border:1px solid var(--rule);border-radius:13px 13px 13px 4px}
+.aroute{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:9.5px;color:var(--ink-3);margin-bottom:2px}
+.acompose{flex:none;display:flex;gap:7px;align-items:center;max-width:760px;width:100%}
+.acompose input{flex:1;background:var(--g2);border:1px solid var(--rule-2);border-radius:11px;padding:11px 13px;color:var(--ink);font:inherit;font-size:13px}
+.acompose .attach{background:var(--g3);border:1px solid var(--rule);border-radius:9px;padding:8px 11px;color:var(--ink-3);font-size:14px}
+
+/* ⌘K palette */
+.palov[hidden]{display:none}
+.palov{position:fixed;inset:0;z-index:200;background:color-mix(in srgb,var(--g1) 55%,transparent);
+ backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;justify-content:center;align-items:flex-start;padding-top:14vh}
+.pal{width:min(560px,calc(100% - 32px));overflow:hidden;border-radius:15px;
+ animation:palin .22s cubic-bezier(.22,1,.36,1) both}
+@keyframes palin{from{opacity:0;transform:translateY(-8px) scale(.985)}to{opacity:1;transform:none}}
+:root[data-reduce="1"] .pal{animation:none}
+.pal input{width:100%;background:transparent;border:0;outline:0;color:var(--ink);font:inherit;font-size:15px;
+ padding:15px 18px;border-bottom:1px solid var(--gl-edge)}
+.pallist{max-height:44vh;overflow-y:auto;padding:6px}
+.palrow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;cursor:pointer;font-size:13.5px}
+.palrow .pt{flex:1;color:var(--ink)}
+.palrow .pk{font-size:9px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;
+ border:1px solid var(--rule);border-radius:4px;padding:1px 6px}
+.palrow[aria-selected="true"]{background:rgba(255,255,255,.09)}
+.palrow[aria-selected="true"] .pt{color:var(--ink)}
+.palempty{padding:14px;color:var(--ink-3);font-size:12.5px;text-align:center}
+.palhint{padding:8px 14px;border-top:1px solid var(--gl-edge);font-size:9.5px;color:var(--ink-3)}
+/* push-to-talk */
+.mic{background:var(--g3);border:1px solid var(--rule);border-radius:9px;padding:8px 11px;color:var(--ink-3);font-size:13px}
+.mic:hover{color:var(--ink)}
+.mic.rec{color:var(--red);border-color:color-mix(in srgb,var(--red) 50%,var(--rule));
+ background:color-mix(in srgb,var(--red) 10%,transparent);animation:recpulse 1.1s ease-in-out infinite}
+@keyframes recpulse{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--red) 35%,transparent)}50%{box-shadow:0 0 0 5px transparent}}
+:root[data-reduce="1"] .mic.rec{animation:none}
+/* forge sessions */
+.sesrow{display:flex;align-items:center;gap:8px;padding:7px 10px 0;font-size:10px;color:var(--ink-3)}
+.sesname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sesnew{background:none;border:1px solid var(--rule);border-radius:5px;color:var(--ink-3);font-size:9.5px;padding:1px 7px;margin-left:auto}
+.sesnew:hover{color:var(--ink);border-color:var(--rule-2)}
+/* glass sheen: the specular seam brightens under the pointer */
+.l2{transition:box-shadow .25s ease}
+.l2:hover::before{opacity:.85}
+
+/* Command — live read-only intake */
+.inview{display:flex;flex-direction:column;gap:12px;max-width:780px}
+.back{align-self:flex-start;background:none;border:1px solid var(--rule);border-radius:8px;padding:5px 11px;color:var(--ink-2);font-size:11px}
+.back:hover{color:var(--ink);border-color:var(--rule-2)}
+.inhead{display:flex;align-items:flex-start;gap:11px}
+.inhead .b{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.05em;text-transform:uppercase;padding:3px 7px;border-radius:4px;background:var(--g5);color:var(--ink-2);margin-top:5px}
+.inhead h2{margin:0}
+.intally{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 13px;background:var(--g2);border:1px solid var(--rule);border-radius:10px;font-size:11.5px;color:var(--ink-2)}
+.intally .tl{display:flex;gap:5px}.intally .tl b{color:var(--ink);font-variant-numeric:tabular-nums}.intally .tl.gr b{color:var(--green)}
+.instream{display:flex;flex-direction:column}
+.instep{display:flex;gap:12px;align-items:flex-start;padding:11px 2px 11px 0;position:relative}
+.instep .intm{font-size:9.5px;color:var(--ink-3);flex:none;width:58px;padding-top:2px}
+.instep .indot{flex:none;width:9px;height:9px;border-radius:50%;background:var(--g6);margin-top:4px;position:relative;z-index:2}
+.instep .indot::after{content:"";position:absolute;left:50%;top:13px;transform:translateX(-50%);width:1px;height:34px;background:var(--rule)}
+.instep:last-child .indot::after{display:none}
+.instep.read .indot{background:var(--cyan)} .instep.seal .indot{background:var(--green)}
+.instep.repro .indot{background:var(--gold)} .instep.hold .indot{background:var(--amber)} .instep.open .indot{background:var(--ink-2)}
+.instep .inbody{flex:1;min-width:0}
+.instep .inh{font-size:13px;color:var(--ink);line-height:1.45}
+.instep .inx{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:2px}
+.instep .inro{flex:none;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--green);border:1px solid color-mix(in srgb,var(--green) 34%,var(--rule));border-radius:99px;padding:2px 7px;margin-top:3px}
+.instep.hold .inro{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 38%,var(--rule))}
+.instep.now{animation:instepin .32s ease-out both}
+.instep.pending .inh{font-style:italic}
+.instep.pending .indot{animation:blink 1.1s infinite both}
+@keyframes instepin{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+:root[data-reduce="1"] .instep.now{animation:none}
+.item.clk{cursor:pointer;transition:border-color .15s ease,background .15s ease}
+.item.clk:hover{border-color:color-mix(in srgb,var(--cyan) 34%,var(--rule-2))}
+.ichev{display:inline-block;margin-top:6px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--cyan);opacity:.85}
+
+/* Command — live activity (watch it work) */
+.actview{display:flex;flex-direction:column;gap:12px;max-width:900px}
+.eyebrow2{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);margin:0 0 3px}
+.acthd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.acthd h2{margin:0}
+.actctl{display:flex;gap:6px;flex:none}
+.acttally{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 13px;background:var(--g2);border:1px solid var(--rule);border-radius:10px;font-size:11.5px;color:var(--ink-2)}
+.acttally .tl b{color:var(--ink);font-variant-numeric:tabular-nums}.acttally .tl.gr b{color:var(--green)}
+.actgrid{display:grid;grid-template-columns:1fr 300px;gap:14px}
+@media (max-width:820px){.actgrid{grid-template-columns:1fr}}
+.actstream{display:flex;flex-direction:column}
+.actrow{display:flex;gap:11px;align-items:flex-start;padding:9px 0}
+.actrow .acti{flex:none;width:16px;text-align:center;color:var(--ink-3);margin-top:1px}
+.actrow.cc .acti{color:var(--gold)}.actrow.seal .acti{color:var(--green)}.actrow.verify .acti,.actrow.browser .acti{color:var(--cyan)}
+.actrow .actb{flex:1;min-width:0}
+.actrow .acth{font-size:13px;color:var(--ink);line-height:1.45}
+.actrow .actx{font-size:11px;color:var(--ink-3);line-height:1.5;margin-top:2px}
+.actrow.now{animation:instepin .34s ease-out both}
+.actrow.pending .acti{animation:blink 1.1s infinite both}
+:root[data-reduce="1"] .actrow.now{animation:none}
+.ccstream{background:var(--g1);border:1px solid color-mix(in srgb,var(--gold) 26%,var(--rule));border-radius:9px;padding:9px 11px;margin-top:3px}
+.ccstream .cch{display:flex;align-items:center;gap:7px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--gold);margin-bottom:6px}
+.ccstream .cch .dot{width:6px;height:6px;border-radius:50%}
+.ccl{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-2);padding:2px 0;line-height:1.5}
+.ccl.think{color:var(--ink-3);font-style:italic}
+.actscreen{background:var(--g2);border:1px solid var(--rule);border-radius:11px;overflow:hidden;align-self:start;min-height:180px;display:flex;flex-direction:column}
+.scrbar{display:flex;align-items:center;gap:5px;padding:7px 11px;border-bottom:1px solid var(--rule);font-size:9px;color:var(--ink-3)}
+.scrbar span{width:7px;height:7px;border-radius:50%;background:var(--g6)}
+.actscreen>div:last-child{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:12px;padding:20px;line-height:1.5}
+.scr-idle{color:var(--ink-3)}.scr-idle span,.scr-load span,.scr-good span{display:block;font-size:10px;color:var(--ink-3);margin-top:5px}
+.scr-load{color:var(--cyan)}
+.scr-good{color:var(--green);font-weight:600}
+
+.actmode{display:flex;gap:2px;background:rgba(255,255,255,.045);border:1px solid var(--gl-edge);border-radius:9px;padding:2px}
+.actmode button{font-family:"IBM Plex Mono",monospace;font-size:10px;padding:4px 9px;border-radius:7px;color:var(--ink-3)}
+.actmode button.on{background:rgba(255,255,255,.11);color:var(--ink)}
+.lanes{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}
+@media (max-width:820px){.lanes{grid-template-columns:1fr}}
+.lane{background:var(--g2);border:1px solid var(--rule);border-radius:11px;padding:12px;min-height:150px}
+.lane.win{border-color:color-mix(in srgb,var(--green) 42%,var(--rule));box-shadow:inset 2px 0 0 var(--green)}
+.laneh{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.lid{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:12px}
+.lwho{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3)}
+.lwho.cc{color:var(--gold)}
+.lstat{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3)}
+.lappr{font-size:10.5px;color:var(--ink-3);margin-bottom:8px}
+.llns{display:flex;flex-direction:column;gap:4px}
+.lln{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-2);animation:instepin .3s ease-out both}
+.lln.tst{color:var(--green)}
+.lln.pend{color:var(--ink-3);font-style:italic}
+:root[data-reduce="1"] .lln{animation:none}
+.selbanner{margin-top:12px;background:color-mix(in srgb,var(--green) 6%,transparent);border:1px solid color-mix(in srgb,var(--green) 30%,var(--rule));border-radius:11px;padding:12px 14px}
+.selh{font-size:13px;color:var(--ink)}.selh b{color:var(--green)}
+.selx{font-size:11.5px;color:var(--ink-2);line-height:1.5;margin-top:5px}
+.selpending{margin-top:12px;font-size:10.5px;color:var(--ink-3);text-align:center;padding:10px}
+</style>
+
+<div class="app">
+ <div class="bar">
+  <button class="brand" id="home" title="Home — Command · Today" aria-label="Home"><span class="hmk">&#9673;</span>Zeno<span>B+C</span></button>
+  <div class="seg" role="tablist" aria-label="Product">
+   <button role="tab" aria-selected="true" data-s="command">Command</button>
+   <button role="tab" aria-selected="false" data-s="forge">Forge</button>
+   <button role="tab" aria-selected="false" data-s="counsel">Counsel</button>
+  </div>
+  <div class="step" aria-label="WEBEXT journey">
+   <button data-j="0" aria-current="true"><span class="d"></span>Jira</button>
+   <button data-j="1"><span class="d"></span>Context</button>
+   <button data-j="2"><span class="d"></span>Approve</button>
+   <button data-j="3"><span class="d"></span>Build</button>
+   <button data-j="4"><span class="d"></span>CI</button>
+  </div>
+  <span class="sp"></span>
+  <button class="ic" id="b-pal" title="Command palette (Cmd/Ctrl+K)">&#8984;K</button>
+  <button class="ic" id="b-lock" aria-pressed="false" title="Simulate locked screen / screen-share">&#128274; masked</button>
+  <button class="ic" id="b-mo" aria-pressed="false">&#8635; reduce motion</button>
+  <button class="ic" id="b-flat" aria-pressed="false">&#9633; 2D</button>
+  <button class="ic" id="b-th">&#9680; theme</button>
+ </div>
+
+ <div class="palov" id="palov" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="l2 pal">
+   <input id="palq" placeholder="Type a command&hellip;" aria-label="Command" autocomplete="off">
+   <div class="pallist" id="pallist" role="listbox"></div>
+   <div class="palhint mono">&#8593;&#8595; navigate &middot; &#9166; run &middot; esc close &middot; every action here still obeys the tier policy</div>
+  </div>
+ </div>
+ <div class="stage">
+  <section class="scr on" id="s-command" aria-label="Zeno Command"></section>
+  <section class="scr" id="s-forge" aria-label="Zeno Forge"></section>
+  <section class="scr" id="s-counsel" aria-label="Zeno Counsel"></section>
+ </div>
+
+ <div class="foot">
+  <span>Synthetic data &middot; original compositions &middot; no reel reproduced</span>
+  <span>Glass only on Layer 2 &mdash; never behind code, diffs or transcripts</span>
+  <span id="ft"></span>
+ </div>
+</div>
+
+<script>
+"use strict";
+var R=document.documentElement, rmq=matchMedia("(prefers-reduced-motion:reduce)");
+function st(k,v){try{localStorage.setItem("zeno-"+k,v)}catch(e){}}
+function ld(k){try{return localStorage.getItem("zeno-"+k)}catch(e){return null}}
+var S={s:"command",j:0,motion:!rmq.matches,lock:false,sel:null,fieldList:false,
+       insp:"chat", mpop:false, ap:"await", drift:false, pan:"explorer",
+       nav:"today", repo:"browser-add-on", wsPop:false, diff:false, killArm:false, fbusy:false, fq:[], auto:true, rec:false, inKey:null, inOps:false, inStep:0, actStep:0, actPaused:false, actPar:false,
+       cn:{idx:0,assist:false,ansFor:-1,asks:[]}, ask:[]};
+if(rmq.matches) R.setAttribute("data-reduce","1");
+R.setAttribute("data-lock","0");
+/* per-device preferences (theme, home style, motion, depth) — stored locally, never synced */
+(function(){
+ var th=ld("th"); if(th==="dark"||th==="light")R.setAttribute("data-theme",th);
+ var mo=ld("mo"); if(mo==="0"){S.motion=false;R.setAttribute("data-reduce","1");}
+                  else if(mo==="1"){S.motion=true;R.setAttribute("data-reduce","0");}
+ var fl=ld("fl"); if(fl==="1")R.setAttribute("data-flat","1");
+})();
+function themeChoice(){return R.getAttribute("data-theme")||"system";}
+function setTheme(v){ if(v==="system"){R.removeAttribute("data-theme");st("th","system");}
+ else{R.setAttribute("data-theme",v);st("th",v);} render(); if(F.c)draw(); }
+function toggleMo(){S.motion=!S.motion;R.setAttribute("data-reduce",S.motion?"0":"1");st("mo",S.motion?"1":"0");syncTop();render();}
+function toggleFlat(){var f=R.getAttribute("data-flat")==="1";R.setAttribute("data-flat",f?"0":"1");st("fl",f?"0":"1");syncTop();render();}
+function syncTop(){var m=document.getElementById("b-mo"),f=document.getElementById("b-flat");
+ if(m)m.setAttribute("aria-pressed",!S.motion); if(f)f.setAttribute("aria-pressed",R.getAttribute("data-flat")==="1");}
+/* masked-mode redaction for employer identifiers */
+function mk(s,n){return S.lock?'<span class="mk">'+"\u2588".repeat(n||10)+'</span>':s;}
+
+/* ===== Standing Field (original: bounded, centreless, matte, axonometric) ===== */
+var N=[
+ {id:"orch",l:"Zeno Orchestrator",k:"core",x:.06,y:0,z:0,d:"The single coordinating core. Owns the task graph and routes least-scoped context. Never a privileged model process."},
+ {id:"work",l:"Work Agent",k:"agent",x:-.72,y:.26,z:.34,d:"Turns a WEBEXT ticket into a cited context pack. Cannot approve its own output."},
+ {id:"sarah",l:"Sarah · Design",k:"agent",x:.74,y:.40,z:-.22,d:"Design agent. Raises cited defects to the internal channel — never posts externally."},
+ {id:"cou",l:"Counsel",k:"agent",x:-.30,y:.60,z:.52,d:"Reads repos to cite live answers. Cannot edit code or create work alone."},
+ {id:"mac",l:"This Mac",k:"dev",x:-.36,y:-.60,z:.30,d:"Work Mac. Development host for isolated synthetic builds. No employer data, no OS permission grant."},
+ {id:"win",l:"Windows pilot",k:"dev",x:.42,y:-.70,z:.06,d:"Personal pilot machine. Specs unknown (B-002) — every latency target is a measurement, not a promise."},
+ {id:"ph",l:"Phone",k:"dev",x:.62,y:-.32,z:.50,d:"Approval companion. One executor lease prevents double-send."},
+ {id:"ba",l:"browser-add-on",k:"repo",x:-.84,y:-.10,z:-.28,d:"20 Cursor rules + AGENTS.md + CLAUDE.md. 3,309 source files."},
+ {id:"pk",l:"packages",k:"repo",x:-.50,y:.60,z:-.42,d:"17,665 source files. Cross-repo changes get one plan, per-repo diffs."},
+ {id:"es",l:"edit-stream",k:"repo",x:.16,y:.66,z:.40,d:"6 Cursor rules. 1,061 source files."},
+ {id:"rs",l:"rest-server",k:"repo",x:.56,y:.08,z:.64,d:"5 Cursor rules. 2,719 source files."},
+ {id:"jira",l:"Jira · WEBEXT/OPS",k:"src",x:-.16,y:-.30,z:-.60,d:"WEBEXT + WEBEXTOPS. A verified assignment creates a read-only Intake — never a build."},
+ {id:"neo",l:"NeoSapien",k:"srcq",x:.80,y:-.06,z:-.48,d:"Undocumented vendor endpoint. Read-only, cited as supplemental, never a silent dependency."}
+];
+var E=[["orch","work"],["orch","sarah"],["orch","cou"],["orch","mac"],["orch","win"],["orch","ph"],
+ ["work","ba"],["work","pk"],["work","es"],["work","rs"],["work","jira"],["work","neo"],["cou","ba"],["cou","neo"],["jira","orch"]];
+var ACT=[["jira"],["work","ba","jira"],["orch","work"],["work","mac","ba"],["work","rs"]];
+function cv(v){return getComputedStyle(R).getPropertyValue(v).trim();}
+function rgba(h,a){h=(h||"#888").trim();
+ if(h.charAt(0)!=="#")return h;
+ if(h.length===4)h="#"+h[1]+h[1]+h[2]+h[2]+h[3]+h[3];
+ var n=parseInt(h.slice(1,7),16);
+ return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";}
+function nc(n){return n.k==="core"?cv("--gold"):(n.k==="agent"||n.k==="src")?cv("--cyan"):cv("--ink-3");}
+var F={c:null,x:null,rot:.62,tilt:.34,tilt0:.34,drag:0,raf:0,hov:null,W:0,H:0,mx:0,my:0};
+function proj(n){var cr=Math.cos(F.rot),sr=Math.sin(F.rot),ct=Math.cos(F.tilt),st=Math.sin(F.tilt);
+ var x=n.x*cr-n.z*sr, z=n.x*sr+n.z*cr, y=n.y*ct-z*st, zz=n.y*st+z*ct, p=1/(1.85-zz*.46);
+ return{x:x*p,y:y*p,d:zz,p:p};}
+function lay(){var wide=F.W>820,
+ pad=Math.min(F.W*(wide?0.275:0.37),F.H*(wide?1.02:0.80)),
+ cx=F.W*(wide?0.655:0.50), cy=F.H*(wide?0.50:0.47);
+ N.forEach(function(n){var q=proj(n);n._=q;n.sx=cx+q.x*pad;n.sy=cy+q.y*pad;});}
+
+/* depth 0 = farthest, 1 = nearest */
+function dep(n){return Math.max(0,Math.min(1,(n._.d+1.05)/2.1));}
+
+function sphere(c,n,r,col,lit){
+ var g=c.createRadialGradient(n.sx-r*.42,n.sy-r*.5,r*.12,n.sx,n.sy,r*1.06);
+ g.addColorStop(0,lit?"rgba(255,255,255,.95)":"rgba(255,255,255,.48)");
+ g.addColorStop(.30,rgba(col,1));
+ g.addColorStop(.80,rgba(col,.78));
+ g.addColorStop(1,"rgba(0,0,0,.62)");
+ c.beginPath();c.arc(n.sx,n.sy,r,0,7);c.fillStyle=g;c.fill();
+}
+
+function draw(){ if(!F.x||!F.W||!F.H)return; var c=F.x; c.clearRect(0,0,F.W,F.H); lay();
+ var act=ACT[S.j]||[], t=performance.now()/1000, placed=[];
+ var CY=cv("--cyan"), GO=cv("--gold"), I3=cv("--ink-3"), GRN=cv("--green");
+ var lightTheme=(R.getAttribute("data-theme")==="light")||
+   (!R.getAttribute("data-theme")&&matchMedia("(prefers-color-scheme:light)").matches);
+
+ /* ground shadow — anchors the graph in space instead of floating it on a flat field */
+ var gy=F.H*0.47+Math.min(F.W*0.30,F.H*0.62)*0.92;
+ var gg=c.createRadialGradient(F.W*.5,gy,2,F.W*.5,gy,Math.min(F.W*.34,190));
+ gg.addColorStop(0,lightTheme?"rgba(23,26,30,.13)":"rgba(0,0,0,.55)");
+ gg.addColorStop(1,"rgba(0,0,0,0)");
+ c.save();c.translate(F.W*.5,gy);c.scale(1,.17);c.translate(-F.W*.5,-gy);
+ c.beginPath();c.arc(F.W*.5,gy,Math.min(F.W*.34,190),0,7);c.fillStyle=gg;c.fill();c.restore();
+
+ /* edges, far-to-near, colour-graded along their length */
+ E.slice().sort(function(p,q){return (g(p[0])._.d+g(p[1])._.d)-(g(q[0])._.d+g(q[1])._.d);})
+ .forEach(function(e){
+  var a=g(e[0]),b=g(e[1]),da=dep(a),db=dep(b),dm=(da+db)/2;
+  var live=act.indexOf(a.id)>=0&&act.indexOf(b.id)>=0;
+  var lg=c.createLinearGradient(a.sx,a.sy,b.sx,b.sy);
+  var ca=(a.k==="core"?GO:a.k==="agent"||a.k==="src"?CY:I3);
+  var cb=(b.k==="core"?GO:b.k==="agent"||b.k==="src"?CY:I3);
+  lg.addColorStop(0,ca);lg.addColorStop(1,cb);
+  c.globalAlpha=(live?.52:.20)+.30*dm;
+  c.strokeStyle=lg;c.lineWidth=(live?1.5:.85)+1.15*dm;
+  c.setLineDash(a.k==="srcq"||b.k==="srcq"?[3,5]:[]);
+  c.beginPath();c.moveTo(a.sx,a.sy);c.lineTo(b.sx,b.sy);c.stroke();
+  /* one travelling packet per live edge — motion that means "this is carrying something" */
+  if(live&&S.motion){var u=(t*.42+(a.sx+b.sx)*.0013)%1;
+   var px=a.sx+(b.sx-a.sx)*u, py=a.sy+(b.sy-a.sy)*u;
+   c.setLineDash([]);c.globalAlpha=.85;
+   c.beginPath();c.arc(px,py,1.9+1.5*dm,0,7);c.fillStyle=CY;c.fill();}
+ });
+ c.setLineDash([]);c.globalAlpha=1;
+
+ N.slice().sort(function(a,b){return a._.d-b._.d;}).forEach(function(n){
+  var d=dep(n), base=(n.k==="core"?9.6:5.9), r=base*(.46+1.08*d), on=act.indexOf(n.id)>=0&&S.motion;
+  var pu=on?1+.13*Math.sin(t*2.4):1; r*=pu;
+  var col=(n.k==="core"?GO:n.k==="agent"||n.k==="src"?CY:n.k==="srcq"?cv("--red"):I3);
+  var sel=(n===F.hov||n.id===S.sel);
+
+  /* bloom: strongest on the core and on whatever is live this step */
+  if(n.k==="core"||on||sel){
+   var br=r*(n.k==="core"?7.0:4.8), peak=(n.k==="core"?.36:.26)*(.45+.55*d);
+   var bg=c.createRadialGradient(n.sx,n.sy,r*.35,n.sx,n.sy,br);
+   bg.addColorStop(0,rgba(col,peak));
+   bg.addColorStop(.45,rgba(col,peak*.28));
+   bg.addColorStop(1,rgba(col,0));
+   c.globalAlpha=1;c.beginPath();c.arc(n.sx,n.sy,br,0,7);c.fillStyle=bg;c.fill();
+  }
+
+  /* far nodes sit back: softer, smaller, lower contrast */
+  c.globalAlpha=Math.min(1,.46+.54*d);
+  c.shadowColor=col; c.shadowBlur=(sel?16:on?12:5)*(.4+.6*d);
+  sphere(c,n,r,col,sel||n.k==="core");
+  c.shadowBlur=0;
+
+  c.beginPath();c.arc(n.sx,n.sy,r,0,7);
+  c.strokeStyle=col;c.globalAlpha=Math.min(1,(.34+.66*d))*(sel?1:.8);
+  c.lineWidth=(n.k==="core"?1.7:1.1)*(.6+.7*d);c.stroke();
+
+  if(sel){c.globalAlpha=.95;c.beginPath();c.arc(n.sx,n.sy,r+7.5,0,7);
+   c.strokeStyle=GO;c.lineWidth=1.4;c.stroke();}
+  /* glassy specular: a bright arc where the light catches the sphere */
+  if(sel||n.k==="core"){c.globalAlpha=Math.min(1,.5+.5*d);
+   c.beginPath();c.arc(n.sx-r*.30,n.sy-r*.34,r*.62,Math.PI*1.02,Math.PI*1.55);
+   c.strokeStyle="rgba(255,255,255,.55)";c.lineWidth=1.1;c.stroke();c.globalAlpha=1;}
+
+  var lab=(sel||n.k==="core"||d>0.46);
+  if(lab){
+   var txt=S.lock?(n.k==="core"?"core":n.k):n.l;
+   var fs=(8.6+3.4*d).toFixed(1);
+   c.font='500 '+fs+'px "IBM Plex Mono",monospace';
+   var tw=c.measureText(txt).width, lx=n.sx+r+8, ly=n.sy+3.5;
+   if(lx+tw>F.W-10){lx=n.sx-r-8-tw;}
+   var hit=function(y){return placed.some(function(b){return Math.abs(b.y-y)<13 && lx<b.x+b.w+7 && b.x<lx+tw+7;});};
+   var must=(sel||n.k==="core");
+   var clash=hit(ly);
+   if(clash&&!hit(ly+15)){ly+=15;clash=false;}
+   else if(clash&&!hit(ly-15)){ly-=15;clash=false;}
+   if(!clash||must){
+    if(clash){ly+=15;}
+    /* a halo, not a box — labels stay legible over bright edges without boxing them in */
+    c.globalAlpha=Math.min(1,.52+.48*d);
+    c.shadowColor=lightTheme?"rgba(233,232,226,.95)":"rgba(10,12,14,.95)";
+    c.shadowBlur=7;
+    c.fillStyle=sel?cv("--ink"):cv("--ink-2");
+    c.fillText(txt,lx,ly);c.fillText(txt,lx,ly);
+    c.shadowBlur=0;
+    placed.push({x:lx,y:ly,w:tw});
+   }
+  }
+ });
+ c.globalAlpha=1;
+}
+function g(id){for(var i=0;i<N.length;i++)if(N[i].id===id)return N[i];}
+function loop(){ if(!F.c||!F.c.isConnected){F.raf=0;return;}
+ if(!F.drag&&S.motion){F.rot+=.0016; F.tilt=F.tilt0+Math.sin(performance.now()/6400)*.055;}
+ draw(); F.raf=requestAnimationFrame(loop); }
+function fieldOn(){
+ var el=document.getElementById("field");
+ if(!el||!el.isConnected||!el.parentElement)return;
+ F.c=el; F.x=el.getContext("2d");
+ stopF();
+ size();                                   // synchronous: layout is already flushed here
+ try{
+   if(F.ro)F.ro.disconnect();
+   if(window.ResizeObserver&&F.c.parentElement){
+     F.ro=new ResizeObserver(function(){size();});
+     F.ro.observe(F.c.parentElement);
+   }
+ }catch(err){/* the observer is an optimisation, never a dependency */}
+ if(S.motion)F.raf=requestAnimationFrame(loop); else draw();
+}
+function stopF(){ if(F.raf){cancelAnimationFrame(F.raf);F.raf=0;}
+ if(F.init){clearTimeout(F.init);F.init=0;} }
+function size(){ if(!F.c||!F.c.isConnected)return;
+ var host=F.c.parentElement; if(!host)return;
+ var w=host.clientWidth, h=host.clientHeight;
+ if(!w||!h){if(F.init)clearTimeout(F.init);F.init=setTimeout(size,60);return;}
+ if(F.init){clearTimeout(F.init);F.init=0;}
+ var d=Math.min(devicePixelRatio||1,2);
+ F.W=w; F.H=h;
+ F.c.style.width=w+"px"; F.c.style.height=h+"px";
+ F.c.width=Math.round(w*d); F.c.height=Math.round(h*d);
+ F.x.setTransform(d,0,0,d,0,0);
+ draw(); }
+function pick(x,y){var b=null,bd=20;N.forEach(function(n){var d=Math.hypot(n.sx-x,n.sy-y);if(d<bd){bd=d;b=n;}});return b;}
+
+/* ===================== COMMAND ===================== */
+var CAPHD={await:"Approval needed &middot; context ready", commit:"Committing &middot; one attempt",
+ verified:"Verified &middot; receipt on file", refused:"Commit refused &middot; drift detected"};
+var SRC='<div class="mono" style="font-size:11px;color:var(--ink-2)">Cited from <b style="color:var(--cyan)">browser-add-on</b> @ <b>feat/WEBEXT-3514</b> &middot; 4 code refs &middot; 1 meeting note</div>'+
+  '<div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">'+
+   '<span class="chip">repo browser-add-on</span><span class="chip">HEAD 4b098d6</span>'+
+   '<span class="chip gr">quillbot-lt-conventions &#10003;</span><span class="chip">20 rules keyed</span>'+
+   '<span class="chip rd">NeoSapien: undocumented</span></div>';
+var DIFF='<div class="diff"><span class="c"># TASK  (only this section changes)</span>\n'+
+  '<span class="r">- Build the insert/replace label feature.</span>\n'+
+  '<span class="a">+ Implement insert/replace label per WEBEXT-3514:</span>\n'+
+  '<span class="a">+   diffWords whitespace drift; single-block &lt;p&gt; wrap.</span>\n'+
+  '<span class="a">+   Refs: InsertReplace.tsx:142, LTAssistant.ts:88</span></div>';
+var BIND='<div class="bind mono"><b>action hash</b> 9f2c&hellip;a41 &middot; bound to<br>'+
+  'pack_hash 7ab3&hellip;0d &middot; patch_hash c410&hellip;9e &middot; base_file_hash 55e1&hellip;b2<br>'+
+  'browser-add-on@4b098d6 &middot; skills_manifest 2f77&hellip;c1 &middot; opus-5 &middot; jira:write-task</div>';
+function capBody(){
+ if(S.ap==="commit") return SRC+DIFF+
+  '<div class="note"><span>Revalidating the bound tuple against live state, then <b>one</b> commit attempt. No retry loop.</span></div>'+
+  '<div class="acts"><span class="chip am">committing&hellip;</span><span class="chip">approval is single-use</span></div>';
+ if(S.ap==="verified") return SRC+DIFF+
+  '<div class="rcpt"><div class="seal">&#10003; verified &middot; 14:12</div>'+
+  '<div class="mono">cas-receipt <b>cas_01J8&hellip;7d</b> &middot; base matched 4b098d6<br>'+
+  'patch-applied-receipt <b>jira_tsk_5f2&hellip;</b> &middot; TASK section only<br>'+
+  'external effect: <b>1 Jira field write</b> &middot; nothing else moved</div></div>'+
+  '<div class="note"><span>The seal rendered <b>after</b> the receipt, never before it. Code still waits for the LLD and the plan &mdash; approving a TASK never starts a build.</span></div>'+
+  '<div class="acts"><button class="btn g">Open receipt</button><button class="btn g">Open in Jira</button>'+
+  '<button class="btn g" data-ap="await">Reset demo</button></div>';
+ if(S.ap==="refused") return SRC+DIFF+
+  '<div class="rcpt bad"><div class="seal bad">&#9888; commit refused</div>'+
+  '<div class="mono">cas-receipt <b>cas_01J8&hellip;9c</b> &middot; base <b>4b098d6</b> &#8594; now <b>d31c7a0</b><br>'+
+  'drifted: InsertReplace.tsx (3 commits by another session)<br>'+
+  'external effect: <b>none</b> &middot; the approval was not spent</div></div>'+
+  '<div class="note"><span>The bound base moved between preview and commit, so the single attempt was refused rather than applied to state you never saw. Re-preview against the new HEAD to continue.</span></div>'+
+  '<div class="acts"><button class="btn p" data-ap="await">Re-preview at d31c7a0</button>'+
+  '<button class="btn g" data-ap="await">Reset demo</button></div>';
+ return SRC+DIFF+BIND+
+  '<div class="note"><span>This is read-only preparation. Approving patches <b>only</b> the TASK section, then hands the hash-verified prompt to Forge. Code still waits for the LLD and the plan.</span></div>'+
+  '<div class="acts"><button class="btn p" data-ap="go">Approve TASK</button><button class="btn">Edit</button>'+
+  '<button class="btn g">Regenerate</button><button class="btn g">Explain</button>'+
+  '<button class="btn g">Open in Jira</button><button class="btn g">Snooze</button>'+
+  '<label class="dtog"><input type="checkbox" id="dr"'+(S.drift?" checked":"")+'> simulate drift at commit</label></div>';
+}
+var MAST=[
+ ["One ticket arrived.<br>Nothing has moved.",
+  "A read-only Intake was opened. No code was read, no message was sent, nothing external happened.",
+  '<span class="hchip am"><i></i><b>1</b> new</span><span class="hchip"><i></i><b>0</b> awaiting you</span><span class="hchip gr"><i></i><b>0</b> external effects</span>'],
+ ["Context is assembling.<br>Still nothing has moved.",
+  "Freezing repo, branch and HEAD, keying rules per repo, then reading the call path before it says anything.",
+  '<span class="hchip cy"><i></i><b>4</b> repos keyed</span><span class="hchip cy"><i></i><b>20</b> rules loaded</span><span class="hchip gr"><i></i><b>0</b> external effects</span>'],
+ ["One decision<br>is waiting on you.",
+  "The packet is sealed and cited. Opening it is not approving it, and approving it does not start a build.",
+  '<span class="hchip am"><i></i><b>1</b> needs you</span><span class="hchip"><i></i><b>2</b> agents idle</span><span class="hchip gr"><i></i><b>0</b> external effects</span>'],
+ ["Building, in an<br>isolated worktree.",
+  "Your approved TASK became a plan, and the plan is running where it cannot touch your working tree.",
+  '<span class="hchip cy"><i></i><b>1</b> run active</span><span class="hchip"><i></i><b>2</b> files touched</span><span class="hchip gr"><i></i><b>1</b> external effect</span>'],
+ ["Checks are green.<br>The merge is yours.",
+  "Zeno stops here. Push and merge each need their own approval, and it will never take either for you.",
+  '<span class="hchip gr"><i></i><b>12</b> tests passed</span><span class="hchip am"><i></i><b>1</b> needs you</span><span class="hchip"><i></i>push <b>held</b></span>'],
+ ["Masked.",
+  "Someone could be looking. Counts and shape stay; senders, tickets, repos and payloads do not.",
+  '<span class="hchip am"><i></i><b>1</b> needs you</span><span class="hchip"><i></i>details <b>withheld</b></span>']
+];
+function buildCapsule(showCaps){
+ var pre = S.j===0
+  ? '<div class="pl" style="padding:15px;max-width:640px"><p class="k">Intake &middot; read-only</p><div style="font-weight:600">'+mk("WEBEXT-3514",11)+' assigned to you</div><div style="color:var(--ink-2);font-size:12.5px;margin-top:6px">A read-only Intake was created. Nothing else has moved &mdash; no code, no messages, no external effect.</div><div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"><span class="chip cy">notified</span><span class="chip">no external effect</span></div></div>'
+  : '<div class="pl lit" style="padding:15px;max-width:640px"><p class="k">Context assembling</p><div style="font-weight:600">Resolving authority &amp; exploring code</div><div style="color:var(--ink-2);font-size:12.5px;margin-top:6px">Freezing repo/branch/HEAD, loading rules and skills keyed per repo, exploring the call path, then searching meeting memory.</div><div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"><span class="chip cy">4 repos keyed</span><span class="chip">20 rules loaded</span><span class="chip am">awaiting memory</span></div></div>';
+ var mpre='<div class="pl" style="padding:15px;max-width:640px"><p class="k">Masked</p><div style="font-weight:600"><span class="mk">'+"█".repeat(16)+'</span></div><div style="color:var(--ink-2);font-size:12.5px;margin-top:6px">One read-only item is waiting. Its sender, ticket, repo and payload are withheld while masked.</div><div style="margin-top:10px"><button class="btn sm">Unmask on this device</button></div></div>';
+ return !showCaps ? (S.lock?mpre:pre)
+  : (S.lock
+     ? '<div class="l2 caps"><div class="masked"><div style="font-size:22px;margin-bottom:6px">&#128274;</div><b style="color:var(--ink)">Approval needed</b><div style="margin-top:5px">Locked screen, screen-share or meeting mode.<br>No sender, ticket, repo, branch or payload is shown.</div><div style="margin-top:11px"><button class="btn sm">Unlock to review</button></div></div></div>'
+     : '<div class="l2 caps ap-'+S.ap+'"><div class="hd"><p class="k" style="margin:0">'+CAPHD[S.ap]+'</p><div style="font-weight:600;font-size:14px;margin-top:3px">WEBEXT-3514 &mdash; TASK patch for your review</div></div><div class="bd">'+capBody()+'</div></div>');
+}
+function todayItems(){
+ return '<div style="margin-top:14px">'+
+  it("WEBEXT","WEBEXT-3514 &middot; insert/replace label","assigned 4m ago &middot; read-only Intake", S.j>=2?"Context ready &mdash; awaiting your approval":"Context assembling &mdash; nothing has moved", S.j>=4?["gr","verified"]:S.j>=3?["cy","building"]:S.j>=2?["am","needs you"]:["cy","assembling"],{key:"WEBEXT-3514",ops:false})+
+  it("OPS","WEBEXTOPS-812 &middot; toolbar flicker on Chrome 141","prod bug &middot; repro pass queued","Will study code and reproduce in an isolated QA profile before proposing a fix",["cy","repro queued"],{key:"WEBEXTOPS-812",ops:true})+
+  it("MR","!5122 compose-window alignment","CI green &middot; 15 sites","Awaiting your merge &mdash; push and merge each need approval",["am","needs you"])+
+  it("WEBEXT","WEBEXT-3488 &middot; sidepanel telemetry","assigned yesterday &middot; blocked on a dependency","Waiting on packages deploy &mdash; Zeno is holding, not retrying",["rd","blocked"])+
+  it("OPS","WEBEXTOPS-799 &middot; memory leak on close","triaged &middot; not yet started","Assigned for triage &mdash; parked until you pick it up",["","parked"])+
+ '</div>';
+}
+function fieldCanvas(){
+ return '<canvas id="field" role="img" aria-label="Standing Field: interactive map of Zeno agents, devices, repositories and sources. Drag to rotate, click a node to inspect. A list equivalent is available via the List button."></canvas>';
+}
+function mastBlock(){
+ var m=MAST[S.lock?5:S.j];
+ return '<p class="eyebrow">Zeno Command &middot; Thursday, 28 August</p>'+
+  '<h1>'+m[0]+'</h1><p class="sub2">'+m[1]+'</p><div class="hchips">'+m[2]+'</div>';
+}
+function nodeCard(){
+ if(!S.sel||S.fieldList)return '';
+ var n=g(S.sel), act, note='';
+ if(n.k==="core"){
+  act='<button class="btn sm g" data-clr="1">Close</button>';
+  note='<div class="ncnote">Not a workspace. The Orchestrator is the coordinating core — it routes least-scoped context to the agents and dispatches work into Forge or Counsel. You never open it; it opens things for you.</div>';
+ } else if(n.k==="repo"){
+  act='<button class="btn sm p" data-go="forge">Open in Forge</button><button class="btn sm g" data-clr="1">Close</button>';
+  note='<div class="ncnote">Opens this repo in <b>Forge</b> — the workspace where code is read, planned and (after approval) changed.</div>';
+ } else if(n.k==="agent"){
+  act='<button class="btn sm p" data-go="forge">Open its run in Forge</button><button class="btn sm g" data-clr="1">Close</button>';
+  note='<div class="ncnote">An agent the Orchestrator dispatched. Its live run opens in <b>Forge</b>; it cannot approve its own output.</div>';
+ } else if(n.k==="dev"){
+  act='<button class="btn sm g" data-nav-dev="1">Manage device</button><button class="btn sm g" data-clr="1">Close</button>';
+ } else {
+  act='<button class="btn sm g" data-go="command">View source</button><button class="btn sm g" data-clr="1">Close</button>';
+  note='<div class="ncnote">A source, not an authority. Read-only — it can be cited, never obeyed.</div>';
+ }
+ return '<div class="l2 nodecard"><div class="mono" style="font-size:9.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em">'+(n.k==="core"?"coordinating core":n.k)+'</div>'+
+  '<div style="font-weight:600;font-size:14px;margin:3px 0 5px">'+(S.lock?'<span class="mk">'+"█".repeat(11)+'</span>':n.l)+'</div>'+
+  '<div style="color:var(--ink-2);font-size:12px;line-height:1.5">'+(S.lock?"Withheld while masked.":n.d)+'</div>'+
+  (S.lock?'':note)+
+  '<div class="acts">'+act+'</div></div>';
+}
+function cmToday(){
+ var capsule=buildCapsule(S.j>=2);
+ var h2='<div class="h2row"><div><h2>Today</h2><p class="sub">5 assigned · each carries its own status · cited and privacy-aware.</p></div>'+
+  '<div class="tally mono"><span class="am">1</span> needs you<span class="sep"></span><span class="cy">2</span> in progress<span class="sep"></span><span class="rd">1</span> blocked<span class="sep"></span><span>1</span> parked</div></div>';
+ return '<div class="cmdmain">'+
+  '<section class="hero">'+
+   '<div class="fieldbox">'+fieldCanvas()+
+    '<div class="heroveil"></div>'+
+    '<div class="hcap">The Standing Field &middot; drag to turn &middot; click a node</div>'+
+   '</div>'+
+   '<div class="heromast">'+mastBlock()+'</div>'+
+   '<div class="field-tog"><button class="ic" id="fl-t" aria-pressed="'+(S.fieldList?"true":"false")+'">'+(S.fieldList?"&#9635; field":"&#9776; list")+'</button></div>'+
+   '<div class="fieldlist '+(S.fieldList?"on":"")+'" id="fl">'+N.map(function(n){
+     return '<div class="flrow" role="option" data-n="'+n.id+'" aria-selected="'+(S.sel===n.id?"true":"false")+'" tabindex="0"><span class="dot" style="border-color:'+(n.k==="core"?"var(--gold)":n.k==="dev"||n.k==="repo"?"var(--ink-3)":"var(--cyan)")+'"></span>'+(S.lock?'<span class="mk">'+"█".repeat(9)+'</span>':n.l)+'<span class="kind">'+n.k+'</span></div>';}).join('')+'</div>'+
+   nodeCard()+
+  '</section>'+
+  h2+capsule+todayItems()+
+ '</div>';
+}
+function vh(t2,s2,body){return '<div class="cmdmain"><h2>'+t2+'</h2><p class="sub">'+s2+'</p>'+body+'</div>';}
+function vApprovals(){
+ var hist='<div style="margin-top:16px"><div class="k" style="margin-bottom:8px">History</div>'+
+  it("T1",mk("WEBEXT-3514",11)+" &middot; skills manifest sealed","09:41 &middot; receipt 2f77&hellip;c1","")+
+  it("T1",mk("WEBEXT-3512",11)+" &middot; TASK approved","yesterday &middot; receipt jira_tsk_4c1&hellip;","Single-use &middot; spent")+
+  it("T2",mk("!5119",5)+" &middot; push approved","Tuesday &middot; provider receipt verified","")+
+ '</div>';
+ var body=(S.j>=2)?buildCapsule(true)+hist
+  :'<div class="pl" style="padding:18px;max-width:640px"><div style="font-weight:600">Nothing waits on you</div><div style="color:var(--ink-2);font-size:12.5px;margin-top:6px">Approvals appear here with the full payload, action tier, hash binding and expiry. Opening one never approves it.</div></div>'+hist;
+ return vh("Approvals","Single-use, hash-bound, tiered. The seal renders only after a receipt.",body);
+}
+function vAgents(){
+ var wst=["watching","retrieving","awaiting-approval","executing","verified"][S.j];
+ var ws_cls=S.j===2?"am":(S.j>=4?"gr":"cy");
+ function agc(nm,st2,cls,mdl2,tier,last,extra){
+  return '<div class="pl agc"><div class="agh"><b>'+nm+'</b><span class="chip '+cls+'">'+st2+'</span></div>'+
+   '<div class="agm">'+mdl2+'</div><div class="agr">'+last+'</div>'+
+   '<div class="acts" style="margin-top:9px"><span class="chip">'+tier+'</span>'+extra+
+   '<span class="sp"></span><button class="btn sm g">Pause</button>'+
+   (S.killArm?'<button class="btn sm" style="color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--rule))" data-kill>Confirm &mdash; revokes 1 lease</button>':'<button class="btn sm g" data-kill>Kill</button>')+
+   '</div></div>';
+ }
+ var body='<div class="aggrid">'+
+  agc("Work Agent",wst,ws_cls,"Auto &middot; local + Claude Code &middot; effort high","tier T1",
+      "Running: "+mk("WEBEXTOPS-812",12)+" &mdash; fix, run &amp; verify in browser",'<span class="chip gr">egress: local</span><button class="btn sm p" data-watch>Watch live &rsaquo;</button>')+
+  agc("Sarah &middot; Design","idle","","Sonnet-class &middot; local screenshots only","tier T1",
+      "Last: raised 2 cited defects to the internal channel &middot; yesterday","")+
+  agc("Counsel agent","standby","","Local ASR &middot; no egress","tier T0",
+      "Last: consent ledger entry &middot; Tuesday 14:02","")+
+ '</div>'+
+ '<div class="note" style="margin-top:13px;max-width:640px"><span>Kill is two-step because it revokes leases &mdash; a confirmation of <b>scope</b>, never a re-authentication. Pause is instant and safe.</span></div>';
+ return vh("Agents & runs","Every agent, its authority, and its last receipt.",body);
+}
+function vWork(){
+ var body='<div class="k" style="margin-bottom:8px">Active leases</div>'+
+  it("LEASE","Executor &middot; Phone","approvals only &middot; expires 18:00 today","One lease at a time prevents double-send")+
+  it("LEASE",mk("browser-add-on-3514-wt",18)+" worktree","isolated &middot; base "+mk("4b098d6",7),"Build runs here &mdash; your working tree is never touched")+
+  '<div class="k" style="margin:16px 0 8px">Processes</div>'+
+  it("PROC","zeno-code v0.4","local &middot; 0 egress connections","")+
+  '<div class="note" style="margin-top:13px;max-width:640px"><span>This Mac holds <b>no OS permission grants</b> &mdash; no Accessibility, Screen Recording, Microphone or Full Disk Access. Phase-0 scope, by ruling.</span></div>';
+ return vh("Workstation","What is running, what it may touch, and for how long.",body);
+}
+function vVault(){
+ var body=it("MD",mk("WEBEXT-3514",11)+" &middot; Context Pack v3","09:41 &middot; cited &middot; 4 code refs + 1 meeting note","Lineage: Jira intake &rarr; rules manifest &rarr; code exploration &rarr; sealed")+
+  it("MD","Counsel consent ledger","Tuesday &middot; 3 participants disclosed","")+
+  it("MD","Video evidence manifest","23&ndash;24 Aug &middot; hash-verified &middot; 2 files","")+
+  '<div class="note" style="margin-top:13px;max-width:640px"><span>Vault projects to a plain <b>Markdown root</b> you own. Reports version forward &mdash; a snapshot goes <i>stale</i>, it is never silently rewritten.</span></div>';
+ return vh("Vault","Governed memory. Everything cited, everything yours.",body);
+}
+function vDevices(){
+ var body=it("MAC","This Mac","dev host &middot; Phase-0 &middot; no permission grants","Runs disposable synthetic builds only")+
+  it("WIN","Windows pilot","<span class='chip am'>blocked &middot; B-002 specs pending</span>","57 acceptance criteria wait on edition/build, CPU/GPU/RAM, displays, mic, WSL2/Docker, admin")+
+  it("PH","Phone","paired &middot; approvals only &middot; lease active","Cannot browse memory or start builds");
+ return vh("Devices","Trust is per-device and earned, never assumed.",body);
+}
+function vInteg(){
+ var rows=[["Jira","read-only","gr","WEBEXT + WEBEXTOPS &middot; acting as "+mk("abheet.isher@quillbot.com",18)+" &middot; assignment &rarr; read-only Intake"]].concat(MCPS);
+ var body=rows.map(function(m){return '<div class="frow"><span class="nm">'+m[0]+'</span><span class="chip '+m[2]+'">'+m[1]+'</span></div><div class="sub2" style="padding:0 6px 8px">'+m[3]+'</div>';}).join('')+
+  '<div class="acts" style="margin-top:10px"><button class="btn sm g">Add integration</button><button class="btn sm g">Tool permissions</button></div>'+
+  '<div class="note" style="margin-top:13px;max-width:640px"><span>A connector is a <b>source, never an authority</b>. Its tools run under the same tier policy and the same approvals as everything else.</span></div>';
+ return vh("Integrations","Connected sources and their real states.",body);
+}
+function vSettings(){
+ function seg(items,attr,cur){return '<div class="segl">'+items.map(function(v){
+  return '<button data-'+attr+'="'+v[0]+'" aria-selected="'+(cur===v[0]?"true":"false")+'">'+v[1]+'</button>';}).join('')+'</div>';}
+ var body='<div class="set">'+
+  '<div class="setrow"><div><b>Theme</b><div class="sub2">Follows the OS, or your explicit choice. Applied instantly.</div></div>'+
+   seg([["system","System"],["dark","Dark"],["light","Light"]],"th",themeChoice())+'</div>'+
+  '<div class="setrow"><div><b>Motion</b><div class="sub2">Orbit, pulses and packet trails. Every animation maps to a real state.</div></div>'+
+   '<button class="ic" data-act="mo" aria-pressed="'+(!S.motion)+'">'+(S.motion?"on":"reduced")+'</button></div>'+
+  '<div class="setrow"><div><b>Depth &amp; glass</b><div class="sub2">2D flat mode removes blur and translucency entirely.</div></div>'+
+   '<button class="ic" data-act="flat" aria-pressed="'+(R.getAttribute("data-flat")==="1")+'">'+(R.getAttribute("data-flat")==="1"?"2D flat":"3D glass")+'</button></div>'+
+  '<div class="setrow"><div><b>Masked mode</b><div class="sub2">Hides senders, tickets, repos, transcripts and payloads &mdash; capture state stays visible. Toggle lives in the top bar.</div></div>'+
+   '<span class="chip '+(S.lock?"am":"")+'">'+(S.lock?"on":"off")+'</span></div>'+
+ '</div>'+
+ '<div class="note" style="margin-top:13px;max-width:640px"><span>Preferences are stored <b>on this device only</b> &mdash; nothing syncs, nothing leaves.</span></div>';
+ return vh("Settings","Yours to shape. Stored locally.",body);
+}
+function vAsk(){
+ var thread=
+  '<div class="amsg you"><div class="ab">what changed in the toolbar code this week, and did the flaky test finally get fixed?</div></div>'+
+  '<div class="amsg z"><div class="awho">Zeno &middot; Orchestrator</div>'+
+   '<div class="aroute mono">reached across <span class="chip">Forge</span><span class="chip">Vault</span><span class="chip">Jira</span> &middot; nothing changed</div>'+
+   '<div class="ab">Two things this week in <b>browser-add-on</b>:'+
+    '<ul class="mdul"><li><b>WEBEXT-3514</b> &mdash; insert/replace label, in review on <code>feat/WEBEXT-3514</code></li>'+
+    '<li><b>!5122</b> &mdash; compose-window alignment, CI-green on 15 sites, awaiting your merge</li></ul>'+
+    'The flaky test <code>InsertReplace.spec.ts</code> is green now &mdash; the fix bounded the retry loop.'+
+    '<div class="cite">cited &middot; 3 commits &middot; 1 meeting note &middot; Vault</div></div></div>'+
+  '<div class="amsg you"><div class="ab">ok, start the insert/replace ticket</div></div>'+
+  '<div class="amsg z"><div class="awho">Zeno &middot; Orchestrator</div>'+
+   '<div class="ab">That&rsquo;s a coding task &mdash; I&rsquo;ll open it in <b>Forge</b> with the context pack already assembled. Nothing runs until you approve the TASK.'+
+   '<div class="acts" style="margin-top:8px"><button class="btn sm p" data-go="forge">Open in Forge</button><button class="btn sm g">Show the plan</button></div></div></div>'+
+  S.ask.map(function(a){return '<div class="amsg you"><div class="ab">'+a+'</div></div><div class="amsg z"><div class="awho">Zeno &middot; Orchestrator</div><div class="ab">On it &mdash; routing to the right product and assembling cited context. Nothing acts without your approval.</div></div>';}).join('');
+ return '<div class="cmdmain askv">'+
+  '<div class="askhead"><h2>Ask Zeno</h2><p class="sub">One conversation with the whole system &mdash; it reaches across Forge, Counsel, Vault and your devices, cites what it finds, and routes work to the right product. It answers; it never acts without approval.</p></div>'+
+  '<div class="athread">'+thread+'</div>'+
+  '<div class="acompose"><button class="attach">&#128206;</button>'+
+   '<button class="mic'+(S.rec?" rec":"")+'" data-mic title="Push to talk &mdash; listens only while you hold it; never always-on">'+(S.rec?'&#9679;':'&#127908;')+'</button>'+
+   '<input id="ca2" placeholder="Ask across everything&hellip;  &crarr; to send" aria-label="Ask Zeno">'+
+   '<button class="btn sm p" data-ask2>Send</button></div>'+
+  '<div class="crow mono" style="padding:8px 2px 0"><span class="chip cy">Auto</span><span style="color:var(--ink-3)">system-wide &middot; cross-product &middot; cited</span></div>'+
+ '</div>';
+}
+function intakeSteps(ops){
+ var s=[
+  ["09:41:02","Ticket assigned &rarr; <b>read-only Intake</b> opened","No code read yet, no message sent, no external effect.","open"],
+  ["09:41:03","Froze <b>browser-add-on @ 4b098d6</b> (repo &middot; branch &middot; HEAD)","A snapshot, so nothing shifts under the analysis.","read"],
+  ["09:41:04","Loaded <b>20 rules + skills</b>, keyed per repo","quillbot-lt-conventions and 19 more &mdash; how your team writes code.","read"],
+  ["09:41:06","Explored the call path &mdash; located the reported behaviour","Found the toolbar render path and the recent change around it.","read"]
+ ];
+ if(ops) s.push(
+  ["09:41:08","<b>Repro pass</b> &mdash; formed a hypothesis","Chrome 141 timing change; planned an isolated-QA-profile repro on a <i>local</i> build.","repro"],
+  ["09:41:09","Repro is <b>read-only observation</b> &mdash; and gated","Driving a real browser needs the pilot (Gate 3). Code-level analysis done now; live repro waits.","hold"]
+ );
+ s.push(
+  ["09:41:10","Searched meeting memory (NeoSapien)","Cited as supplemental &mdash; tagged, never a silent dependency.","read"],
+  ["09:41:11","Sealed a <b>cited context pack</b> &mdash; ready for you","Everything above, with sources and ages. This is preparation, not action.","seal"]
+ );
+ return s;
+}
+var INTIMER=0;
+function intakeArm(n){ if(INTIMER)return;
+ INTIMER=setInterval(function(){ if(S.nav!=="intake"){clearInterval(INTIMER);INTIMER=0;return;}
+  if(S.inStep<n){S.inStep++;render();} else {clearInterval(INTIMER);INTIMER=0;} }, S.motion?820:0);
+ if(!S.motion){S.inStep=n;} }
+function vIntake(){
+ var ops=S.inOps, key=S.inKey||"WEBEXT-3514", steps=intakeSteps(ops), shown=Math.min(S.inStep,steps.length);
+ var done=shown>=steps.length;
+ var rows=steps.slice(0,shown).map(function(st,i){
+  var last=i===shown-1;
+  return '<div class="instep '+st[3]+(last&&!done?" now":"")+'">'+
+   '<span class="intm mono">'+st[0]+'</span>'+
+   '<span class="indot"></span>'+
+   '<div class="inbody"><div class="inh">'+st[1]+'</div><div class="inx">'+st[2]+'</div></div>'+
+   '<span class="inro mono">read-only</span></div>';
+ }).join('');
+ return '<div class="cmdmain inview">'+
+  '<button class="back mono" data-nav="today">&lsaquo; Today</button>'+
+  '<div class="inhead"><span class="b">'+(ops?"OPS":"WEBEXT")+'</span>'+
+   '<div><h2>'+key+'</h2><p class="sub">Read-only intake &mdash; watch it prepare. It has touched nothing.</p></div></div>'+
+  '<div class="intally"><span class="tl"><b>0</b> code changes</span><span class="tl"><b>0</b> messages</span><span class="tl gr"><b>0</b> external effects</span><span class="sp"></span>'+(done?'<span class="chip am">awaiting your approval</span>':'<span class="chip cy">preparing&hellip;</span>')+'</div>'+
+  '<div class="instream">'+rows+(!done?'<div class="instep pending"><span class="intm mono">&middot;&middot;&middot;</span><span class="indot"></span><div class="inbody"><div class="inh" style="color:var(--ink-3)">working&hellip;</div></div></div>':'')+'</div>'+
+  (done?'<div class="l2 caps" style="margin-top:6px"><div class="hd"><p class="k" style="margin:0">Context ready</p><div style="font-weight:600;font-size:14px;margin-top:3px">'+key+' &mdash; nothing has moved</div></div><div class="bd"><div class="note"><span>The intake is <b>preparation only</b>. A fix still passes the full chain &mdash; sealed TASK &rarr; <b>your approval</b> &rarr; LLD &rarr; plan &rarr; build &rarr; every effect gated one at a time. Approving a pack never starts a build.</span></div><div class="acts"><button class="btn sm p" data-go="forge">Open in Forge</button>'+(ops?'<button class="btn sm g">Run repro (needs pilot)</button>':'')+'<button class="btn sm g" data-nav="today">Back</button></div></div></div>':'')+
+  (done?'':'<button class="btn sm g" data-inskip style="margin-top:10px">Skip to ready</button>')+
+ '</div>';
+}
+function actSteps(){
+ return [
+  ["read","Sealed context pack &mdash; "+mk("WEBEXTOPS-812",12),"cited &middot; 4 code refs &middot; 1 meeting note","ro"],
+  ["cc","Launched <b>Claude Code</b> (headless) in an isolated worktree","hash-verified prompt handed off &middot; sanctioned provider for company code","cc"],
+  ["ccout","<div class='ccstream'><div class='cch'><span class='dot' style='background:var(--gold)'></span>Claude Code &middot; live output</div>"+
+    "<div class='ccl'>&#9881; read InsertReplace.tsx:138&ndash;150</div>"+
+    "<div class='ccl'>&#9881; read toolbar/render.ts</div>"+
+    "<div class='ccl think'>the flicker is a double-render on the Chrome 141 paint timing&hellip;</div>"+
+    "<div class='ccl'>&#9998; wrote fix &middot; 2 files &middot; minimal diff</div>"+
+    "<div class='ccl'>&#9889; ran tests &rarr; <b style='color:var(--green)'>12 passed</b></div></div>","Zeno streams and <b>verifies</b> its output &mdash; it doesn't take Claude's word, it re-runs the tests itself","cc"],
+  ["build","Built the extension in the sandbox","dist ok &middot; no network &middot; isolated worktree","ro"],
+  ["browser","Loaded into an <b>isolated QA browser profile</b>","not your real Chrome &mdash; a clean profile, your logins untouched","ro"],
+  ["verify","Navigated, triggered the toolbar, captured before/after","observation only &middot; nothing external changed","ro"],
+  ["done","<b>Verified</b> &mdash; flicker gone on Chrome 141","Fix sits in the worktree. Push / MR need your approval, gated one at a time.","seal"]
+ ];
+}
+var ACTIMER=0;
+function actArm(n){ if(ACTIMER||S.actPaused)return;
+ ACTIMER=setInterval(function(){ if(!(S.s==="command"&&S.nav==="activity")||S.actPaused){clearInterval(ACTIMER);ACTIMER=0;return;}
+  if(S.actStep<n){S.actStep++;render();} else {clearInterval(ACTIMER);ACTIMER=0;} }, S.motion?1050:0);
+ if(!S.motion)S.actStep=n; }
+function parallelBody(shown,done){
+ var lanes=[
+  {id:"A",who:"Qwen2.5-Coder-14B",tag:"local",appr:"minimal diff",lines:["read call path","wrote 2-file fix","tests 12/12"],tests:"12/12",files:2,win:true},
+  {id:"B",who:"Claude Code",tag:"sonnet",appr:"defensive",lines:["read call path + tests","added guard clauses","tests 12/12"],tests:"12/12",files:4,win:false},
+  {id:"C",who:"DeepSeek-Coder",tag:"local",appr:"refactor-first",lines:["read 6 files","restructured render","tests 11/12"],tests:"11/12",files:6,win:false}
+ ];
+ var laneEls=lanes.map(function(l){
+  var prog=Math.min(shown, l.lines.length+1); // +1 = header revealed first
+  var lns=l.lines.slice(0,Math.max(0,prog-1)).map(function(x,i){
+   var t=(l.tag==="sonnet"?"&#9670; ":"&#9881; ");
+   return '<div class="lln'+(x.indexOf("tests")===0?" tst":"")+'">'+(x.indexOf("tests")===0?'&#9889; ':t)+x+'</div>';}).join('');
+  var laneDone=prog>l.lines.length;
+  return '<div class="lane'+(done&&l.win?" win":"")+'">'+
+   '<div class="laneh"><span class="lid">Agent '+l.id+'</span><span class="lwho '+(l.tag==="sonnet"?"cc":"")+'">'+l.who+'</span>'+
+    (done&&l.win?'<span class="chip gr" style="margin-left:auto">winner</span>':'<span class="lstat">'+(laneDone?"done":"working&hellip;")+'</span>')+'</div>'+
+   '<div class="lappr">'+l.appr+' &middot; isolated worktree</div>'+
+   '<div class="llns">'+lns+(!laneDone&&!S.actPaused?'<div class="lln pend">working&hellip;</div>':'')+'</div>'+
+  '</div>';
+ }).join('');
+ var sel = done
+  ? '<div class="selbanner"><div class="selh"><b>Agent A wins</b> &mdash; smallest correct diff, all tests green, follows your repo conventions.</div>'+
+    '<div class="selx">The <b>other two ran too</b> (also sandboxed, nothing applied) and are discarded with receipts. Only Agent A enters the approval capsule &mdash; gated exactly like a single change.</div>'+
+    '<div class="acts" style="margin-top:8px"><button class="btn sm p" data-go="command" data-nav="approvals">Send winner to approval</button><button class="btn sm g" data-go="forge">Compare diffs</button></div></div>'
+  : '<div class="selpending mono">ranking begins once all three finish &middot; by tests, diff size and conventions</div>';
+ return '<div class="lanes">'+laneEls+'</div>'+sel;
+}
+function vActivity(){
+ var steps=actSteps(), shown=Math.min(S.actStep,steps.length), done=shown>=steps.length;
+ var rows=steps.slice(0,shown).map(function(s,i){
+  var last=i===shown-1;
+  return '<div class="actrow '+s[3]+(last&&!done&&!S.actPaused?" now":"")+'">'+
+   '<span class="acti">'+(s[0]==="cc"||s[0]==="ccout"?'&#9670;':s[0]==="verify"||s[0]==="browser"?'&#9680;':s[0]==="seal"?'&#10003;':'&#9679;')+'</span>'+
+   '<div class="actb"><div class="acth">'+s[1]+'</div><div class="actx">'+s[2]+'</div></div>'+
+   (s[3]==="ro"?'<span class="inro mono">read-only</span>':s[3]==="cc"?'<span class="inro mono" style="color:var(--gold);border-color:color-mix(in srgb,var(--gold) 40%,var(--rule))">claude code</span>':'')+
+  '</div>';
+ }).join('');
+ var frame = shown>=6
+  ? '<div class="scr-good">&#10003; toolbar renders clean<br><span>Chrome 141 &middot; QA profile</span></div>'
+  : shown>=5 ? '<div class="scr-load">loading extension&hellip;<br><span>isolated QA profile</span></div>'
+  : '<div class="scr-idle">the driven browser appears here<br><span>a sandbox, not your Chrome</span></div>';
+ return '<div class="cmdmain actview">'+
+  '<button class="back mono" data-nav="agents">&lsaquo; Agents &amp; runs</button>'+
+  '<div class="acthd"><div><p class="eyebrow2 mono">'+(done?"completed":S.actPaused?"paused":"running")+'</p><h2>Fix, run &amp; verify &mdash; '+mk("WEBEXTOPS-812",12)+'</h2></div>'+
+   '<div class="actmode"><button class="'+(!S.actPar?"on":"")+'" data-actmode="0">&#9670; 1 agent</button><button class="'+(S.actPar?"on":"")+'" data-actmode="1">&#9670;&#9670;&#9670; 3 parallel</button></div>'+
+   '<div class="actctl">'+(done?'':'<button class="btn sm g" data-actpause>'+(S.actPaused?"&#9654; Resume":"&#10073;&#10073; Pause")+'</button>')+
+    '<button class="btn sm" style="color:var(--red);border:1px solid color-mix(in srgb,var(--red) 45%,var(--rule))" data-actkill>&#9632; Kill</button></div></div>'+
+  '<div class="acttally">'+(S.actPar
+     ? '<span class="tl"><b>3</b> agents &middot; parallel</span><span class="tl"><b>3</b> isolated sandboxes</span><span class="tl gr"><b>0</b> external effects</span>'
+     : '<span class="tl"><b>1</b> agent &middot; Claude Code</span><span class="tl"><b>2</b> files (worktree)</span><span class="tl gr"><b>0</b> external effects</span>')+
+   '<span class="sp"></span>'+(done?'<span class="chip am">'+(S.actPar?"winner awaits you":"push awaits you")+'</span>':'<span class="chip cy">working&hellip;</span>')+'</div>'+
+  (S.actPar?parallelBody(shown,done):
+  '<div class="actgrid">'+
+   '<div class="actstream">'+rows+(!done&&!S.actPaused?'<div class="actrow pending"><span class="acti">&#9679;</span><div class="actb"><div class="acth" style="color:var(--ink-3);font-style:italic">working&hellip;</div></div></div>':'')+'</div>'+
+   '<div class="actscreen"><div class="scrbar mono"><span class="d1"></span><span class="d2"></span><span class="d3"></span> QA browser &middot; sandbox</div>'+frame+'</div>'+
+  '</div>')+
+  (done?'<div class="note" style="margin-top:4px"><span>Claude Code drafted this in a sandbox and Zeno verified it. <b>Nothing shipped.</b> The push and the MR are external writes &mdash; each waits for your approval, gated by the kernel.</span></div><div class="acts"><button class="btn sm p" data-go="forge">Review the diff in Forge</button><button class="btn sm g" data-nav="agents">Back</button></div>':'')+
+  (!done?'<button class="btn sm g" data-actskip style="margin-top:10px">Skip to end</button>':'')+
+ '</div>';
+}
+function rCommand(){
+ var el=document.getElementById("s-command");
+ var NAVS=[["today","Today &amp; Attention",3],["ask","Ask Zeno",0],["approvals","Approvals",(S.j>=2&&S.ap!=="verified")?1:0],
+  ["agents","Agents &amp; runs",2],["work","Workstation",0],["vault","Vault",0],
+  ["devices","Devices",3],["integrations","Integrations",0],["settings","Settings",0]];
+ var content = S.nav==="today"?cmToday()
+  : S.nav==="intake"?vIntake()
+  : S.nav==="activity"?vActivity()
+  : S.nav==="ask"?vAsk()
+  : S.nav==="approvals"?vApprovals()
+  : S.nav==="agents"?vAgents()
+  : S.nav==="work"?vWork()
+  : S.nav==="vault"?vVault()
+  : S.nav==="devices"?vDevices()
+  : S.nav==="integrations"?vInteg()
+  : vSettings();
+ el.innerHTML=
+ '<div class="cmd">'+
+  '<div class="rail"><p class="k">Zeno Command</p><nav>'+
+   NAVS.map(function(n){return '<button data-nav="'+n[0]+'" aria-current="'+(S.nav===n[0]?"true":"false")+'">'+n[1]+(n[2]?'<span class="n">'+n[2]+'</span>':'')+'</button>';}).join('')+
+  '</nav>'+
+   '<div class="legend" style="margin-top:14px"><span><i style="background:var(--green)"></i>verified</span><span><i style="background:var(--amber)"></i>needs you</span><span><i style="background:var(--red)"></i>blocked</span></div></div>'+
+  content+
+ '</div>';
+ if(S.nav==="today"&&!S.fieldList) setTimeout(fieldOn,20); else stopF();
+ if(S.nav==="intake"){var _n=intakeSteps(S.inOps).length; if(S.inStep<_n)intakeArm(_n);}
+ if(S.nav==="activity"){var _a=S.actPar?5:actSteps().length; if(S.actStep<_a&&!S.actPaused)actArm(_a);}
+}
+function it(b,t,m,w,stat,intake){
+ if(S.lock){b="&#9679;";t='<span class="mk">'+"█".repeat(14)+'</span>';m="item withheld · masked";w="";stat=stat?["","withheld"]:null;intake=null;}
+ var pill=stat?'<span class="ist '+stat[0]+'">'+stat[1]+'</span>':'';
+ var attr=intake?' data-intake="'+intake.key+'" data-ops="'+(intake.ops?1:0)+'" role="button" tabindex="0"':'';
+ var chev=intake?'<span class="ichev">view intake &rsaquo;</span>':'';
+ return '<div class="pl item'+(S.lock?" mkd":"")+(intake?" clk":"")+'"'+attr+'><span class="b">'+b+'</span><div style="flex:1;min-width:0"><div class="itop"><div class="t">'+t+'</div>'+pill+'</div><div class="m">'+m+'</div>'+(w?'<div class="w">'+w+'</div>':'')+chev+'</div></div>';}
+
+/* ===================== FORGE ===================== */
+var FILES=[["src/toolbar/","InsertReplace.tsx",1],["src/toolbar/","Toolbar.tsx",0],["src/lt/","LTAssistant.ts",0],["tests/","insertReplace.spec.ts",0]];
+var PANW={
+ explorer:function(){ return '<div class="tree">'+FILES.map(function(f,i){
+   return (i===0||FILES[i-1][0]!==f[0]?'<div class="d">'+f[0]+'</div>':'')+
+   '<button aria-current="'+(f[2]?"true":"false")+'">'+(f[2]?'<span style="color:var(--green)">&#9679;</span>':'<span style="color:var(--ink-3)">&#9675;</span>')+f[1]+'</button>';}).join('')+'</div>'; },
+ rules:function(){ return '<div class="pw">'+
+  '<div class="warn"><b>Conflict &mdash; blocks a cross-repo build</b><div>identity-rule.mdc resolves to <b>3 different hashes</b> across packages / edit-stream / rest-server. Rules stay scoped per repo; a run spanning them needs your ruling first.</div>'+
+  '<div class="acts"><button class="btn sm">Compare 3</button><button class="btn sm g">Scope per repo</button></div></div>'+
+  '<div class="d" style="margin-top:11px">active for browser-add-on</div>'+
+  RULES.map(function(r){return '<div class="frow" title="'+r[0]+'"><span class="nm">'+r[1]+'</span><span class="chip '+r[3]+'">'+r[2]+'</span></div>';}).join('')+
+  '<div class="d" style="margin-top:12px">skills</div>'+
+  '<div class="frow"><span class="nm">quillbot-lt-conventions</span><span class="chip gr">loaded &#10003;</span></div>'+
+  '<div class="frow"><span class="nm">lld-artifact</span><span class="chip">on demand</span></div>'+
+  '<div class="frow"><span class="nm">qb-design</span><span class="chip">on demand</span></div>'+
+  '<div class="hint">Nothing loads implicitly. Every rule and skill in a run is listed with its hash in the run receipt.</div></div>'; },
+ mcp:function(){ return '<div class="pw">'+
+  '<div class="d">servers</div>'+
+  MCPS.map(function(m){return '<div class="frow"><span class="nm">'+m[0]+'</span><span class="chip '+m[2]+'">'+m[1]+'</span></div>'+
+   '<div class="sub2">'+m[3]+'</div>';}).join('')+
+  '<div class="hint">A connector is a source, never an authority. Tools it exposes still run under the same tier policy and the same approval.</div>'+
+  '<div class="acts"><button class="btn sm g">Add server</button><button class="btn sm g">Tool permissions</button></div></div>'; },
+ scm:function(){ return '<div class="pw"><div class="d">working tree</div>'+
+  '<div class="frow"><span class="nm">InsertReplace.tsx</span><span class="chip am">modified</span></div>'+
+  '<div class="frow"><span class="nm">LTAssistant.ts</span><span class="chip am">modified</span></div>'+
+  '<div class="d" style="margin-top:12px">branch</div>'+
+  '<div class="sub2">feat/WEBEXT-3514 &middot; worktree &middot; base 4b098d6</div>'+
+  '<div class="warn"><b>Commit and push are owner-only</b><div>Forge stages and previews. It never commits and never pushes &mdash; those stay your hands, by policy, not by setting.</div></div></div>'; },
+ tests:function(){ return '<div class="pw"><div class="d">last run</div>'+
+  '<div class="frow"><span class="nm">InsertReplace.spec.ts</span><span class="chip gr">12 passed</span></div>'+
+  '<div class="frow"><span class="nm">LTAssistant.spec.ts</span><span class="chip">not run</span></div>'+
+  '<div class="hint">1.8s &middot; local &middot; no network. Coverage thresholds are read from the repo, never invented.</div></div>'; },
+ search:function(){ return '<div class="pw"><div class="d">search</div><div class="sub2">Exact and symbol search across the 4 keyed repos. Results cite file and line; nothing is summarised away.</div>'+
+  '<div class="frow"><span class="nm">diffWords</span><span class="chip">14 refs &middot; 3 repos</span></div>'+
+  '<div class="frow"><span class="nm">isSingleBlock</span><span class="chip">2 refs</span></div></div>'; },
+ debug:function(){ return '<div class="pw"><div class="d">debug</div><div class="sub2">No session attached. Attaching a debugger is an explicit action and is listed in the run receipt.</div></div>'; },
+ tasks:function(){ return '<div class="pw"><div class="d">assigned to you</div>'+
+  '<div class="frow"><span class="mono h">WEBEXT</span><span class="nm">3514 insert/replace</span><span class="chip am">in Forge</span></div>'+
+  '<div class="frow"><span class="mono h">OPS</span><span class="nm">812 toolbar flicker</span><span class="chip">repro queued</span></div>'+
+  '<div class="hint">Read-only mirror. Zeno never moves a ticket without your approval.</div></div>'; }
+};
+var PANS=[["explorer","Explorer"],["search","Search"],["scm","Source control"],["rules","Rules &amp; skills"],
+ ["mcp","MCP servers"],["tests","Tests"],["debug","Debug"],["tasks","Task board"]];
+var RULES=[["d12383ec","identity-rule.mdc","scoped","am"],["a4f1","react-conventions.mdc","active","gr"],
+ ["7c02","testing-rules.mdc","active","gr"],["b918","commit-style.mdc","active","gr"],
+ ["e551","a11y-rules.mdc","active","gr"],["0d3a","+15 more","keyed",""]];
+var MCPS=[["Figma","connected","gr","Design context, read-only. Screenshots and variables."],
+ ["NeoSapien","undocumented","rd","Officialness unverified &mdash; queries stay blocked until you rule on it."],
+ ["GitLab","needs auth","am","OAuth not granted in this session. No writes exist regardless."],
+ ["Wispr Flow","deferred","","Present, unqueried. Role undecided."]];
+var RUNS=[
+ {id:"A",appr:"minimal diff",model:"Qwen2.5-Coder-14B · local",tests:"12/12",files:2,churn:"none",win:true,
+  note:"Won on the rule: smallest correct change, all tests green, zero unrelated churn, obeys quillbot-lt-conventions + lint."},
+ {id:"B",appr:"defensive · extra guards",model:"Claude Code · Sonnet",tests:"12/12",files:4,churn:"low",win:false,
+  note:"Also green, but adds guard clauses the task didn't ask for — more surface to review."},
+ {id:"C",appr:"refactor-first",model:"DeepSeek-Coder · local",tests:"11/12",files:6,churn:"high",win:false,
+  note:"One test red; touches 6 files. Interesting approach, not this task's scope."}
+];
+function runsPanel(){
+ var rows=RUNS.map(function(r){
+  var ok=r.tests.split("/")[0]===r.tests.split("/")[1];
+  return '<div class="run'+(r.win?" win":"")+'">'+
+   '<div class="rh"><span class="rid">Agent '+r.id+'</span><span class="rappr">'+r.appr+'</span>'+
+    (r.win?'<span class="chip gr" style="margin-left:auto">recommended</span>':'<span class="sp"></span>')+'</div>'+
+   '<div class="rmeta"><span class="chip cy">'+r.model+'</span><span class="chip '+(ok?"gr":"rd")+'">'+r.tests+' tests</span>'+
+    '<span class="chip">'+r.files+' files</span><span class="chip">churn: '+r.churn+'</span></div>'+
+   '<div class="rnote">'+r.note+'</div>'+
+   '<div class="acts" style="margin-top:8px">'+(r.win
+     ? '<button class="btn sm p" data-go="command">Send winner to approval</button><button class="btn sm g">Open diff</button>'
+     : '<button class="btn sm g">Open diff</button><button class="btn sm g">Make this the winner</button>')+'</div>'+
+  '</div>';
+ }).join('');
+ return '<div class="runsp">'+
+  '<div class="rhead"><b style="color:var(--ink)">3 agents ran this task in parallel</b>'+
+   '<div class="sub2">Zeno routed this coding task to <b style="color:var(--ink-2)">coder-tuned models</b> (best fit for the task type), ran them in isolated sandboxes, then ranked by tests, diff size and rule conformance.</div></div>'+
+   '<div class="route mono"><span class="chip">task type: code-edit</span> <span style="color:var(--ink-3)">&rarr; routed to coder models &middot; a reasoning task would route elsewhere</span></div>'+
+   '<div class="selrule"><b>Selection rule:</b> Forge prefers the <b>smallest, cleanest</b> change that <b>passes tests and follows your repo conventions</b> (rules + lint) &mdash; not the cleverest or the largest. Ties break toward less churn.</div>'+
+  rows+
+  '<div class="note" style="margin-top:4px"><span><b>Nothing was applied.</b> Three proposals, zero effects &mdash; each ran in an isolated worktree and none can commit. Only the winner you pick enters the approval capsule, and it is gated exactly like a single change.</span></div>'+
+ '</div>';
+}
+function rForge(){
+ var el=document.getElementById("s-forge");
+ var building=S.j>=3, ci=S.j>=4;
+ var chat=
+  '<div class="msg"><div class="who">you</div><div class="bub">Why does the single-block case need a &lt;p&gt; wrap?</div></div>'+
+  '<div class="msg me"><div class="who">Zeno Forge <span class="mchip">Auto &middot; 14B</span></div>'+
+   '<div class="think">Read the call path in InsertReplace.tsx, then checked diffWords output shape&hellip;</div>'+
+   '<div class="tool"><span class="th">&#9881; read</span> InsertReplace.tsx:138&ndash;145 <span class="ok">&#10003;</span></div>'+
+   '<div class="bub">Because <code>diffWords</code> returns inline parts with <b>no block ancestor</b> when the range sits inside one block. Without the wrap, the replacement loses paragraph semantics on insert.'+
+   '<div class="codeblk"><div class="cbhd mono">ts</div><pre>if (isSingleBlock(range))\n  wrapParagraph(parts);   <span class="cm">// preserves the &lt;p&gt;</span></pre></div>'+
+   '<ul class="mdul"><li>green on all 12 tests</li><li>no unrelated churn</li></ul>'+
+   '<div class="cite" data-jump="1">&#8599; InsertReplace.tsx:142 &middot; browser-add-on</div></div></div>'+
+  S.ask.map(function(a){return '<div class="msg"><div class="who">you</div><div class="bub">'+a+'</div></div><div class="msg me"><div class="who">Zeno Forge</div><div class="bub">Answered from the frozen context at HEAD 4b098d6 &mdash; cited, read-only. No file was modified.</div></div>';}).join('')+
+  (S.fbusy?'<div class="msg me"><div class="who">Zeno Forge</div><div class="bub streaming"><span class="dots"><i></i><i></i><i></i></span> working&hellip;</div></div>':'');
+ var lens='<div style="font-size:11.5px;color:var(--ink-2)">'+
+  '<div style="margin-bottom:8px"><b style="color:var(--ink)">Rules &amp; skills active</b> <span class="chip cy" style="margin-left:4px">per-repo keyed</span></div>'+
+  ['quillbot-lt-conventions <span class="chip gr">skill</span>','general-coding.mdc','react-extension-patterns.mdc','toolbar.mdc','lifecycle-and-cleanup.mdc','unit-testing.mdc'].map(function(r){
+   return '<div style="display:flex;gap:7px;padding:4px 0;border-bottom:1px solid var(--rule)"><span class="mono" style="font-size:10px;color:var(--ink-3);width:52px">'+Math.random().toString(16).slice(2,8)+'</span><span>'+r+'</span></div>';}).join('')+
+  '<div style="margin-top:9px;padding:8px 10px;background:var(--g4);border:1px solid color-mix(in srgb,var(--amber) 40%,var(--rule));border-radius:7px">'+
+  '<b style="color:var(--amber);font-size:11px">CONFLICT &mdash; blocks Build</b><div style="margin-top:4px">identity-rule.mdc differs across packages / edit-stream / rest-server (3 hashes). Scoped per repo; resolve before a cross-repo build.</div></div>'+
+  '<div style="margin-top:9px"><b style="color:var(--ink)">OMITTED</b><div style="color:var(--ink-3);margin-top:3px">14 rules not triggered &middot; 3 repos out of scope for this task</div></div></div>';
+ el.innerHTML=
+ '<div class="forge">'+
+  '<div class="rgA">'+
+   '<button class="mdl" id="ws" style="width:100%" aria-expanded="'+S.wsPop+'"><span style="color:var(--ink-3)">&#9776;</span><b>'+mk(S.repo,12)+'</b><span class="sp"></span><span class="mono" style="font-size:9.5px;color:var(--ink-3)">+3</span></button>'+
+   '<div class="panbody">'+PANW[S.pan]()+'</div>'+
+   '<div class="panbar"><div class="d">panels</div>'+
+   '<div class="tree">'+PANS.map(function(p){return '<button data-pan="'+p[0]+'" aria-current="'+(p[0]===S.pan?"true":"false")+'">'+p[1]+'</button>';}).join('')+'</div></div>'+
+  '</div>'+
+  (S.lock?'<div class="l2 lpill fglock"><span class="dot" style="background:var(--amber)"></span>work surfaces withheld &middot; masked</div>':'')+
+  '<div class="rgB">'+
+   '<div class="crumbs mono">'+mk("browser-add-on",13)+' <i>&rsaquo;</i> src/toolbar <i>&rsaquo;</i> <b>InsertReplace.tsx</b>'+
+    '<span class="sp"></span><span class="chip go">'+mk("feat/WEBEXT-3514",15)+' &middot; worktree</span></div>'+
+   '<div class="tabs"><span class="tb" aria-selected="true"><span class="fdot"></span>InsertReplace.tsx</span><span class="tb">LTAssistant.ts</span>'+
+    '<span class="sp"></span></div>'+
+   '<div class="edwrap"><div class="code" id="codebox">'+
+    row(138,'<span class="cm">// resolve only the changed range</span>')+
+    row(139,'<span class="kw">const</span> range = resolveRange(node);')+
+    row(140,'')+
+    row(141,'<span class="kw">export function</span> applyEdit(prev, next, node) {')+
+    (building
+     ? row(142,'  <span class="kw">const</span> parts = diffWords(prev, next, {<span class="st"> intraSpace</span>: <span class="kw">true</span> });','add')+row(143,'  <span class="kw">if</span> (isSingleBlock(range)) wrapParagraph(parts);','add')
+     : row(142,'  <span class="cm">// awaiting approved LLD + plan before any edit</span>','hl')+row(143,''))+
+    row(144,'  <span class="kw">return</span> commit(parts);')+
+    row(145,'}')+
+   '</div>'+
+   '<div class="mini" aria-hidden="true"><i style="top:8%"></i><i style="top:14%;width:70%"></i><i style="top:22%;width:52%"></i><i style="top:34%;width:80%"></i><i style="top:46%;width:64%"></i><i class="vp" style="top:40%"></i><i style="top:60%;width:58%"></i><i style="top:72%;width:74%"></i><i style="top:84%;width:40%"></i></div>'+
+   '</div></div>'+
+  '<div class="rgC">'+
+   '<div class="sesrow mono"><span class="sesname">&#9662; session &middot; '+mk("WEBEXT-3514 insert/replace",20)+'</span><button class="sesnew" title="New session">+ new</button></div>'+
+   '<div class="insp-tabs">'+["chat","plan","runs","actions","lens"].map(function(t){return '<button data-i="'+t+'" aria-selected="'+(S.insp===t?"true":"false")+'">'+t[0].toUpperCase()+t.slice(1)+'</button>';}).join('')+'</div>'+
+   '<div class="insp-bd">'+
+    (S.insp==="chat"?chat:
+     S.insp==="runs"?runsPanel():
+     S.insp==="lens"?lens:
+     S.insp==="plan"?'<div style="font-size:12px;color:var(--ink-2)"><b style="color:var(--ink)">Plan &mdash; awaiting approval</b><ol style="padding-left:17px;margin-top:7px;line-height:1.7"><li>Add intraSpace diffWords handling</li><li>Gate &lt;p&gt; wrap on isSingleBlock</li><li>Regression test for the drift case</li></ol><div class="note" style="margin-top:9px"><span>Build cannot start until this plan and the LLD are approved.</span></div></div>'
+     :'<div>'+
+      ev("09:41","Context Readiness <b>passed</b> &middot; 4 repos keyed")+
+      ev("09:41","Rules loaded &middot; <b>browser-add-on (20)</b>")+
+      (S.j>=2?ev("09:43","TASK approved &middot; handoff hash <b>verified</b>"):"")+
+      (building?ev("09:44","<b>Building</b> in isolated worktree…","act")+ev("09:44","2 files &middot; minimal diff"):"")+
+      (ci?ev("09:47","Targeted tests <b>green</b> &middot; browser QA ok")+ev("09:47","CI: <b>local preflight</b> only &mdash; rerun waits for you"):"")+
+     '</div>')+
+   '</div>'+
+   (S.fq && S.fq.length?'<div class="qstrip mono">'+S.fq.length+' queued &middot; sent while it\'s working, run in order'+S.fq.map(function(q){return '<span class="qmsg">'+q+'</span>';}).join('')+'</div>':'')+
+   '<div class="compose"><button class="attach" title="Attach file / image">&#128206;</button>'+
+    '<input id="fq" placeholder="Ask about this run&hellip;  &crarr; to send" aria-label="Ask Forge">'+
+    (S.fbusy?'<button class="btn sm" id="fstop" style="color:var(--red);border:1px solid color-mix(in srgb,var(--red) 45%,var(--rule))" data-fstop>&#9632; Stop</button>':'<button class="btn sm p" data-send="1">Send</button>')+
+   '</div>'+
+   '<div class="crow mono"><span class="chip cy">Auto</span><span style="color:var(--ink-3)">&rarr; Qwen2.5-Coder-14B &middot; light task</span><span class="sp"></span><span style="color:var(--ink-3)">&crarr; send &middot; &#8679;&crarr; newline</span></div>'+
+  '</div>'+
+  '<div class="rgD">'+
+   '<div class="fdrag" id="fdrag" title="Drag to resize · double-click to reset"></div>'+
+   '<div class="drawhd"><span class="chip cy">Terminal</span><span class="chip">Tests</span><span class="chip">CI</span><span class="chip">Processes &amp; ports</span>'+
+    '<span class="sp"></span><button class="drawcol" id="drawcol">'+(R.getAttribute("data-drawer")==="min"?"&#9650; expand":"&#9660; collapse")+'</button></div>'+
+   '<div class="drawbody mono" style="font-size:11px;line-height:1.7;color:var(--ink-2)">'+
+   '<span class="chip" style="margin-right:6px">this Mac</span><span class="chip" style="margin-right:6px">zsh</span><span class="chip">~/Work/browser-add-on (wt)</span><br>'+
+   (building?'$ npm run test -- InsertReplace<br><span style="color:var(--green)">&#10003; 12 passed</span> &middot; 1.8s':'<span style="color:var(--ink-3)">idle &mdash; no command running. Opening a terminal never runs anything implicitly.</span>')+
+   '</div></div>'+
+  '<div class="rgE"><b>'+mk("browser-add-on",13)+'</b><span>'+mk("feat/WEBEXT-3514",15)+'</span><span>HEAD '+mk("4b098d6",7)+'</span><span>worktree clean</span>'+
+   '<span class="meter" title="context used"><i style="width:16%"></i></span><span>21k / 128k</span><span>UTF-8 &middot; LF &middot; TSX</span>'+
+   '<span class="sp"></span><button class="mdl" id="mb" style="margin:0;padding:3px 8px"><b>Qwen3-Coder 30B</b> <span class="chip cy" style="margin-left:5px">local</span> <span style="color:var(--ink-3)">effort: high</span></button>'+
+   '<span class="chip gr">egress: local only</span><span class="chip">mode: '+(building?'Build':'Plan')+'</span></div>'+
+ '</div>'+
+ '<div class="l2 mpop'+(S.wsPop?" on":"")+'" id="wsp" style="left:10px;right:auto;top:88px;width:264px">'+
+   '<div style="font-weight:600;margin-bottom:8px;font-size:12.5px">Workspace</div>'+
+   [["browser-add-on","3,309 files &middot; 20 rules"],["packages","17,665 files &middot; 7 rules"],["edit-stream","1,061 files &middot; 6 rules"],["rest-server","2,719 files &middot; 5 rules"]].map(function(r){
+    return '<button class="wsrow" data-repo="'+r[0]+'" aria-selected="'+(S.repo===r[0]?"true":"false")+'"><b>'+mk(r[0],12)+'</b><span>'+r[1]+'</span></button>';}).join('')+
+   '<button class="wsrow ghost"><b>Open folder&hellip;</b><span>any local path &middot; T0 read-only until keyed</span></button>'+
+   '<div style="margin-top:8px;font-size:10px;color:var(--ink-3);line-height:1.5">Opening a folder indexes nothing and runs nothing &mdash; rules load only when you key them.</div>'+
+  '</div>'+
+ '<div class="l2 mpop'+(S.mpop?" on":"")+'" id="mp">'+
+  '<div style="font-weight:600;margin-bottom:8px;font-size:12.5px">Model &amp; effort</div>'+
+  '<div class="automode"><div class="amh"><b>Auto</b><span class="chip cy" style="margin-left:auto">on</span></div><div class="amx">Zeno picks the <b>lightest model that fits each task</b> &mdash; a small fast model for a rename or a lookup, a 14B for a normal edit, a 32B (offload) for the hard ones &mdash; and can escalate to <b>Claude Code</b> (already your sanctioned provider) when a task deserves the best. You can pin any rung to override.</div></div>'+
+  mr("model","Qwen3-Coder 30B &middot; Q5")+mr("runs on","<span class='chip cy'>local</span>")+mr("context","128k &middot; 21k used")+
+  mr("cost","0 &mdash; local weights")+mr("latency p95","<span style='color:var(--ink-3)'>unmeasured (B-002)</span>")+
+  mr("effort","high")+mr("harness","zeno-code v0.4 &middot; a91f")+
+  '<div style="margin-top:9px;padding:8px 9px;background:var(--g4);border-radius:7px;font-size:11px;color:var(--ink-2)">'+
+  '<b style="color:var(--ink)">Conformance</b><div style="margin-top:4px">tool-calling <span class="chip gr">verified</span> structured-output <span class="chip gr">verified</span> vision <span class="chip rd">absent &rarr; rejected for QA tasks</span></div>'+
+  '<div style="margin-top:5px;color:var(--ink-3)">A missing capability rejects the task or enters a visible reduced mode &mdash; never a silent downgrade.</div></div></div>';
+}
+function row(n,c,cls){return '<div class="row '+(cls||'')+'"><span class="ln">'+n+'</span><span>'+c+'</span></div>';}
+function ev(t,x,c){return '<div class="ev '+(c||'')+'"><span class="tm">'+t+'</span><span class="tx">'+x+'</span></div>';}
+function mr(l,v){return '<div class="mrow"><span class="lb">'+l+'</span><span>'+v+'</span></div>';}
+
+/* ===================== COUNSEL ===================== */
+/* live transcript — Counsel listens to OTHER speakers; you never appear in it */
+var TR=[
+ {w:"Priya (PM)",x:"Morning &mdash; quick sync on the toolbar work.",q:0},
+ {w:"Priya (PM)",x:"Is the insert/replace fix handling the single-block wrap case?",q:1,
+  a:{say:"Yes &mdash; single-block ranges get wrapped in a &lt;p&gt;. It&rsquo;s on feat/WEBEXT-3514, in review.",
+     p:["diffWords with intraSpace handles the whitespace drift","isSingleBlock() gates the &lt;p&gt; wrap","In review &mdash; not merged yet"],
+     c:"InsertReplace.tsx:143 &middot; WEBEXT-3514 &middot; 4m old",cf:"High"}},
+ {w:"Dev lead",x:"What&rsquo;s left before we can merge?",q:1,
+  a:{say:"Only review &mdash; !5122 is CI-green on all 15 sites; nothing else blocks it.",
+     p:["!5122 CI green &middot; 15 sites","Click-dismissal split into its own MR","Merge and push each need owner approval"],
+     c:"GitLab !5122 &middot; WEBEXT-3444 &middot; 2h old",cf:"High"}},
+ {w:"Priya (PM)",x:"And can you commit to a date for the Chrome 141 flicker?",q:1,
+  a:{say:"Repro runs today in an isolated profile &mdash; I&rsquo;ll commit to a date once the cause is confirmed, not before.",
+     p:["WEBEXTOPS-812 &middot; repro pass queued","Isolated QA profile &middot; console + network captured","The fix follows the normal approval chain"],
+     c:"WEBEXTOPS-812 &middot; intake 09:12",cf:"Medium"}},
+ {w:"Dev lead",x:"Good. Let&rsquo;s move on.",q:0}
+];
+var CNT=0, CN1=true;
+function cnArm(){ if(CNT||!S.motion||S.lock)return;
+ CNT=setInterval(function(){ if(S.s!=="counsel"||!S.motion||S.lock){clearInterval(CNT);CNT=0;return;}
+  if(S.cn.idx<TR.length-1){S.cn.idx++;S.cn.assist=false;render();} },7000);}
+function rCounsel(){
+ var el=document.getElementById("s-counsel");
+ if(S.lock){
+  el.innerHTML='<div class="cn"><div class="l2 lpill"><span class="dot"></span>listening &middot; masked &mdash; details withheld</div>'+
+   '<div class="lphint">Capture is disclosed; everything else is hidden. Unmask on this device to see the overlay.</div></div>';
+  return;
+ }
+ var last=TR[S.cn.idx], spkr=last.w;
+ var feed=TR.slice(Math.max(0,S.cn.idx-2),S.cn.idx+1).map(function(l,i,arr){
+  var latest=(i===arr.length-1);
+  return '<div class="trline'+(latest?" now":"")+(l.q?" isq":"")+'">'+
+   '<span class="who">'+l.w+'</span><span class="tx">&ldquo;'+l.x+'&rdquo;</span>'+
+   (l.q&&latest?'<span class="qm">?</span>':'')+'</div>';}).join("");
+ var qi=S.cn.ansFor, a=(S.cn.assist&&qi>=0)?TR[qi].a:null;
+ var ans=a?'<div class="ans"><div class="ansq">answers &ldquo;'+TR[qi].x+'&rdquo;</div>'+
+  '<p class="say">&ldquo;'+a.say+'&rdquo;</p><ul>'+a.p.map(function(x){return "<li>"+x+"</li>";}).join("")+'</ul>'+
+  '<div class="cite">cited &middot; '+a.c+'</div>'+
+  '<div class="conf">CONFIDENCE <span class="chip gr">'+a.cf+'</span><span style="color:var(--ink-3)">verified &mdash; not a guess</span>'+
+  '<span class="sp"></span><button class="btn sm">Copy</button></div></div>':'';
+ var th=S.cn.asks.length?'<div class="thread">'+S.cn.asks.map(function(x){
+  return '<div class="q">'+x+'</div><div class="a">Answered privately from your authorized context &mdash; not in the transcript, never broadcast.</div>';}).join("")+'</div>':'';
+ var hasQ=false;for(var k=S.cn.idx;k>=0;k--){if(TR[k].q){hasQ=true;break;}}
+ el.innerHTML=
+ '<div class="cn">'+
+  '<div class="faces">'+["Priya (PM)","You","Dev lead"].map(function(f){
+    return '<div class="face'+(f!=="You"&&spkr.indexOf(f.split(" ")[0])===0?" spk":"")+'">'+f+(f!=="You"&&spkr.indexOf(f.split(" ")[0])===0?" &middot; speaking":"")+'</div>';}).join("")+'</div>'+
+  '<div class="l2 pre"><p class="k" style="margin:0 0 8px">Preflight &middot; before capture</p>'+
+   pr("microphone","MacBook mic &#10003;")+pr("system audio","captured &#10003;")+pr("model","local &middot; no egress")+
+   pr("retention","transcript only")+pr("consent","3 of 3 disclosed")+pr("others can see overlay","<span style=\'color:var(--green)\'>No &mdash; verified</span>")+
+   '<div class="hint">A failed or unknown critical check blocks capture rather than hiding it.</div></div>'+
+  '<div class="l2 ov'+(CN1?" drop":"")+'">'+
+   '<div class="hd"><span class="dot"></span><span class="mono" style="font-size:10px;color:var(--ink-2)">LISTENING &middot; other speakers &middot; local</span>'+
+    '<span class="sp"></span><button class="ic" data-nx title="Simulate the next transcribed line" style="padding:2px 7px;font-size:10px">&#9197;</button>'+
+    '<span class="mono" style="font-size:10px;color:var(--ink-3)">12:0'+(4+S.cn.idx)+'</span></div>'+
+   '<div class="bd">'+
+    '<div class="feed">'+feed+'</div>'+
+    (hasQ&&!S.cn.assist?'<button class="assist" data-as="1"><span>&#9670;</span> Assist</button>':'')+
+    ans+
+    th+
+    '<div class="ask"><input id="ca" placeholder="Ask Counsel privately&hellip;" aria-label="Ask Counsel privately"><button class="btn sm p" data-cs="1">Send</button></div>'+
+    '<div class="hint one">It never speaks or sends for you &mdash; Assist and Send are always your press.</div>'+
+   '</div></div>'+
+ '</div>';
+ CN1=false;
+ cnArm();
+}
+function cnScroll(){var b=document.querySelector("#s-counsel .ov .bd");
+ if(b)b.scrollTop=b.scrollHeight;
+ var i=document.getElementById("ca"); if(i)i.focus();}
+function pr(l,v){return '<div class="prow"><span style="color:var(--ink-3)">'+l+'</span><span>'+v+'</span></div>';}
+
+/* ===================== shell ===================== */
+function render(){
+ ["command","forge","counsel"].forEach(function(k){
+  document.getElementById("s-"+k).classList.toggle("on",k===S.s);});
+ document.querySelectorAll('[data-s]').forEach(function(b){b.setAttribute("aria-selected",b.dataset.s===S.s);});
+ if(S.s!=="command")stopF();
+ if(S.s!=="counsel"){CN1=true;if(CNT){clearInterval(CNT);CNT=0;}}
+ if(S.s==="command")rCommand(); else if(S.s==="forge")rForge(); else rCounsel();
+ var nm=["Jira assigned","Context assembling","Awaiting your approval","Building","CI · local preflight"];
+ document.getElementById("ft").textContent="Journey: "+nm[S.j]+"  //  View: "+S.s+(S.lock?"  //  MASKED":"");
+}
+document.addEventListener("click",function(e){
+ var t=e.target, b;
+ if(t.closest("#b-pal")){palOpen();return;}
+ if(PAL.open&&t.closest(".palrow")){PAL.idx=+t.closest(".palrow").dataset.pi;palRun();return;}
+ if(PAL.open&&t.id==="palov"){palClose();return;}
+ if((b=t.closest("[data-intake]"))){S.nav="intake";S.inKey=b.dataset.intake;S.inOps=b.dataset.ops==="1";S.inStep=0;render();return;}
+ if(t.closest("[data-inskip]")){S.inStep=99;render();return;}
+ if(t.closest("[data-watch]")){S.nav="activity";S.actStep=0;S.actPaused=false;render();return;}
+ if(t.closest("[data-actskip]")){S.actStep=99;render();return;}
+ if((b=t.closest("[data-actmode]"))){S.actPar=b.dataset.actmode==="1";S.actStep=0;S.actPaused=false;if(ACTIMER){clearInterval(ACTIMER);ACTIMER=0;}render();return;}
+ if(t.closest("[data-actpause]")){S.actPaused=!S.actPaused;if(ACTIMER){clearInterval(ACTIMER);ACTIMER=0;}render();return;}
+ if(t.closest("[data-actkill]")){if(ACTIMER){clearInterval(ACTIMER);ACTIMER=0;}S.actStep=0;S.actPaused=false;S.nav="agents";render();return;}
+ if(t.closest("#home")){S.s="command";S.nav="today";S.sel=null;S.mpop=false;S.wsPop=false;render();return;}
+ if(S.mpop && !t.closest("#mp") && !t.closest("#mb")){S.mpop=false;render();}
+ if(S.wsPop && !t.closest("#wsp") && !t.closest("#ws")){S.wsPop=false;render();}
+ if((b=t.closest("[data-s]"))){S.s=b.dataset.s;render();return;}
+ if((b=t.closest("[data-j]"))){S.j=+b.dataset.j;S.ap="await";
+  document.querySelectorAll("[data-j]").forEach(function(x){var i=+x.dataset.j;
+   x.setAttribute("aria-current",i===S.j);x.classList.toggle("done",i<S.j);});
+  render();return;}
+ if(t.closest("#fl-t")){S.fieldList=!S.fieldList;render();return;}
+ if((b=t.closest("[data-n]"))){S.sel=b.dataset.n;render();return;}
+ if(t.closest("[data-nav-dev]")){S.s="command";S.nav="devices";S.sel=null;render();return;}
+ if((b=t.closest("[data-go]"))){S.s=b.dataset.go;render();return;}
+ if(t.closest("[data-clr]")){S.sel=null;render();return;}
+ if((b=t.closest("[data-i]"))){S.insp=b.dataset.i;render();return;}
+ if(t.closest("#mb")){S.mpop=!S.mpop;render();return;}
+ if(t.closest("[data-send]")){var i=document.getElementById("fq");if(i&&i.value.trim()){
+   if(S.fbusy){S.fq.push(i.value.trim());}else{S.ask.push(i.value.trim());} S.insp="chat";render();}return;}
+ if(t.closest("[data-fstop]")){S.fbusy=false;render();return;}
+ if(t.closest("[data-mic]")){S.rec=!S.rec;render();if(S.rec)setTimeout(function(){if(S.rec){S.rec=false;S.ask.push("(voice) what needs me today?");render();}},1800);return;}
+ if(t.closest("[data-ask2]")){var i=document.getElementById("ca2");if(i&&i.value.trim()){S.ask.push(i.value.trim());render();var t2=document.querySelector(".athread");if(t2)t2.scrollTop=t2.scrollHeight;}return;}
+ if(t.closest("[data-as]")){var qi=-1;for(var k=S.cn.idx;k>=0;k--){if(TR[k].q){qi=k;break;}}
+  if(qi>=0){S.cn.assist=true;S.cn.ansFor=qi;}render();return;}
+ if(t.closest("[data-cs]")){var c=document.getElementById("ca");if(c&&c.value.trim()){S.cn.asks.push(c.value.trim());render();cnScroll();}return;}
+ if((b=t.closest("[data-pan]"))){S.pan=b.dataset.pan;render();return;}
+ if(t.closest("#dr")){S.drift=!S.drift;return;}
+ if((b=t.closest("[data-ap]"))){var v=b.dataset.ap;
+  if(v==="go"){S.ap="commit";render();
+   setTimeout(function(){S.ap=S.drift?"refused":"verified";render();},1100);}
+  else {S.ap="await";render();}
+  return;}
+ if(t.closest("#b-lock")){S.lock=!S.lock;R.setAttribute("data-lock",S.lock?"1":"0");t.closest("#b-lock").setAttribute("aria-pressed",S.lock);render();if(F.c)draw();return;}
+ if(t.closest("#b-mo")){toggleMo();return;}
+ if(t.closest("#b-flat")){toggleFlat();return;}
+ if((b=t.closest("[data-nav]"))){S.nav=b.dataset.nav;S.killArm=false;render();return;}
+ if((b=t.closest("[data-th]"))){setTheme(b.dataset.th);return;}
+ if((b=t.closest("[data-act]"))){if(b.dataset.act==="mo")toggleMo();else toggleFlat();return;}
+ if(t.closest("[data-nx]")){if(S.cn.idx<TR.length-1){S.cn.idx++;S.cn.assist=false;}render();return;}
+ if(t.closest("#ws")){S.wsPop=!S.wsPop;render();return;}
+ if(t.closest("#drawcol")){R.setAttribute("data-drawer",R.getAttribute("data-drawer")==="min"?"open":"min");render();return;}
+ if((b=t.closest("[data-repo]"))){S.repo=b.dataset.repo;S.wsPop=false;render();return;}
+ if(t.closest("[data-diff]")){S.diff=!S.diff;render();return;}
+ if(t.closest("[data-kill]")){S.killArm=!S.killArm;render();return;}
+ if(t.closest("#b-th")){
+  var cur=R.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:light)").matches?"light":"dark");
+  setTheme(cur==="light"?"dark":"light");return;}
+});
+document.addEventListener("keydown",function(e){
+ if((e.metaKey||e.ctrlKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();PAL.open?palClose():palOpen();return;}
+ if(PAL.open){
+  if(e.key==="Escape"){palClose();return;}
+  if(e.key==="ArrowDown"){e.preventDefault();PAL.idx++;palRender();return;}
+  if(e.key==="ArrowUp"){e.preventDefault();PAL.idx=Math.max(0,PAL.idx-1);palRender();return;}
+  if(e.key==="Enter"){e.preventDefault();palRun();return;}
+  return;
+ }
+ if(e.key==="Escape"){ if(S.mpop){S.mpop=false;render();return;}
+  if(S.wsPop){S.wsPop=false;render();return;}
+  if(S.sel){S.sel=null;render();return;} }
+ if(e.key==="Enter"&&!e.shiftKey&&e.target.id==="fq"&&e.target.value.trim()){
+   if(S.fbusy){S.fq.push(e.target.value.trim());}else{S.ask.push(e.target.value.trim());} S.insp="chat";render();}
+ if(e.key==="Enter"&&e.target.id==="ca"&&e.target.value.trim()){S.cn.asks.push(e.target.value.trim());render();cnScroll();}
+ if(e.key==="Enter"&&e.target.id==="ca2"&&e.target.value.trim()){S.ask.push(e.target.value.trim());render();var t3=document.querySelector(".athread");if(t3)t3.scrollTop=t3.scrollHeight;}
+ if(e.key==="Enter"&&e.target.classList.contains("flrow")){S.sel=e.target.dataset.n;render();}
+});
+document.addEventListener("pointerdown",function(e){
+ if(e.target.id!=="field")return; F.drag=1;F.mx=e.clientX;F.my=e.clientY;F._m=0;});
+document.addEventListener("pointermove",function(e){
+ if(!F.c)return; var b=F.c.getBoundingClientRect();
+ if(F.drag){var dx=e.clientX-F.mx,dy=e.clientY-F.my;F.rot+=dx*.006;
+  F.tilt=Math.max(-.7,Math.min(.7,F.tilt+dy*.004));F.tilt0=F.tilt;F.mx=e.clientX;F.my=e.clientY;
+  if(Math.abs(dx)+Math.abs(dy)>3)F._m=1; if(!F.raf)draw();}
+ else if(e.target.id==="field"){var h=pick(e.clientX-b.left,e.clientY-b.top);
+  if(h!==F.hov){F.hov=h;F.c.style.cursor=h?"pointer":"grab";if(!F.raf)draw();}}});
+document.addEventListener("pointerup",function(e){
+ if(F.drag&&!F._m&&F.c){var b=F.c.getBoundingClientRect();
+  var n=pick(e.clientX-b.left,e.clientY-b.top); if(n){S.sel=n.id;render();}}
+ F.drag=0;});
+/* Command palette (⌘K) */
+var PAL={open:false,idx:0};
+function palActions(){
+ return [
+  ["Go home &middot; Today","view",function(){S.s="command";S.nav="today";render();}],
+  ["Ask Zeno &mdash; whole system","view",function(){S.s="command";S.nav="ask";render();}],
+  ["Open Forge","view",function(){S.s="forge";render();}],
+  ["Open Counsel","view",function(){S.s="counsel";render();}],
+  ["Approvals","view",function(){S.s="command";S.nav="approvals";render();}],
+  ["Agents &amp; runs","view",function(){S.s="command";S.nav="agents";render();}],
+  ["Parallel runs of this task","view",function(){S.s="forge";S.insp="runs";render();}],
+  [S.lock?"Open current ticket":"Open WEBEXT-3514 in Forge","task",function(){S.s="forge";render();}],
+  ["Jump to the approval","task",function(){S.s="command";S.nav="today";S.j=Math.max(S.j,2);render();}],
+  ["Toggle masked","toggle",function(){document.getElementById("b-lock").click();}],
+  ["Toggle theme","toggle",function(){document.getElementById("b-th").click();}],
+  ["Toggle 2D / depth","toggle",function(){toggleFlat();}],
+  ["Toggle reduced motion","toggle",function(){toggleMo();}],
+  ["Settings","view",function(){S.s="command";S.nav="settings";render();}]
+ ];
+}
+function palFiltered(){
+ var q=(document.getElementById("palq").value||"").toLowerCase().trim();
+ return palActions().filter(function(a){return !q||a[0].replace(/&[a-z]+;/g," ").toLowerCase().indexOf(q)>=0;});
+}
+function palRender(){
+ var list=document.getElementById("pallist"), acts=palFiltered();
+ if(PAL.idx>=acts.length)PAL.idx=Math.max(0,acts.length-1);
+ list.innerHTML=acts.length?acts.map(function(a,i){
+  return '<div class="palrow" role="option" data-pi="'+i+'" aria-selected="'+(i===PAL.idx)+'">'+
+   '<span class="pt">'+a[0]+'</span><span class="pk mono">'+a[1]+'</span></div>';}).join("")
+  :'<div class="palempty">No matching command</div>';
+}
+function palOpen(){PAL.open=true;PAL.idx=0;var o=document.getElementById("palov");o.hidden=false;
+ var q=document.getElementById("palq");q.value="";palRender();q.focus();}
+function palClose(){PAL.open=false;document.getElementById("palov").hidden=true;}
+function palRun(){var acts=palFiltered();var a=acts[PAL.idx];if(a){palClose();a[2]();}}
+document.addEventListener("input",function(e){if(e.target.id==="palq"){PAL.idx=0;palRender();}});
+/* Forge terminal: draggable divider */
+var DR={on:0,y0:0,h0:0};
+document.addEventListener("pointerdown",function(e){
+ var h=e.target.closest&&e.target.closest("#fdrag"); if(!h)return;
+ var fg=document.querySelector(".forge"); if(!fg)return;
+ if(R.getAttribute("data-drawer")==="min")R.setAttribute("data-drawer","open");
+ DR.on=1; DR.y0=e.clientY; DR.fg=fg;
+ var cs=getComputedStyle(fg).getPropertyValue("--fdrawer");
+ DR.h0=parseFloat(cs)|| (document.querySelector(".rgD").offsetHeight);
+ h.classList.add("grab"); e.preventDefault();
+ try{h.setPointerCapture(e.pointerId);}catch(_){}
+});
+document.addEventListener("pointermove",function(e){
+ if(!DR.on)return;
+ var fgH=DR.fg.offsetHeight, max=Math.max(80,fgH*0.7), min=40;
+ var h=Math.min(max,Math.max(min, DR.h0+(DR.y0-e.clientY)));
+ DR.fg.style.setProperty("--fdrawer",h+"px");
+});
+document.addEventListener("pointerup",function(){ if(DR.on){DR.on=0;
+ var h=document.querySelector("#fdrag"); if(h)h.classList.remove("grab");}});
+document.addEventListener("dblclick",function(e){ if(e.target.closest&&e.target.closest("#fdrag")){
+ var fg=document.querySelector(".forge"); if(fg)fg.style.setProperty("--fdrawer","150px");}});
+addEventListener("resize",function(){if(F.c&&S.s==="command")size();});
+syncTop();render();
+</script>

@@ -1,0 +1,217 @@
+<meta charset="utf-8">
+<title>Policy &amp; Approval Kernel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+ --g1:#0A0C0E;--g2:#0F1214;--g3:#151A1D;--g4:#1B2124;--g5:#222A2E;--g6:#2C363B;
+ --ink:#ECEBE6;--ink-2:#9AA1AC;--ink-3:#6C7480;--rule:#242C31;--rule-2:#2C363B;
+ --cyan:#38C3D6;--gold:#D8BE7E;--amber:#E0A128;--red:#D8695A;--green:#5BB98C;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+ --g1:#EAE9E3;--g2:#F4F3EE;--g3:#FBFAF6;--g4:#EFEEE9;--g5:#E6E5DF;--g6:#D6D4CC;
+ --ink:#171A1E;--ink-2:#555C67;--ink-3:#828994;--rule:#DEDCD5;--rule-2:#CBC9C1;
+ --cyan:#15707E;--gold:#8A6D2C;--amber:#8C6410;--red:#A6483C;--green:#387153;
+}}
+:root[data-theme="dark"]{
+ --g1:#0A0C0E;--g2:#0F1214;--g3:#151A1D;--g4:#1B2124;--g5:#222A2E;--g6:#2C363B;
+ --ink:#ECEBE6;--ink-2:#9AA1AC;--ink-3:#6C7480;--rule:#242C31;--rule-2:#2C363B;
+ --cyan:#38C3D6;--gold:#D8BE7E;--amber:#E0A128;--red:#D8695A;--green:#5BB98C;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--g1);color:var(--ink);
+ font:15px/1.62 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:44px 24px 80px}
+.mono{font-family:"IBM Plex Mono",monospace}
+h1{font-family:Newsreader,serif;font-weight:500;font-size:34px;line-height:1.1;letter-spacing:-.02em;margin:6px 0 4px;text-wrap:balance}
+h2{font-family:Newsreader,serif;font-weight:500;font-size:23px;letter-spacing:-.01em;margin:38px 0 6px;padding-top:20px;border-top:1px solid var(--rule)}
+h2 .no{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--cyan);margin-right:10px;font-weight:500}
+h3{font-size:14px;font-weight:600;margin:20px 0 5px}
+p{margin:9px 0;color:var(--ink-2)}
+b,strong{color:var(--ink);font-weight:600}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.lede{font-size:16px;color:var(--ink-2);line-height:1.6;max-width:64ch}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;font-size:12.5px;margin:18px 0 4px;
+ padding:14px 16px;background:var(--g2);border:1px solid var(--rule);border-radius:11px}
+.meta dt{font-family:"IBM Plex Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);align-self:center}
+.meta dd{margin:0;color:var(--ink)}
+.gates{display:inline-flex;gap:6px}
+.pill{display:inline-flex;align-items:center;gap:5px;font-family:"IBM Plex Mono",monospace;font-size:10px;
+ padding:3px 9px;border-radius:99px;border:1px solid var(--rule);color:var(--ink-2);white-space:nowrap}
+.pill.ok{color:var(--green);border-color:color-mix(in srgb,var(--green) 40%,var(--rule));background:color-mix(in srgb,var(--green) 8%,transparent)}
+.pill.wait{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,var(--rule));background:color-mix(in srgb,var(--amber) 8%,transparent)}
+.pill.cy{color:var(--cyan);border-color:color-mix(in srgb,var(--cyan) 40%,var(--rule));background:color-mix(in srgb,var(--cyan) 8%,transparent)}
+ul,ol{margin:9px 0;padding-left:22px;color:var(--ink-2)}
+li{margin:4px 0}
+li::marker{color:var(--ink-3)}
+code{font-family:"IBM Plex Mono",monospace;font-size:12.5px;background:var(--g3);border:1px solid var(--rule);
+ border-radius:4px;padding:1px 5px;color:var(--ink)}
+pre{background:var(--g2);border:1px solid var(--rule);border-radius:11px;padding:15px 17px;overflow-x:auto;
+ font-family:"IBM Plex Mono",monospace;font-size:12px;line-height:1.7;color:var(--ink-2);margin:12px 0}
+pre b{color:var(--cyan);font-weight:400}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+@media (max-width:640px){.two{grid-template-columns:1fr}}
+.card{background:var(--g2);border:1px solid var(--rule);border-radius:11px;padding:14px 16px}
+.card.in{border-left:2px solid var(--green)}
+.card.out{border-left:2px solid var(--ink-3)}
+.card h3{margin-top:0}
+.card ul{padding-left:18px;font-size:13.5px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:"IBM Plex Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);font-weight:500}
+td .t{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:12px}
+.t0{color:var(--ink-2)}.t1{color:var(--cyan)}.t2{color:var(--gold)}.t3{color:var(--amber)}.t4{color:var(--red)}
+.laws{list-style:none;padding:0;margin:14px 0;display:flex;flex-direction:column;gap:8px}
+.laws li{display:flex;gap:12px;padding:11px 14px;background:var(--g2);border:1px solid var(--rule);border-radius:9px;margin:0}
+.laws .lid{font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--cyan);flex:none;font-size:12px}
+.laws .lx{color:var(--ink-2);font-size:13.5px}
+.laws .lx b{color:var(--ink)}
+.sm{display:grid;grid-template-columns:1fr;gap:0;margin:14px 0;font-family:"IBM Plex Mono",monospace;font-size:12px}
+.st{display:flex;align-items:center;gap:12px;padding:9px 0}
+.st .node{flex:none;min-width:118px;padding:5px 11px;border-radius:8px;border:1px solid var(--rule-2);background:var(--g3);color:var(--ink);text-align:center;font-weight:500}
+.st .node.term{border-style:dashed}
+.st .node.good{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,var(--rule))}
+.st .node.bad{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,var(--rule))}
+.st .node.hold{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 45%,var(--rule))}
+.st .arr{color:var(--ink-3);flex:1;border-top:1px dashed var(--rule-2);position:relative;height:1px}
+.st .lbl{color:var(--ink-3);font-size:10.5px;flex:none}
+.plain{background:color-mix(in srgb,var(--cyan) 7%,transparent);border:1px solid color-mix(in srgb,var(--cyan) 28%,var(--rule));
+ border-radius:13px;padding:16px 19px;margin:20px 0 6px}
+.plain p{color:var(--ink);font-size:14.5px;line-height:1.6}
+.plain p:first-of-type{margin-top:4px}
+.plainline{background:var(--g2);border-left:2px solid var(--cyan);border-radius:0 8px 8px 0;
+ padding:9px 14px;font-size:13.5px;color:var(--ink-2)}
+.plainline b{color:var(--cyan);font-weight:600}
+.note{border-left:2px solid var(--cyan);background:color-mix(in srgb,var(--cyan) 6%,transparent);
+ padding:12px 15px;border-radius:0 8px 8px 0;margin:16px 0;font-size:13.5px;color:var(--ink-2)}
+.note.amber{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 7%,transparent)}
+.ask{background:var(--g2);border:1px solid color-mix(in srgb,var(--gold) 30%,var(--rule));border-radius:13px;padding:20px 22px;margin:24px 0}
+.ask h2{border:0;padding:0;margin:0 0 6px}
+.foot{margin-top:40px;padding-top:16px;border-top:1px solid var(--rule);font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);line-height:1.7}
+</style>
+
+<div class="wrap">
+ <p class="eyebrow">Zeno · Low-Level Design · for owner approval</p>
+ <h1>Policy &amp; Approval Kernel</h1>
+ <p class="lede">The deterministic engine that sits outside every model and is the only thing allowed to turn a proposal into an effect. Slice <b>P1-01</b> — the first thing built, because everything else trusts it.</p>
+
+ <div class="plain">
+  <p class="eyebrow" style="color:var(--cyan)">In plain words</p>
+  <p><b>Think of it as the security desk that sits between Zeno's “thinking” and the real world.</b> The AI can <i>think</i> anything and <i>propose</i> anything — but it can never actually <i>do</i> something (push code, write a ticket, send a message) without walking up to this desk first. The desk checks how risky the action is, shows you exactly what will happen, waits for your yes, checks nothing changed while you decided, then lets it through <b>once</b> — and stamps a receipt. Payments and anything forbidden don't get a desk pass at all.</p>
+  <p style="margin-bottom:0">This slice builds <b>only that desk</b> — no screens, no AI, no internet. Small, boring, and provable, so the exciting parts on top can be trusted.</p>
+ </div>
+
+ <dl class="meta">
+  <dt>slice</dt><dd>P1-01 · Wave A · needs only Gate 1 — no Windows dependency, no UI, no model</dd>
+  <dt>gates</dt><dd class="gates"><span class="pill ok">Gate 1 ✓</span><span class="pill ok">Gate 2 ✓</span><span class="pill wait">this LLD → your approval</span></dd>
+  <dt>host</dt><dd>Windows 11 pilot · headless · <b>nothing on the work Mac</b></dd>
+  <dt>stack</dt><dd class="mono">TypeScript · Node ≥20 · zero network · zero LLM · deterministic</dd>
+ </dl>
+
+ <h2><span class="no">0</span>Why this slice is first</h2>
+ <p>Every promise in the suite — “Reason before action”, the approval capsule you clicked, the drift refusal, the receipt-gated seal — <b>is this component</b>. It is the policy engine that sits outside every model and is the only code permitted to cause an external effect.</p>
+ <p>If it is correct, no agent, model, bug, or prompt-injection can produce an unapproved or double-applied effect. If it is wrong, nothing above it can be trusted. So it is built first, alone, with no UI and no model, where it can be proven in isolation. It depends on nothing; everything else depends on it.</p>
+
+ <h2><span class="no">1</span>Scope</h2>
+ <div class="two">
+  <div class="card in">
+   <h3>Built in this slice</h3>
+   <ul>
+    <li>Risk-tier classifier <span class="mono">T0–T4</span> from static policy</li>
+    <li>The contract state machine (§3)</li>
+    <li>Approval binding — one approval, one exact action, single-use</li>
+    <li>Compare-and-swap commit — the drift refusal</li>
+    <li>Append-only, hash-chained receipt ledger</li>
+    <li>Decision API + a headless simulator</li>
+   </ul>
+  </div>
+  <div class="card out">
+   <h3>Not in this slice</h3>
+   <ul>
+    <li>No UI (the prototype is the design; this is the engine)</li>
+    <li>No LLM, no context assembly, no model routing</li>
+    <li>No executors — it decides &amp; records, then hands an approved bound token to an executor slice</li>
+    <li>No credentials, no sanitizer, <b>no network at all</b></li>
+   </ul>
+  </div>
+ </div>
+
+ <h2><span class="no">2</span>The contract state machine</h2>
+ <p class="plainline"><b>Plain version:</b> every action walks one fixed path — <i>classified → shown to you → you approve → double-checked → done once → receipt.</i> There are no shortcuts and no side doors. Read the rows below as “from this state, the only ways out are these.”</p>
+ <p>One instance per action. These are the <b>only</b> legal transitions — a consequential effect can be reached one way and no other.</p>
+ <div class="sm">
+  <div class="st"><span class="node">CLASSIFIED</span><span class="lbl">tier T4</span><span class="arr"></span><span class="node term bad">DENIED</span></div>
+  <div class="st"><span class="node">CLASSIFIED</span><span class="lbl">tier T0</span><span class="arr"></span><span class="node term good">AUTO · verified</span></div>
+  <div class="st"><span class="node">CLASSIFIED</span><span class="lbl">T1–T3</span><span class="arr"></span><span class="node">PREVIEWED</span><span class="lbl">owner approves</span><span class="arr"></span><span class="node hold">APPROVED</span></div>
+  <div class="st"><span class="node hold">APPROVED</span><span class="lbl">revalidate — base drifted</span><span class="arr"></span><span class="node term bad">REFUSED</span></div>
+  <div class="st"><span class="node hold">APPROVED</span><span class="lbl">tuple equal · ONE attempt</span><span class="arr"></span><span class="node good">COMMITTING</span><span class="lbl">effect proven</span><span class="arr"></span><span class="node term good">VERIFIED</span></div>
+ </div>
+ <p class="mono" style="font-size:11.5px;color:var(--ink-3)">An unprovable commit result becomes <b style="color:var(--amber)">OUTCOME_UNKNOWN</b> with retry frozen — never a silent re-try. A lapsed preview/approval becomes <b>EXPIRED</b>.</p>
+
+ <h2><span class="no">3</span>The seven laws</h2>
+ <p class="plainline"><b>Plain version:</b> these are the seven promises the desk can never break — no matter what the AI says, what a web page tries to trick it into, or what bug exists upstream. They aren't guidelines; they're built into the structure, and each one is proven by an automated test.</p>
+ <p>Each is enforced structurally and each ships as a property test over randomized action streams.</p>
+ <ul class="laws">
+  <li><span class="lid">L1</span><span class="lx"><b>No skip.</b> No consequential action reaches <code>COMMITTING</code> without passing <code>APPROVED</code> for its own action hash.</span></li>
+  <li><span class="lid">L2</span><span class="lx"><b>One attempt.</b> The executor runs exactly once. No retry loop, ever.</span></li>
+  <li><span class="lid">L3</span><span class="lx"><b>Compare-and-swap.</b> At commit the base is re-read; if it drifted → <code>REFUSED</code>, approval unspent, nothing applied.</span></li>
+  <li><span class="lid">L4</span><span class="lx"><b>Single-use.</b> An approval is consumed on use; a second use is denied.</span></li>
+  <li><span class="lid">L5</span><span class="lx"><b>Seal after receipt.</b> <code>VERIFIED</code> is only reachable after a durable receipt is written — success can never render before its receipt exists.</span></li>
+  <li><span class="lid">L6</span><span class="lx"><b>No self-approval.</b> The agent that proposes can never approve. This is the structural answer to prompt-injection: a malicious string reaches <code>PREVIEWED</code> at most, never <code>COMMITTING</code>.</span></li>
+  <li><span class="lid">L7</span><span class="lx"><b>T4 is absolute.</b> Payments and prohibited actions reach only <code>DENIED</code>. No override path exists in code.</span></li>
+ </ul>
+
+ <h2><span class="no">4</span>Risk-tier policy</h2>
+ <p>Policy is <b>data, not code</b> — one <code>policy.json</code>, schema-validated and <b>hash-pinned</b>: its hash lands in every receipt, so you can always prove which policy governed a decision. (Signing it comes with the later Signer slice — v1 doesn't pretend to have keys it doesn't.) Classification is deterministic and rounds <b>up</b> on ambiguity, never down.</p>
+ <table>
+  <tr><th>Tier</th><th>Meaning</th><th>Examples</th><th>Gate</th></tr>
+  <tr><td><span class="t t0">T0</span></td><td>No external effect</td><td>read · inspect · scratch write</td><td>auto, still receipted</td></tr>
+  <tr><td><span class="t t1">T1</span></td><td>Low, reversible effect</td><td>TASK-patch handoff · draft</td><td>owner approval</td></tr>
+  <tr><td><span class="t t2">T2</span></td><td>External write</td><td>jira.write · push · send</td><td>approval + authenticator</td></tr>
+  <tr><td><span class="t t3">T3</span></td><td>High blast radius</td><td>MR · settings · multi-target</td><td>approval + auth + scope re-confirm</td></tr>
+  <tr><td><span class="t t4">T4</span></td><td>Prohibited</td><td>payment · bypass · covert mode</td><td><b style="color:var(--red)">denied always</b></td></tr>
+ </table>
+
+ <h2><span class="no">5</span>The receipt ledger</h2>
+ <p class="plainline"><b>Plain version:</b> a tamper-evident logbook. Every outcome — done, refused, denied — writes one line, and each line is cryptographically linked to the one before it (like a chain). If anyone edits or deletes a past line, the chain visibly breaks and Zeno can point to exactly where. This is also why a “success” checkmark can only appear <i>after</i> its logbook line exists — the tick is drawn from the receipt, never before it.</p>
+ <p>A single append-only JSONL file on the pilot's local disk — <b>tamper-evident now, tamper-proof later</b> (the Signer slice adds real signatures; v1 says exactly what it is). Every terminal outcome writes one hash-chained receipt; every approval is logged. Any edit or deletion breaks the chain, and <code>verifyChain()</code> localizes the first break.</p>
+ <pre>{ id, actionHash, outcome:<b>'verified'|'refused'|'denied'|'expired'|'outcome-unknown'</b>,
+  reason, casBaseObserved, externalEffect, prevReceipt, selfHash, at }</pre>
+ <p>Raw secrets never enter the ledger — a <code>redact()</code> pass records <i>that</i> a value existed, never the value. The <code>selfHash</code> is written by an injected <code>Signer</code> (plain SHA-256 now; a keypair/HSM in the later signing slice — the seam is left open).</p>
+
+ <h2><span class="no">6</span>How you'll see it's done</h2>
+ <ul>
+  <li><b>Property tests</b> for each of L1–L7 over randomized streams — e.g. <i>no sequence ever reaches VERIFIED without a matching single-use approval.</i></li>
+  <li><b>CAS test:</b> approve → mutate base → commit ⇒ REFUSED, approval unspent, zero effect.</li>
+  <li><b>Injection test:</b> adversarial payloads never advance past PREVIEWED.</li>
+  <li><b>Chain test:</b> corrupt one line ⇒ <code>verifyChain()</code> reports the exact break.</li>
+  <li><b>Determinism:</b> same inputs + injected clock ⇒ byte-identical ledger (replayable).</li>
+  <li>The headless simulator drives every path the Gate-2 capsule shows — <span class="mono" style="font-size:11.5px">await→commit→verified</span> and <span class="mono" style="font-size:11.5px">await→drift→refused</span> — with no UI and no model.</li>
+ </ul>
+ <p class="mono" style="font-size:11.5px;color:var(--ink-3)">Maps to SUITE-AC-06 and the action-contract / drift / single-use acceptance rows; full ID table ships as acceptance.csv with the slice.</p>
+
+ <h2><span class="no">7</span>Simplicity pass — what v1 deliberately does NOT have</h2>
+ <p class="plainline"><b>Plain version:</b> reviewed for overcomplication. Everything cuttable was cut; every cut is a seam we can reopen later — none changes the seven laws.</p>
+ <ul>
+  <li><b>No policy or receipt signing</b> — hash-pinned and hash-chained instead; real keys arrive with the Signer slice.</li>
+  <li><b>No multi-approver, no delegation</b> — one owner, one approval channel.</li>
+  <li><b>No database</b> — one JSONL file. <b>No plugin system. No config sprawl</b> — just <code>policy.json</code>.</li>
+  <li><b>Binding verifies four fields</b> (payload, base, target, tier); all provenance rides as one opaque hash — recorded and replayable, not individually validated.</li>
+ </ul>
+ <p>The seven laws are the product. Everything else stays as small as honesty allows.</p>
+
+ <div class="ask">
+  <p class="eyebrow" style="color:var(--gold)">what I need from you</p>
+  <h2 style="font-size:20px">Two things, then I build only this slice</h2>
+  <ol style="margin-top:10px">
+   <li><b>Approve this LLD.</b> It unlocks writing this slice's code (still no commit/push by me — you land git).</li>
+   <li><b>One decision — T2 authenticator on the pilot:</b> a local OS prompt (<b>Windows Hello</b>) now, or <b>defer</b> real auth to the credential-broker slice and treat the authenticator as a typed placeholder this kernel checks the <i>presence</i> of? <span class="mono" style="font-size:11.5px;color:var(--ink-3)">Default if silent: defer.</span></li>
+  </ol>
+  <p style="margin-bottom:0">Nothing is built until you say <b>approve</b>.</p>
+ </div>
+
+ <div class="foot">
+  Zeno · synthetic-design phase · no code written · no repo committed · no build run<br>
+  This document is the per-slice gate. Approving it authorizes only slice P1-01's implementation — not the next slice, not the work-Mac pilot (Gate 3 + "Approve work-Mac pilot"), not any external write beyond the tier policy.
+ </div>
+</div>
