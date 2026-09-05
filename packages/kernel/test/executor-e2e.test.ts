@@ -5,13 +5,17 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve as pResolve, sep } from 'node:path';
 import { Kernel } from '../src/index.js';
 import { hashOf } from '../src/hash.js';
 import type { ActionRequest, World } from '../src/types.js';
 import { worktreeExecutor, makeWritePayload, type SandboxFs, type SandboxFs as _Fs } from '../src/executor.js';
 import { TestWorld } from './harness.js';
 
-const ROOT = '/sandbox';
+/** Platform-native sandbox root: "/sandbox" on POSIX, "<drive>:\sandbox" on Windows. */
+const ROOT = pResolve(sep + 'sandbox');
+/** Build a path inside the sandbox the same way jail() does. */
+const at = (rel: string): string => pResolve(ROOT, rel);
 
 /** A memory fs shared by BOTH the executor (to write) and the world (to CAS-read). */
 function sharedFs(init: [string, string][] = []) {
@@ -56,9 +60,9 @@ function writeRequest(abs: string, base: string | null, next: string): { req: Ac
 }
 
 test('E2E: approve → the file really changes → VERIFIED with the real post-hash', async () => {
-  const { files, fs } = sharedFs([[ROOT + '/InsertReplace.tsx', 'OLD']]);
+  const { files, fs } = sharedFs([[at('Editor.tsx'), 'OLD']]);
   const k = new Kernel(worldOver(files));
-  const { req, payload } = writeRequest(ROOT + '/InsertReplace.tsx', 'OLD', 'NEW');
+  const { req, payload } = writeRequest(at('Editor.tsx'), 'OLD', 'NEW');
 
   const pv = k.preview(req);
   assert.equal(pv.tier, 'T1');
@@ -66,39 +70,39 @@ test('E2E: approve → the file really changes → VERIFIED with the real post-h
   const r = await k.commit(ap, worktreeExecutor({ root: ROOT, fs }, payload));
 
   assert.equal(r.outcome, 'verified');
-  assert.equal(files.get(ROOT + '/InsertReplace.tsx'), 'NEW', 'the file actually changed');
+  assert.equal(files.get(at('Editor.tsx')), 'NEW', 'the file actually changed');
   assert.equal(r.externalEffect.effect, 'file:' + hashOf('NEW'));
   assert.equal(k.verifyChain().ok, true);
 });
 
 test('E2E: base drifts after approve → REFUSED → file untouched, approval unspent', async () => {
-  const { files, fs } = sharedFs([[ROOT + '/a.tsx', 'OLD']]);
+  const { files, fs } = sharedFs([[at('a.tsx'), 'OLD']]);
   const k = new Kernel(worldOver(files));
-  const { req, payload } = writeRequest(ROOT + '/a.tsx', 'OLD', 'NEW');
+  const { req, payload } = writeRequest(at('a.tsx'), 'OLD', 'NEW');
   const pv = k.preview(req);
   const ap = k.approve(pv.actionHash);
 
-  files.set(ROOT + '/a.tsx', 'SOMEONE_ELSE_EDITED_IT'); // drift between approve and commit
+  files.set(at('a.tsx'), 'SOMEONE_ELSE_EDITED_IT'); // drift between approve and commit
 
   const r = await k.commit(ap, worktreeExecutor({ root: ROOT, fs }, payload));
   assert.equal(r.outcome, 'refused');
-  assert.equal(files.get(ROOT + '/a.tsx'), 'SOMEONE_ELSE_EDITED_IT', 'executor never ran; file untouched by us');
+  assert.equal(files.get(at('a.tsx')), 'SOMEONE_ELSE_EDITED_IT', 'executor never ran; file untouched by us');
 });
 
 test('E2E: T0 local.write auto-applies in the sandbox, still receipted', async () => {
-  const { files, fs } = sharedFs([[ROOT + '/scratch.txt', 'a']]);
+  const { files, fs } = sharedFs([[at('scratch.txt'), 'a']]);
   const k = new Kernel(worldOver(files));
-  const { req, payload } = writeRequest(ROOT + '/scratch.txt', 'a', 'b');
+  const { req, payload } = writeRequest(at('scratch.txt'), 'a', 'b');
   const t0req = { ...req, kind: 'local.write' as const };
   const pv = k.preview(t0req);
   assert.equal(pv.auto, true); // sandbox write needs no owner approval
   const r = await k.commit(pv.actionHash, worktreeExecutor({ root: ROOT, fs }, payload));
   assert.equal(r.outcome, 'verified');
-  assert.equal(files.get(ROOT + '/scratch.txt'), 'b');
+  assert.equal(files.get(at('scratch.txt')), 'b');
 });
 
 test('E2E: a failing executor yields OUTCOME_UNKNOWN, retry frozen', async () => {
-  const { files } = sharedFs([[ROOT + '/a.tsx', 'OLD']]);
+  const { files } = sharedFs([[at('a.tsx'), 'OLD']]);
   const flaky: SandboxFs = {
     readFile: (p: string) => (files.has(p) ? files.get(p)! : null),
     writeAtomic: () => {
@@ -107,7 +111,7 @@ test('E2E: a failing executor yields OUTCOME_UNKNOWN, retry frozen', async () =>
     realpath: (p: string) => p,
   };
   const k = new Kernel(worldOver(files));
-  const { req, payload } = writeRequest(ROOT + '/a.tsx', 'OLD', 'NEW');
+  const { req, payload } = writeRequest(at('a.tsx'), 'OLD', 'NEW');
   const pv = k.preview(req);
   const ap = k.approve(pv.actionHash);
   const r = await k.commit(ap, worktreeExecutor({ root: ROOT, fs: flaky }, payload));

@@ -9,28 +9,36 @@
 /** Risk tiers. Higher = more dangerous. T4 is prohibited outright. */
 export type Tier = 'T0' | 'T1' | 'T2' | 'T3' | 'T4';
 
-/** Kinds of action the kernel can gate. */
-export type ActionKind =
-  | 'read' // no external effect            -> T0
-  | 'local.write' // isolated worktree/scratch write -> T0
-  | 'patch.task' // TASK-section-only patch handoff -> T1
-  | 'vcs.commit'
-  | 'vcs.push'
-  | 'vcs.mr'
-  | 'jira.write'
-  | 'message.send'
-  | 'settings.change'
-  | 'payment' // -> T4 always (denied)
-  | 'destructive'; // delete / overwrite / revoke-lease
+/**
+ * Kinds of action the kernel can gate. The array is the single source of truth:
+ * the type is derived from it, so a new kind cannot be added to the union while
+ * the policy validator silently keeps ignoring it.
+ */
+export const ACTION_KINDS = [
+  'read', // no external effect              -> T0
+  'local.write', // isolated worktree/scratch write  -> T0
+  'patch.task', // scoped-marker patch handoff      -> T1
+  'vcs.commit',
+  'vcs.push',
+  'vcs.mr',
+  'jira.write',
+  'message.send',
+  'settings.change',
+  'payment', //                                -> T4 always (denied)
+  'destructive', // delete / overwrite / revoke-lease
+] as const;
+export type ActionKind = (typeof ACTION_KINDS)[number];
 
-/** Which data zones an action touches. `financial` forces T4. */
-export type DataZone =
-  | 'personal'
-  | 'company'
-  | 'cloud'
-  | 'external'
-  | 'financial'
-  | 'ephemeral';
+/** Which data zones an action touches. `financial` forces T4. Same rule as above. */
+export const DATA_ZONES = [
+  'personal',
+  'company',
+  'cloud',
+  'external',
+  'financial',
+  'ephemeral',
+] as const;
+export type DataZone = (typeof DATA_ZONES)[number];
 
 /** A proposed action. Produced by an agent; never self-approving. */
 export interface ActionRequest {
@@ -59,6 +67,9 @@ export interface Binding {
   readonly payloadHash: string;
   readonly baseHash: string;
   readonly targetRef: string;
+  /** Part of the identity: the same payload sent as a different KIND of action
+   *  is a different action, and must not share an approval. */
+  readonly kind: ActionKind;
   readonly tier: Tier;
   readonly provenanceHash: string;
 }
@@ -79,6 +90,8 @@ export interface Approval {
   readonly grantedAt: string;
   readonly grantedByOwner: true;
   readonly authenticator: AuthEvidence | null;
+  /** Who granted it, when the caller identified themselves (see L6). */
+  readonly approvedBy: string | null;
   readonly singleUse: true;
   readonly expiresAt: string;
 }
@@ -110,6 +123,29 @@ export interface Receipt {
   /** Hash over this receipt's own content + prevReceipt. */
   readonly selfHash: string;
   readonly at: string;
+
+  /**
+   * Schema version of this line. v2 adds the self-describing fields below, so a
+   * single receipt renders a complete history row with no second data source.
+   * Lines written before v2 simply lack these keys, and still verify: the hash
+   * covers exactly the keys a line carries, so the verifier needs no special case.
+   */
+  readonly schemaVersion: 2;
+  readonly kind: ActionKind;
+  readonly tier: Tier;
+  /** What was touched, as the action declared it. */
+  readonly targetRef: string;
+  /** The one human sentence that was shown in the preview. */
+  readonly summary: string;
+  /** Hash of the policy that governed this decision — which rules were in force. */
+  readonly policyHash: string;
+
+  /**
+   * Detached Ed25519 signature over `selfHash`, hex. Present only when the
+   * kernel was given a receipt signer; absent on an unsigned ledger, and a
+   * receipt still verifies its chain link either way.
+   */
+  readonly signature?: string;
 }
 
 export interface Preview {

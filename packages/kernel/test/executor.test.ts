@@ -1,6 +1,7 @@
 /** P1-02 — the WorktreeExecutor: jailed, atomic, proven. Unit + property tests. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve as pResolve, sep } from 'node:path';
 import { hashOf } from '../src/hash.js';
 import { PolicyError, type Binding } from '../src/types.js';
 import {
@@ -12,7 +13,10 @@ import {
 } from '../src/executor.js';
 import { prng, pick } from './harness.js';
 
-const ROOT = '/sandbox';
+/** Platform-native sandbox root: "/sandbox" on POSIX, "<drive>:\sandbox" on Windows. */
+const ROOT = pResolve(sep + 'sandbox');
+/** Build a path inside the sandbox the same way jail() does. */
+const at = (rel: string): string => pResolve(ROOT, rel);
 
 /** In-memory sandbox fs. `links` overrides realpath to simulate escaping symlinks. */
 function memFs(init: [string, string][] = []) {
@@ -42,18 +46,19 @@ function bindingFor(payload: WritePayload): Binding {
   return {
     payloadHash: hashOf(payload),
     baseHash: payload.expectBaseHash,
-    targetRef: ROOT + '/' + payload.relPath,
+    targetRef: at(payload.relPath),
+    kind: 'patch.task',
     tier: 'T1',
     provenanceHash: 'p',
   };
 }
 
 test('happy path: applies the write and returns a file receipt', async () => {
-  const fs = memFs([[ROOT + '/a.txt', 'old']]);
+  const fs = memFs([[at('a.txt'), 'old']]);
   const payload = makeWritePayload('a.txt', 'old', 'new');
   const exec = worktreeExecutor({ root: ROOT, fs }, payload);
   const proof = await exec(bindingFor(payload));
-  assert.equal(fs.files.get(ROOT + '/a.txt'), 'new');
+  assert.equal(fs.files.get(at('a.txt')), 'new');
   assert.equal(proof.effect, 'file:' + hashOf('new'));
 });
 
@@ -66,38 +71,38 @@ test('JAIL — no adversarial path ever resolves outside the sandbox (property)'
     assert.throws(() => jail(fs, ROOT, bad), (e) => e instanceof PolicyError && /escapes/.test(e.message));
   }
   // and a legitimate nested path is allowed
-  assert.equal(jail(memFs(), ROOT, 'src/toolbar/x.tsx'), ROOT + '/src/toolbar/x.tsx');
+  assert.equal(jail(memFs(), ROOT, 'src/toolbar/x.tsx'), at('src/toolbar/x.tsx'));
 });
 
 test('JAIL — an escaping symlink is rejected', () => {
   const fs = memFs();
-  fs.link(ROOT + '/link', '/outside/secret'); // realpath of the target points outside
+  fs.link(at('link'), pResolve(sep + 'outside', 'secret')); // realpath of the target points outside
   assert.throws(() => jail(fs, ROOT, 'link'), (e) => e instanceof PolicyError);
 });
 
 test('integrity — a payload that is not the approved one is refused', async () => {
-  const fs = memFs([[ROOT + '/a.txt', 'old']]);
+  const fs = memFs([[at('a.txt'), 'old']]);
   const approved = makeWritePayload('a.txt', 'old', 'new');
   const bound = bindingFor(approved);
   const tampered = makeWritePayload('a.txt', 'old', 'EVIL');
   const exec = worktreeExecutor({ root: ROOT, fs }, tampered); // executor holds a different payload
   await assert.rejects(() => exec(bound), (e) => e instanceof PolicyError && e.code === 'tuple-mismatch');
-  assert.equal(fs.files.get(ROOT + '/a.txt'), 'old', 'nothing written');
+  assert.equal(fs.files.get(at('a.txt')), 'old', 'nothing written');
 });
 
 test('base-check — a drifted base is refused, nothing written', async () => {
-  const fs = memFs([[ROOT + '/a.txt', 'DIFFERENT']]); // file is not what the payload expects
+  const fs = memFs([[at('a.txt'), 'DIFFERENT']]); // file is not what the payload expects
   const payload = makeWritePayload('a.txt', 'old', 'new'); // expects base "old"
   const exec = worktreeExecutor({ root: ROOT, fs }, payload);
   await assert.rejects(() => exec(bindingFor(payload)), (e) => e instanceof PolicyError && e.code === 'base-drifted');
-  assert.equal(fs.files.get(ROOT + '/a.txt'), 'DIFFERENT');
+  assert.equal(fs.files.get(at('a.txt')), 'DIFFERENT');
 });
 
 test('idempotent — re-applying an already-applied payload writes nothing (property)', async () => {
   const rnd = prng(1202);
   for (let i = 0; i < 300; i++) {
     const next = 'v' + Math.floor(rnd() * 1000);
-    const fs = memFs([[ROOT + '/a.txt', next]]); // file already equals the target
+    const fs = memFs([[at('a.txt'), next]]); // file already equals the target
     const payload = makeWritePayload('a.txt', 'old', next);
     const exec = worktreeExecutor({ root: ROOT, fs }, payload);
     const proof = await exec(bindingFor(payload));
@@ -107,7 +112,7 @@ test('idempotent — re-applying an already-applied payload writes nothing (prop
 });
 
 test('PROVEN — a lying fs (write silently drops) is caught by reconcile', async () => {
-  const files = new Map([[ROOT + '/a.txt', 'old']]);
+  const files = new Map([[at('a.txt'), 'old']]);
   const liar: SandboxFs = {
     readFile: (p) => (files.has(p) ? files.get(p)! : null),
     writeAtomic: () => {
@@ -121,7 +126,7 @@ test('PROVEN — a lying fs (write silently drops) is caught by reconcile', asyn
 });
 
 test('atomic — a throwing write surfaces as an error (kernel will mark outcome-unknown)', async () => {
-  const files = new Map([[ROOT + '/a.txt', 'old']]);
+  const files = new Map([[at('a.txt'), 'old']]);
   const flaky: SandboxFs = {
     readFile: (p) => (files.has(p) ? files.get(p)! : null),
     writeAtomic: () => {
@@ -132,5 +137,27 @@ test('atomic — a throwing write surfaces as an error (kernel will mark outcome
   const payload = makeWritePayload('a.txt', 'old', 'new');
   const exec = worktreeExecutor({ root: ROOT, fs: flaky }, payload);
   await assert.rejects(() => exec(bindingFor(payload)), /disk full/);
-  assert.equal(files.get(ROOT + '/a.txt'), 'old', 'original intact');
+  assert.equal(files.get(at('a.txt')), 'old', 'original intact');
+});
+
+test('JAIL — Windows path traps are rejected before anything resolves', () => {
+  const fs = memFs();
+  const traps: [string, RegExp][] = [
+    ['notes.txt:hidden', /alternate data stream/], // NTFS ADS — invisible content
+    ['sub/a.txt:$DATA', /alternate data stream/],
+    ['NUL', /reserved device name/], // the write is swallowed by the device
+    ['sub/con.txt', /reserved device name/],
+    ['COM1', /reserved device name/],
+    ['a.txt.', /dot or space/], // Win32 strips it: checked path != written path
+    ['sub/name ', /dot or space/],
+  ];
+  for (const [bad, expected] of traps) {
+    assert.throws(
+      () => jail(fs, ROOT, bad),
+      (e) => e instanceof PolicyError && expected.test(e.message),
+      bad,
+    );
+  }
+  // ordinary navigation still resolves normally
+  assert.equal(jail(fs, ROOT, 'src/./toolbar/x.tsx'), at('src/toolbar/x.tsx'));
 });

@@ -14,12 +14,22 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  unlinkSync,
   writeSync,
   existsSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { SandboxFs } from './executor.js';
+
+/** Write every byte. A short write would silently truncate the file. */
+function writeAll(fd: number, text: string): void {
+  const buf = Buffer.from(text, 'utf8');
+  let written = 0;
+  while (written < buf.length) {
+    written += writeSync(fd, buf, written, buf.length - written);
+  }
+}
 
 export function nodeSandboxFs(): SandboxFs {
   return {
@@ -34,14 +44,26 @@ export function nodeSandboxFs(): SandboxFs {
       const dir = dirname(absPath);
       mkdirSync(dir, { recursive: true });
       const tmp = absPath + '.' + randomBytes(6).toString('hex') + '.tmp';
-      const fd = openSync(tmp, 'wx');
       try {
-        writeSync(fd, contents, null, 'utf8');
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
+        const fd = openSync(tmp, 'wx');
+        try {
+          writeAll(fd, contents);
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+        renameSync(tmp, absPath); // atomic replace on the same filesystem
+      } catch (err) {
+        // Never leave the temp file behind inside the sandbox: it would be a
+        // file nobody approved, that no receipt describes, and that the next
+        // reader has no way to account for.
+        try {
+          unlinkSync(tmp);
+        } catch {
+          /* already gone, or never created */
+        }
+        throw err;
       }
-      renameSync(tmp, absPath); // atomic replace on the same filesystem
     },
     realpath(absPath: string): string {
       // Resolve symlinks; for a non-existent path, resolve the deepest existing ancestor.

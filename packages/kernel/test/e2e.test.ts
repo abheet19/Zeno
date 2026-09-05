@@ -14,12 +14,12 @@ test('E2E happy path: await -> approve -> commit -> VERIFIED with a receipt', as
   const world = new TestWorld();
   const k = new Kernel(world);
 
-  // A TASK patch, exactly like WEBEXT-3514 in the prototype.
+  // A TASK patch, exactly like TASK-101 in the prototype.
   const req = buildRequest(world, {
     kind: 'patch.task',
-    targetRef: 'browser-add-on@4b098d6',
+    targetRef: 'demo-repo@a1b2c3d',
     base: 'file_4b098d6',
-    payload: { file: 'InsertReplace.tsx', hunk: 'wrap <p> on single block' },
+    payload: { file: 'Editor.tsx', hunk: 'wrap <p> on single block' },
   });
 
   const pv = k.preview(req);
@@ -44,13 +44,13 @@ test('E2E drift path: await -> approve -> base moves -> REFUSED, unspent, nothin
   const k = new Kernel(world);
   const req = buildRequest(world, {
     kind: 'patch.task',
-    targetRef: 'browser-add-on@4b098d6',
+    targetRef: 'demo-repo@a1b2c3d',
     base: 'file_4b098d6',
   });
   const pv = k.preview(req);
   const ap = k.approve(pv.actionHash);
 
-  world.setBase('browser-add-on@4b098d6', 'file_d31c7a0'); // teammate pushed
+  world.setBase('demo-repo@a1b2c3d', 'file_d31c7a0'); // teammate pushed
 
   const exec = okExecutor();
   const r = await k.commit(ap, exec);

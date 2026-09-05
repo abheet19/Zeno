@@ -1,0 +1,25 @@
+{
+  "name": "@abheet19/zeno-sanitizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeno Sanitizer — the thing behind the tick. Deterministic, dependency-free secret detection and stable redaction for every sink text can leak into: a prompt, a receipt, a log line, the approval capsule.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test --experimental-test-coverage --test-coverage-exclude=\"dist/test/**\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=95 \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "typescript": "^5.6.3"
+  }
+}

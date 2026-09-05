@@ -7,6 +7,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const FORBIDDEN_IMPORTS = [
   /from\s+['"]node:https?['"]/,
@@ -31,7 +32,7 @@ function walk(dir) {
 }
 
 let violations = 0;
-const srcFiles = walk(new URL('../src', import.meta.url).pathname);
+const srcFiles = walk(fileURLToPath(new URL('../src', import.meta.url)));
 
 for (const file of srcFiles) {
   const text = readFileSync(file, 'utf8');

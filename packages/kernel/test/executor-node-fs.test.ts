@@ -37,7 +37,7 @@ test('real fs: jail accepts inside, rejects climbing out', () => {
 
 test('real fs E2E: approve → a real file on disk changes → verified', async () => {
   const fs = nodeSandboxFs();
-  const abs = join(root, 'InsertReplace.tsx');
+  const abs = join(root, 'Editor.tsx');
   fs.writeAtomic(abs, 'OLD');
 
   const tw = new TestWorld();
@@ -52,10 +52,10 @@ test('real fs E2E: approve → a real file on disk changes → verified', async 
   };
   const k = new Kernel(world);
 
-  const payload = makeWritePayload('InsertReplace.tsx', 'OLD', 'NEW');
+  const payload = makeWritePayload('Editor.tsx', 'OLD', 'NEW');
   const req: ActionRequest = {
     kind: 'patch.task',
-    summary: 'write InsertReplace.tsx',
+    summary: 'write Editor.tsx',
     targetRef: abs,
     payload,
     baseHash: payload.expectBaseHash,

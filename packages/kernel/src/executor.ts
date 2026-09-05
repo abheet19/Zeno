@@ -41,23 +41,85 @@ export interface WorktreeSpec {
   readonly fs: SandboxFs;
 }
 
+/** Windows path semantics differ from POSIX; `sep` tells us which we are on. */
+const WIN = sep === '\\';
+/** Win32 device names are real files everywhere: a write to NUL is silently swallowed. */
+const WIN_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
+
+/**
+ * Traps a POSIX-shaped jail misses on Windows. Each of these resolves *inside* the
+ * root lexically, so containment alone would wave them through:
+ *   `notes.txt:hidden` — an NTFS alternate data stream; content nobody sees again
+ *   `NUL` / `COM1`     — a device, not a file; the write vanishes
+ *   `a.txt.` / `a.txt ` — Win32 strips the trailing dot/space, so the path you
+ *                         checked is not the path you wrote
+ */
+function rejectWindowsTraps(relPath: string): void {
+  for (const segment of relPath.split(/[\\/]/)) {
+    // "." and ".." are ordinary navigation — the containment check below judges them.
+    if (segment === '' || segment === '.' || segment === '..') continue;
+    if (segment.includes(':')) {
+      throw new PolicyError('policy-schema-invalid', 'Path contains a drive marker or alternate data stream.', 'Use a plain relative path with no ":".');
+    }
+    if (WIN_RESERVED.test(segment)) {
+      throw new PolicyError('policy-schema-invalid', `Path uses the reserved device name "${segment}".`, 'Rename the file; Windows device names are not writable files.');
+    }
+    if (/[ .]$/.test(segment)) {
+      throw new PolicyError('policy-schema-invalid', 'Path segment ends with a dot or space.', 'Windows silently strips these — remove the trailing character.');
+    }
+  }
+}
+
+/**
+ * Path equality for the current platform: Windows compares case-insensitively,
+ * POSIX does not. Exported because every jail in the codebase must agree on what
+ * "the same place" means — two spellings of this is how an escape gets in.
+ */
+export function samePath(a: string, b: string): boolean {
+  return WIN ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+/** Containment test. Windows paths are case-insensitive; POSIX paths are not. */
+function contains(rootAbs: string, target: string): boolean {
+  const root = WIN ? rootAbs.toLowerCase() : rootAbs;
+  const p = WIN ? target.toLowerCase() : target;
+  return p === root || p.startsWith(root.endsWith(sep) ? root : root + sep);
+}
+
 const ABSENT = 'base_absent';
-function hashFile(contents: string | null): string {
+/**
+ * The base/post hash of a file's contents, with one canonical spelling for
+ * "absent". Exported so that a caller's `World.readBase` computes byte-for-byte
+ * the same value the executor's base-check compares against; two spellings of
+ * this would surface as a permanent and very confusing `base-drifted`.
+ */
+export function fileHash(contents: string | null): string {
   return contents === null ? ABSENT : hashOf(contents);
+}
+
+/**
+ * The fs-free half of the path-jail: platform traps plus lexical containment.
+ * Exported so that an executor with no filesystem to inject (the git executor
+ * drives the git binary, not `fs`) enforces the SAME containment rules rather
+ * than growing a second, subtly different copy of them.
+ */
+export function jailPath(root: string, relPath: string): string {
+  // 0. platform traps that resolve *inside* the root but do not mean what they say.
+  rejectWindowsTraps(relPath);
+  const rootAbs = pResolve(root);
+  const abs = pResolve(rootAbs, relPath);
+  // 1. lexical: catches "../..", absolute paths, drive letters, UNC roots.
+  if (!contains(rootAbs, abs)) {
+    throw new PolicyError('policy-schema-invalid', 'Path escapes the sandbox.', 'Use a path inside the sandbox root.');
+  }
+  return abs;
 }
 
 /** The path-jail: resolve the target and prove it stays inside the sandbox root. */
 export function jail(fs: SandboxFs, root: string, relPath: string): string {
-  const rootAbs = pResolve(root);
-  const abs = pResolve(rootAbs, relPath);
-  // 1. lexical: catches "../..", absolute paths, drive letters.
-  if (abs !== rootAbs && !abs.startsWith(rootAbs + sep)) {
-    throw new PolicyError('policy-schema-invalid', 'Path escapes the sandbox.', 'Use a path inside the sandbox root.');
-  }
-  // 2. symlink: the resolved real path must also stay inside the real root.
-  const realRoot = fs.realpath(rootAbs);
-  const realAbs = fs.realpath(abs);
-  if (realAbs !== realRoot && !realAbs.startsWith(realRoot + sep)) {
+  const abs = jailPath(root, relPath);
+  // 2. symlink (and Windows junction/reparse point): the REAL path must also stay in.
+  if (!contains(fs.realpath(pResolve(root)), fs.realpath(abs))) {
     throw new PolicyError('policy-schema-invalid', 'Path escapes the sandbox via a symlink.', 'Remove the escaping symlink or use a real path inside the root.');
   }
   return abs;
@@ -79,7 +141,7 @@ export function worktreeExecutor(spec: WorktreeSpec, payload: WritePayload): Exe
     }
 
     const abs = jail(spec.fs, spec.root, payload.relPath);
-    const before = hashFile(spec.fs.readFile(abs));
+    const before = fileHash(spec.fs.readFile(abs));
 
     // Idempotent: if the effect is already present, this is a safe no-op success.
     if (before === payload.expectPostHash) {
@@ -100,7 +162,7 @@ export function worktreeExecutor(spec: WorktreeSpec, payload: WritePayload): Exe
 
     // Reconcile: prove it. If the file on disk is not what was approved, refuse to
     // claim success — the kernel then records OUTCOME_UNKNOWN, never a false verified.
-    const after = hashFile(spec.fs.readFile(abs));
+    const after = fileHash(spec.fs.readFile(abs));
     if (after !== payload.expectPostHash) {
       throw new Error(`reconcile failed: post-state ${after.slice(0, 7)} != expected ${payload.expectPostHash.slice(0, 7)}`);
     }
@@ -113,7 +175,7 @@ export function makeWritePayload(relPath: string, base: string | null, next: str
   return {
     relPath,
     contents: next,
-    expectBaseHash: hashFile(base),
-    expectPostHash: hashFile(next),
+    expectBaseHash: fileHash(base),
+    expectPostHash: fileHash(next),
   };
 }

@@ -14,7 +14,13 @@ function sortValue(v: unknown): unknown {
   if (v === null || typeof v !== 'object') return v;
   if (Array.isArray(v)) return v.map(sortValue);
   const obj = v as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
+  // Object.create(null), NOT {}. On a plain object literal, assigning the key
+  // "__proto__" hits Object.prototype's inherited accessor instead of creating
+  // an own property, so the key — and everything under it — silently vanishes
+  // from the serialization and is covered by no hash. `JSON.parse` produces
+  // "__proto__" as an ordinary own key, so a single spliced key in a receipt
+  // line on disk would otherwise leave the chain verifying as intact.
+  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   for (const key of Object.keys(obj).sort()) out[key] = sortValue(obj[key]);
   return out;
 }

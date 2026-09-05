@@ -5,7 +5,7 @@
  */
 import { hashOf } from './hash.js';
 import type { ActionKind, ActionRequest, DataZone, Tier } from './types.js';
-import { PolicyError } from './types.js';
+import { ACTION_KINDS, DATA_ZONES, PolicyError } from './types.js';
 
 const TIER_ORDER: readonly Tier[] = ['T0', 'T1', 'T2', 'T3', 'T4'];
 
@@ -55,20 +55,7 @@ export function validatePolicy(p: Policy): void {
       'Supply a policy.json with a non-empty version string.',
     );
   }
-  const kinds: ActionKind[] = [
-    'read',
-    'local.write',
-    'patch.task',
-    'vcs.commit',
-    'vcs.push',
-    'vcs.mr',
-    'jira.write',
-    'message.send',
-    'settings.change',
-    'payment',
-    'destructive',
-  ];
-  for (const k of kinds) {
+  for (const k of ACTION_KINDS) {
     const t = p.kindTier[k];
     if (!t || !TIER_ORDER.includes(t)) {
       throw new PolicyError(
@@ -78,6 +65,28 @@ export function validatePolicy(p: Policy): void {
       );
     }
   }
+  // A zone the kernel does not recognise, or a tier it cannot rank, would be
+  // silently skipped by classify() — leaving a policy that READS stricter than it
+  // behaves. Ambiguity must round up, so refuse to load it at all.
+  const zoneTier: Readonly<Partial<Record<string, Tier>>> = p.zoneTier ?? {};
+  for (const zone of Object.keys(zoneTier)) {
+    if (!(DATA_ZONES as readonly string[]).includes(zone)) {
+      throw new PolicyError(
+        'policy-schema-invalid',
+        `Policy zoneTier names an unknown data zone "${zone}".`,
+        `Use one of: ${DATA_ZONES.join(', ')} — a misspelled zone would silently never apply.`,
+      );
+    }
+    const zt = zoneTier[zone];
+    if (zt !== undefined && !TIER_ORDER.includes(zt)) {
+      throw new PolicyError(
+        'policy-schema-invalid',
+        `Policy zone "${zone}" has an invalid tier "${String(zt)}".`,
+        `Use a tier T0–T4 for "${zone}", or remove it.`,
+      );
+    }
+  }
+
   // A policy that fails to deny payments is not a valid Zeno policy.
   if (p.kindTier.payment !== 'T4') {
     throw new PolicyError(
@@ -86,10 +95,78 @@ export function validatePolicy(p: Policy): void {
       'Set policy.kindTier.payment = "T4"; payments are prohibited by design.',
     );
   }
+  // L7 has two halves. Enforcing only the payment half would let a policy file
+  // quietly delete the financial floor, so anything merely TOUCHING financial
+  // data would fall back to its kind's tier and become approvable.
+  if (zoneTier.financial !== 'T4') {
+    throw new PolicyError(
+      'policy-schema-invalid',
+      'Policy must keep the "financial" data zone at T4.',
+      'Set policy.zoneTier.financial = "T4"; anything touching financial data is prohibited by design.',
+    );
+  }
 }
 
 export function policyHash(p: Policy): string {
   return hashOf(p);
+}
+
+/**
+ * Parse a policy document. Pure: it takes the text, never a path, so file
+ * reading stays in `policy-node-fs.ts`.
+ *
+ * Every failure is a legible `PolicyError` naming the single thing to fix. A
+ * policy is never partially applied, guessed at, or quietly replaced by the
+ * default — the unreadable one may well be the stricter of the two.
+ */
+export function loadPolicy(text: string): Policy {
+  let parsed: unknown;
+  try {
+    // Strip a leading UTF-8 byte-order mark. Every Windows editor — Notepad,
+    // VS Code's default, PowerShell's `Set-Content -Encoding utf8` — writes one,
+    // and it wraps the FILE rather than being part of the policy. Refusing to
+    // start because of it would mean the owner cannot edit their own policy with
+    // the tools they actually have.
+    parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  } catch (err) {
+    throw new PolicyError(
+      'policy-schema-invalid',
+      `Policy is not valid JSON: ${err instanceof Error ? err.message : 'parse failed'}`,
+      'Fix the syntax in policy.json, or delete the file to fall back to the built-in policy.',
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new PolicyError(
+      'policy-schema-invalid',
+      'Policy must be a JSON object.',
+      'Wrap the policy in { } with "version", "kindTier" and optionally "zoneTier".',
+    );
+  }
+  const p = parsed as Partial<Policy>;
+  if (typeof p.kindTier !== 'object' || p.kindTier === null || Array.isArray(p.kindTier)) {
+    throw new PolicyError(
+      'policy-schema-invalid',
+      'Policy is missing a "kindTier" object.',
+      'Add "kindTier" mapping every action kind to a tier T0–T4.',
+    );
+  }
+  if (
+    p.zoneTier !== undefined &&
+    (typeof p.zoneTier !== 'object' || p.zoneTier === null || Array.isArray(p.zoneTier))
+  ) {
+    throw new PolicyError(
+      'policy-schema-invalid',
+      '"zoneTier" must be an object when present.',
+      'Map each data zone to the tier floor it forces, or omit "zoneTier" entirely.',
+    );
+  }
+  const policy: Policy = {
+    version: p.version as string,
+    kindTier: p.kindTier,
+    zoneTier: p.zoneTier ?? {},
+  };
+  validatePolicy(policy); // version, every kind, every zone, and payment === T4
+  return policy;
 }
 
 export interface Classification {
@@ -100,10 +177,25 @@ export interface Classification {
 /** Deterministically classify a request. Ambiguity rounds up. */
 export function classify(req: ActionRequest, policy: Policy): Classification {
   const reasons: string[] = [];
-  let tier: Tier = policy.kindTier[req.kind];
-  reasons.push(`kind "${req.kind}" -> ${tier}`);
+  // Ambiguity rounds UP. A kind the policy has never heard of is not "no rules
+  // apply" — an undefined tier would sail straight past the T2 authenticator
+  // gate AND the T4 denial, which is the one direction this must never fail in.
+  const known = policy.kindTier[req.kind];
+  let tier: Tier = known ?? 'T4';
+  reasons.push(
+    known === undefined
+      ? `kind "${req.kind}" is not in the policy -> T4 (prohibited)`
+      : `kind "${req.kind}" -> ${tier}`,
+  );
 
   for (const zone of req.dataZones) {
+    if (!(DATA_ZONES as readonly string[]).includes(zone)) {
+      // Same rule as an unknown kind. A zone nobody has classified is not
+      // "harmless by default" — treating it that way fails open.
+      if (tierRank('T4') > tierRank(tier)) tier = 'T4';
+      reasons.push(`data zone "${zone}" is not recognised -> T4 (prohibited)`);
+      continue;
+    }
     const zt = policy.zoneTier[zone];
     if (zt && tierRank(zt) > tierRank(tier)) {
       tier = zt;
