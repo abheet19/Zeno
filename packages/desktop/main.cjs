@@ -26,6 +26,12 @@ const { spawn } = require('node:child_process');
 const { join, dirname } = require('node:path');
 const { existsSync } = require('node:fs');
 
+// Electron names its per-user data directory after the packaged app's
+// package.json `name`, which here is the npm workspace root — so it would
+// write to AppData\Roaming\@abheet19\zeno-workspace\. Say the product's name
+// once, before anything asks for a path, and it becomes AppData\Roaming\Zeno.
+app.setName('Zeno');
+
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.ZENO_PORT || 7317);
 const ORIGIN = `http://${HOST}:${PORT}`;
@@ -59,27 +65,56 @@ function startDaemon() {
     const entry = daemonEntry();
     if (!entry) return reject(new Error('The Zeno daemon build was not found. Run "npm run build" first.'));
 
+    // Where an installed Zeno keeps its receipts. The daemon's own default is
+    // `.zeno` resolved against the working directory, which is exactly right
+    // for a checkout and quietly wrong for an installed application: launched
+    // from the Start menu the working directory is arbitrary, and under
+    // Program Files it is not writable at all. So the packaged app names a
+    // per-user location instead. A checkout keeps the old behaviour, and an
+    // explicit ZENO_DIR still wins over both.
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', ZENO_NO_OPEN: '1' };
+    if (app.isPackaged && !env.ZENO_DIR) {
+      env.ZENO_DIR = join(app.getPath('userData'), 'workspace');
+    }
+
     daemon = spawn(process.execPath, [entry], {
       // ELECTRON_RUN_AS_NODE makes Electron's bundled binary behave as plain
       // Node, so the daemon runs without needing Node installed on the machine.
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ZENO_NO_OPEN: '1' },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     let settled = false;
     const done = (u) => { if (!settled) { settled = true; resolve(u); } };
 
+    // Keep what the daemon says on its way out. When it refuses to start it
+    // explains why in plain words — the port is taken, the workspace is held
+    // by another copy — and that sentence is the entire diagnosis. Reporting
+    // only "exited (code 1)" throws the answer away and leaves the owner with
+    // a dead end to guess at.
+    let said = '';
+    const remember = (text) => { if (said.length < 4000) said += text; };
+
     daemon.stdout.on('data', (b) => {
       const text = String(b);
       process.stdout.write(text);
+      remember(text);
       const m = text.match(/http:\/\/127\.0\.0\.1:\d+\/\?k=[a-f0-9]+/);
       if (m) done(m[0]);
     });
-    daemon.stderr.on('data', (b) => process.stderr.write(String(b)));
+    daemon.stderr.on('data', (b) => {
+      const text = String(b);
+      process.stderr.write(text);
+      remember(text);
+    });
     daemon.on('error', reject);
     daemon.on('exit', (code) => {
       daemon = null;
-      if (!settled) reject(new Error(`The daemon exited before it was ready (code ${code}).`));
+      if (settled) return;
+      const explained = said.trim();
+      reject(new Error(explained !== ''
+        ? explained
+        : `The daemon exited before it was ready (code ${code}), and gave no reason.`));
     });
 
     // If the banner never arrives, fall back to the bare origin rather than
