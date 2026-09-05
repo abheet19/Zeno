@@ -14,7 +14,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import {
   Kernel,
   PolicyError,
@@ -76,6 +76,17 @@ export interface DaemonOptions {
   readonly kernel: Kernel;
   /** Absolute path to the sandbox root. Nothing is written outside it. */
   readonly sandbox: string;
+  /**
+   * The workspace directory this daemon owns — where `proposer.token`, the
+   * ledger and the lock live.
+   *
+   * Optional, and NOT derived from `sandbox` when it is missing. It exists so a
+   * 401 can point at the actual file the caller should have read, and a message
+   * that guessed a path would be the same class of lie it is there to fix: an
+   * in-memory daemon with a bare temp sandbox has no such file, and must say
+   * nothing rather than name one.
+   */
+  readonly workspace?: string;
   readonly fs: SandboxFs;
   readonly tokens: Tokens;
   readonly stream: Stream;
@@ -209,6 +220,16 @@ const MIME: Readonly<Record<string, string>> = {
 const TREE_CAP = 2000;
 const FILE_LINE_CAP = 4000;
 
+/**
+ * Search's two caps, in the same spirit. `SEARCH_MATCH_CAP` bounds how many
+ * matching lines cross the wire; `SEARCH_TEXT_CAP` bounds ONE line, because a
+ * minified bundle is a single line megabytes long and `git grep` will happily
+ * hand the whole of it over. Both are reported (`truncated`, `clipped`) so the
+ * panel says it is showing a part.
+ */
+const SEARCH_MATCH_CAP = 500;
+const SEARCH_TEXT_CAP = 400;
+
 export function createServer(opts: DaemonOptions): Server {
   const held = new Map<string, Held>();
   const publicRoot = resolve(opts.publicDir);
@@ -296,12 +317,42 @@ export function createServer(opts: DaemonOptions): Server {
     }
 
     // ---- everything below is authenticated ---------------------------------
+    //
+    // Two different failures, and they had one answer between them. "You sent no
+    // token" and "you sent a token this daemon has never issued" need opposite
+    // things done about them, and the second is the common one on this machine:
+    // tokens are minted per PROCESS, so a `proposer.token` read out of the wrong
+    // workspace — or out of the right workspace after a restart — is a perfectly
+    // well-formed credential belonging to some other daemon. Answering that with
+    // "this endpoint needs a Zeno token" sends the owner looking for a header
+    // they already sent.
+    //
+    // The old `resolve` then compounded it: "The daemon prints both tokens on
+    // startup." It prints NEITHER. The proposer token is written to
+    // <workspace>/proposer.token precisely so a live credential stays out of
+    // shell scrollback, and the owner token is handed only to an authorised
+    // window. The fix told the owner to go read something that does not exist.
     if (role === null) {
+      // An EMPTY header or cookie is "none sent", not "a token that was wrong":
+      // the read-only shell is served with an empty meta token on purpose, and
+      // its fetches must not be told their credential was rejected.
+      const sent = (v: string | undefined): boolean => typeof v === 'string' && v.trim() !== '';
+      const presented = sent(header(req, 'x-zeno-token')) || sent(cookie(req, 'zeno_token'));
       return json(res, 401, {
         error: {
-          code: 'unauthenticated',
-          message: 'This endpoint needs a Zeno token.',
-          resolve: 'Send it as the "x-zeno-token" header. The daemon prints both tokens on startup.',
+          code: presented ? 'token-not-recognised' : 'unauthenticated',
+          message: presented
+            ? 'That token is not one this daemon issued.'
+            : 'This endpoint needs a Zeno token, and none was sent.',
+          resolve: presented
+            ? 'Tokens are minted fresh by each daemon process, so one from another workspace — or ' +
+              'from a previous run of this one — is never valid here. Re-read the proposer token ' +
+              `from ${tokenFileLabel()}, and check that ZENO_DIR and ZENO_PORT name the same Zeno ` +
+              'you meant.'
+            : `Send it as the "x-zeno-token" header. The proposer token is in ${tokenFileLabel()}; ` +
+              'it is never printed, because a live credential does not belong in a log. The owner ' +
+              'token is only ever handed to the window this daemon serves, by opening the ?k= URL ' +
+              'it announced.',
         },
       });
     }
@@ -322,6 +373,7 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'POST' && path === '/approvals') return await postApproval(req, res, role);
     if (req.method === 'GET' && path === '/forge/status') return serveForgeStatus(res);
     if (req.method === 'GET' && path === '/forge/file') return serveForgeFile(res, url);
+    if (req.method === 'GET' && path === '/forge/search') return serveForgeSearch(res, url);
     if (req.method === 'POST' && path === '/forge/commit') return await postForgeCommit(req, res, role);
     if (req.method === 'GET' && path === '/skills') return serveSkills(res);
     if (req.method === 'GET' && path === '/forge/agents') return await serveForgeAgents(res);
@@ -386,6 +438,17 @@ export function createServer(opts: DaemonOptions): Server {
     }
     res.writeHead(200, headers);
     res.end(withToken);
+  }
+
+  /**
+   * How to name the proposer token file in an error, without ever naming one
+   * that may not exist. A daemon told its workspace points at the real path; one
+   * that was not says where the file lives in words, and guesses nothing.
+   */
+  function tokenFileLabel(): string {
+    return opts.workspace === undefined
+      ? 'the proposer.token file in the workspace directory this daemon was started with'
+      : join(opts.workspace, 'proposer.token');
   }
 
   function isStaticish(path: string): boolean {
@@ -625,6 +688,99 @@ export function createServer(opts: DaemonOptions): Server {
       truncated,
       eol: /\r\n/.test(contents) ? 'CRLF' : 'LF',
       encoding: 'UTF-8',
+    });
+  }
+
+  /**
+   * Search the sandbox — `git grep -n`, and nothing more than that. READ ONLY,
+   * like /forge/file, and built to the same shape on purpose.
+   *
+   * WHY GIT GREP AND NOT AN INDEX. There is no index here and inventing one
+   * would mean a second source of truth about the repository that can go stale.
+   * git already knows exactly which files are in this working tree, already
+   * honours .gitignore, and already skips binaries with `-I`. The answer this
+   * route gives is therefore the same set of files the Explorer tree draws.
+   *
+   * THE JAIL. Two arguments reach a subprocess, and both are closed:
+   *
+   *   the QUERY is passed after `-e`, so a query that begins with `-` is a
+   *     pattern and never an option; and `-F` makes it a fixed string, so it is
+   *     not a regular expression either. `nodeGitRunner` spawns with
+   *     `shell: false`, so nothing re-parses it.
+   *
+   *   the SCOPE goes through the SAME `jail()` the file route and the executor
+   *     use — Windows traps, lexical containment, then a realpath check for
+   *     symlinks and junctions — and is refused with the identical 403
+   *     path-escape answer. It is then handed to git as `:(literal)<rel>`:
+   *     without that prefix a scope like `:(exclude)src` is pathspec MAGIC
+   *     rather than a path, and git would read it as an instruction. `:(literal)`
+   *     makes the scope mean the directory it spells and nothing else.
+   *
+   * Exit codes are git's: 0 found something, 1 found nothing (NOT an error —
+   * an empty result is a real answer), anything else is a failure we report as
+   * a failure rather than as "no matches".
+   */
+  function serveForgeSearch(res: ServerResponse, url: URL): void {
+    const query = url.searchParams.get('q');
+    if (query === null || query.trim() === '') {
+      return json(res, 400, {
+        error: { code: 'bad-request', message: 'Name what to search for.', resolve: 'GET /forge/search?q=useState' },
+      });
+    }
+
+    // The optional scope. Absent means the whole sandbox; present means one
+    // directory or file inside it, and "inside it" is the jail's word, not ours.
+    const scope = url.searchParams.get('path');
+    let pathspec: string | null = null;
+    if (scope !== null && scope.trim() !== '') {
+      let abs: string;
+      try {
+        abs = jail(opts.fs, opts.sandbox, scope);
+      } catch {
+        // One shape for every escape, exactly as /forge/file answers. The reply
+        // must not say WHICH trick was tried, or it becomes a probe for what
+        // lives outside the sandbox.
+        return json(res, 403, {
+          error: { code: 'path-escape', message: 'That path leaves the sandbox.', resolve: 'Search a path inside the sandbox.' },
+        });
+      }
+      // git wants a repo-relative pathspec with forward slashes, even on Windows.
+      const rel = relative(opts.sandbox, abs).split(sep).join('/');
+      pathspec = rel === '' ? '.' : rel;
+    }
+
+    const run = (args: readonly string[]) => gitRunner.run(args, opts.sandbox);
+    if (run(['rev-parse', '--is-inside-work-tree']).status !== 0) {
+      return json(res, 200, {
+        query, scope: scope ?? null, repo: false, matches: [], files: 0, total: 0, truncated: false,
+        note: 'The sandbox is not a git repository yet, so there is nothing to search.',
+      });
+    }
+
+    const args = ['grep', '--no-color', '-n', '-z', '-I', '-F', '-i', '--untracked', '-e', query];
+    if (pathspec !== null) args.push('--', `:(literal)${pathspec}`);
+    const r = run(args);
+    if (r.status !== 0 && r.status !== 1) {
+      return json(res, 500, {
+        error: {
+          code: 'search-failed',
+          message: `git grep could not run: ${r.stderr.trim() || `it exited ${r.status}`}`,
+          resolve: 'Check that git is installed and that the sandbox is a healthy repository.',
+        },
+      });
+    }
+
+    const all = parseGrep(r.stdout);
+    const truncated = all.length > SEARCH_MATCH_CAP;
+    const matches = truncated ? all.slice(0, SEARCH_MATCH_CAP) : all;
+    json(res, 200, {
+      query,
+      scope: scope ?? null,
+      repo: true,
+      matches,
+      files: new Set(matches.map((m) => m.path)).size,
+      total: all.length,
+      truncated,
     });
   }
 
@@ -931,7 +1087,24 @@ export function createServer(opts: DaemonOptions): Server {
       const result = agentId === 'local'
         ? await runLocalModel(tree.path, task, model, effort)
         : runAgent({ agentId, task, worktree: tree.path, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, nodeSpawner());
-      const changed = result.ok ? diffFiles(tree.path, gitRunner) : [];
+      // ALWAYS ask git what is in the worktree — never `result.ok ? … : []`.
+      //
+      // That conditional destroyed real work and then said nothing had happened.
+      // An agent that edits three files and THEN exits non-zero — an API error,
+      // a rate limit, a crash after the writes — is the ordinary case, not an
+      // exotic one, and `runner.ts` already says what to do with it: "we could
+      // still read what it left behind — hand the changeset to the gate anyway,
+      // but say the run did not succeed." This function threw those files away,
+      // reported `changed: []`, and then deleted the worktree in the `finally`
+      // below, so the window told the owner "No changes were proposed" about a
+      // run that had proposed several and lost them irrecoverably.
+      //
+      // `diffFiles` is a read-only git status of the worktree, so this invents
+      // nothing: a run that truly changed nothing still reports nothing. What
+      // changed is that a failed run no longer has its output silently deleted.
+      // The failure itself is not hidden — `run.ok` and `run.note` travel in the
+      // same response and the surfaces render them.
+      const changed = diffFiles(tree.path, gitRunner);
       const proposed: ProposedChange[] = [];
       for (const rel of changed) {
         let contents: string;
@@ -1968,6 +2141,50 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
 function header(req: IncomingMessage, name: string): string | undefined {
   const v = req.headers[name];
   return Array.isArray(v) ? v[0] : v;
+}
+
+/** One matching line, exactly as git reported it. */
+interface GrepMatch {
+  readonly path: string;
+  readonly line: number;
+  readonly text: string;
+  /** True when the line was longer than SEARCH_TEXT_CAP and was cut here. */
+  readonly clipped: boolean;
+}
+
+/**
+ * Parse `git grep -n -z` output: `<path> NUL <line> NUL <text> LF`, repeating.
+ *
+ * Scanned with a cursor rather than split on a separator, and that is not
+ * fussiness — `-z` exists precisely so a path may contain anything, newline
+ * included. Splitting the stream on LF would cut such a record in half and
+ * report a path fragment as a filename. The NULs are the frame; the LF only
+ * ends a record whose text is already known to hold none (grep is line-based,
+ * and `-I` has already dropped every file that could carry a stray NUL).
+ */
+function parseGrep(stdout: string): GrepMatch[] {
+  const out: GrepMatch[] = [];
+  let i = 0;
+  while (i < stdout.length) {
+    const afterPath = stdout.indexOf('\u0000', i);
+    if (afterPath === -1) break;
+    const afterLine = stdout.indexOf('\u0000', afterPath + 1);
+    if (afterLine === -1) break;
+    let end = stdout.indexOf('\n', afterLine + 1);
+    if (end === -1) end = stdout.length;
+    const n = Number(stdout.slice(afterPath + 1, afterLine));
+    // A CRLF working tree leaves the CR on the end of every line git hands back.
+    const raw = stdout.slice(afterLine + 1, end).replace(/\r$/, '');
+    const clipped = raw.length > SEARCH_TEXT_CAP;
+    out.push({
+      path: stdout.slice(i, afterPath),
+      line: Number.isInteger(n) ? n : 0,
+      text: clipped ? raw.slice(0, SEARCH_TEXT_CAP) : raw,
+      clipped,
+    });
+    i = end + 1;
+  }
+  return out;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

@@ -662,6 +662,154 @@ test('Forge — the code pane reads a sandbox file, and a path that escapes is r
   }
 });
 
+test('Forge — search is a real git grep over the sandbox, and a path that escapes is refused', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { nodeWorkDesk: desk } = await import('../src/work.js');
+
+  // git must be present; skip cleanly if not (CI without git)
+  try { execFileSync('git', ['--version']); } catch { return; }
+
+  const dir = mkdtempSync(join(tmpdir(), 'zeno-search-'));
+  const sandbox = join(dir, 'sandbox');
+  mkdirSync(join(sandbox, 'src', 'deep'), { recursive: true });
+  execFileSync('git', ['init'], { cwd: sandbox });
+  execFileSync('git', ['config', 'user.email', 't@t.local'], { cwd: sandbox });
+  execFileSync('git', ['config', 'user.name', 'T'], { cwd: sandbox });
+
+  // Something real to steal, one level ABOVE the sandbox — with the needle in
+  // it, so an escape that were allowed would visibly return its contents.
+  writeFileSync(join(dir, 'secrets.txt'), 'useState TOP SECRET\n');
+
+  writeFileSync(join(sandbox, 'src', 'App.tsx'), 'const a = 1;\nconst useState = 2;\nconst abc = 3;\n');
+  writeFileSync(join(sandbox, 'src', 'deep', 'Other.tsx'), 'import { useState } from "react";\n');
+  writeFileSync(join(sandbox, 'src', 'Flags.ts'), 'const flag = "--untracked";\n');
+  writeFileSync(join(sandbox, 'src', 'Shout.ts'), 'const USESTATE_MAX = 9;\n');
+  // Untracked, ignored and binary: three files git knows how to tell apart, and
+  // the route's answer must agree with git's own view of the working tree.
+  writeFileSync(join(sandbox, 'src', 'New.tsx'), 'untracked useState here\n');
+  writeFileSync(join(sandbox, '.gitignore'), 'ignored.txt\n');
+  writeFileSync(join(sandbox, 'ignored.txt'), 'ignored useState here\n');
+  writeFileSync(join(sandbox, 'blob.bin'), 'binary useState' + String.fromCharCode(0) + 'tail\n');
+  execFileSync('git', ['add', 'src/App.tsx', 'src/deep/Other.tsx', 'src/Flags.ts', 'src/Shout.ts', '.gitignore', 'blob.bin'], { cwd: sandbox });
+  execFileSync('git', ['commit', '-m', 'seed'], { cwd: sandbox });
+
+  const fs = nodeSandboxFs();
+  const tokens = mintTokens();
+  const server = createServer({
+    kernel: new Kernel(nodeWorld(fs), { store: nodeLedgerStore(join(dir, 'l.jsonl')) }),
+    sandbox, fs, tokens, stream: new Stream(), publicDir: join(dir, 'public'),
+    work: desk(dir),
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const search = (qs: string, token: string | null = tokens.owner) =>
+    fetch(base + '/forge/search?' + qs, { headers: token === null ? {} : { 'x-zeno-token': token } });
+  interface Hit { path: string; line: number; text: string; clipped: boolean }
+  interface Answer { repo: boolean; matches: Hit[]; files: number; total: number; truncated: boolean }
+
+  try {
+    // The needle, with its REAL line number and the REAL line beside it.
+    const res = await search('q=useState');
+    assert.equal(res.status, 200);
+    const d = await res.json() as Answer;
+    assert.equal(d.repo, true);
+    const app = d.matches.find((m) => m.path === 'src/App.tsx');
+    assert.ok(app, 'the tracked file that contains the needle is a hit');
+    assert.equal(app.line, 2, 'the line number is git grep -n\u2019s, not a guess');
+    assert.equal(app.text, 'const useState = 2;', 'the matching line is carried verbatim');
+    assert.ok(d.matches.some((m) => m.path === 'src/deep/Other.tsx'), 'a nested file is searched too');
+
+    // What git considers part of the working tree is what is searched: an
+    // untracked file IS, an ignored one is NOT, and a binary one is NOT.
+    assert.ok(d.matches.some((m) => m.path === 'src/New.tsx'), 'an untracked file is searched (--untracked)');
+    assert.ok(!d.matches.some((m) => m.path === 'ignored.txt'), '.gitignore is honoured');
+    assert.ok(!d.matches.some((m) => m.path === 'blob.bin'), 'a binary file is skipped (-I), never rendered as source');
+
+    // And nothing outside the sandbox is ever reachable, escape or no escape.
+    assert.ok(!d.matches.some((m) => m.path.includes('secrets')), 'the file above the sandbox is not in the tree');
+    assert.equal(d.files, new Set(d.matches.map((m) => m.path)).size, 'the file count is the files actually returned');
+    assert.equal(d.total, d.matches.length);
+    assert.equal(d.truncated, false);
+
+    // Case-insensitive, so the panel finds what the eye meant.
+    const shout = await (await search('q=' + encodeURIComponent('usestate_max'))).json() as Answer;
+    assert.ok(shout.matches.some((m) => m.path === 'src/Shout.ts'), 'the search is case-insensitive');
+
+    // FIXED STRING, not a regular expression: "a.c" must not match "abc", or
+    // every query with a dot in it would quietly answer about other files.
+    const dotted = await (await search('q=' + encodeURIComponent('a.c'))).json() as Answer;
+    assert.equal(dotted.total, 0, 'the query is a fixed string (-F); "." is a full stop, not "any character"');
+
+    // A query that LOOKS like an option is a query. It arrives after `-e`, so
+    // git can never read it as a flag.
+    const flagish = await search('q=' + encodeURIComponent('--untracked'));
+    assert.equal(flagish.status, 200, 'a query beginning with "-" is a pattern, not an argument to git');
+    const flags = await flagish.json() as Answer;
+    assert.ok(flags.matches.some((m) => m.path === 'src/Flags.ts'), 'and it finds the literal text');
+
+    // A scope narrows the search to one directory inside the sandbox.
+    const scoped = await (await search('q=useState&path=' + encodeURIComponent('src/deep'))).json() as Answer;
+    assert.deepEqual([...new Set(scoped.matches.map((m) => m.path))], ['src/deep/Other.tsx'], 'the scope is honoured');
+
+    // A scope is a PATH, never a git pathspec. `src/*.tsx` is a glob to git and
+    // would match two files here — but the route sends `:(literal)`, so the
+    // scope means the one (absent) file it spells, and matches nothing. Without
+    // that prefix this returns hits, which is the whole point of asserting it:
+    // a scope box that silently accepts pathspec magic is a scope box that can
+    // be told to do something other than scope.
+    const glob = await search('q=useState&path=' + encodeURIComponent('src/*.tsx'));
+    assert.equal(glob.status, 200);
+    assert.equal((await glob.json() as Answer).total, 0,
+      'the scope is a literal path — git pathspec magic (globs) is not interpreted');
+
+    // And magic that carries a colon never even reaches git: the jail refuses a
+    // segment containing ":" on every platform (it is an NTFS stream marker).
+    const colon = await search('q=useState&path=' + encodeURIComponent(':(exclude)src/App.tsx'));
+    assert.equal(colon.status, 403, ':(exclude) is refused as a path, not obeyed as an instruction');
+    assert.equal((await colon.json() as { error: { code: string } }).error.code, 'path-escape');
+
+    // A needle that is simply not there is an empty answer, never an error.
+    const none = await search('q=' + encodeURIComponent('zzz-not-in-this-repo'));
+    assert.equal(none.status, 200, 'git grep exits 1 for "no matches" — that is an answer, not a failure');
+    assert.equal((await none.json() as Answer).total, 0);
+
+    // THE JAIL. Every shape of escape is refused with the same answer and no
+    // matches — traversal, an absolute path, a Windows drive letter, a UNC root.
+    const escapes = ['..', '../secrets.txt', 'src/../../secrets.txt', '/etc', 'C:\\Windows', '\\\\server\\share\\x'];
+    for (const bad of escapes) {
+      const r = await search('q=useState&path=' + encodeURIComponent(bad));
+      assert.equal(r.status, 403, `${bad} must be refused, not searched`);
+      const body = await r.json() as { error: { code: string }; matches?: unknown };
+      assert.equal(body.error.code, 'path-escape', `${bad} is refused as a path escape`);
+      assert.equal(body.matches, undefined, `${bad} must not leak a single line`);
+    }
+
+    // No query at all is a bad request, not a dump of the repository.
+    assert.equal((await search('q=')).status, 400);
+    assert.equal((await fetch(base + '/forge/search', { headers: { 'x-zeno-token': tokens.owner } })).status, 400);
+
+    // And an unauthenticated search is refused before the jail is even reached.
+    assert.equal((await search('q=useState', null)).status, 401, 'search sits behind the same token gate as the rest');
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Forge — search over a sandbox that is not a repository says so instead of failing', async () => {
+  const h = await start();
+  try {
+    const res = await fetch(h.base + '/forge/search?q=anything', { headers: { 'x-zeno-token': h.owner } });
+    assert.equal(res.status, 200, 'no repository is an answer, not a 500');
+    const d = await res.json() as { repo: boolean; matches: unknown[]; note: string };
+    assert.equal(d.repo, false);
+    assert.deepEqual(d.matches, []);
+    assert.match(d.note, /not a git repository/);
+  } finally {
+    await h.close();
+  }
+});
+
 test('Forge — the model/effort picker is served', async () => {
   const h = await start();
   try {

@@ -200,7 +200,9 @@ function main(): void {
   // missing directory is an empty archive, so a first run needs no setup.
   const meetings = new Meetings(nodeMeetingStore(join(dir, 'meetings')));
   const launchNonce = randomBytes(18).toString('hex');
-  const server = createServer({ kernel, sandbox, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce });
+  // `workspace` is passed so a 401 can name the exact proposer.token file the
+  // caller should have read, instead of telling them the daemon printed it.
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce });
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in

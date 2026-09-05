@@ -23,17 +23,33 @@ export interface ProposeResult {
 }
 
 export async function propose(o: ProposeOptions): Promise<ProposeResult> {
-  const res = await fetch(`${o.url.replace(/\/$/, '')}/previews`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-zeno-token': o.token },
-    body: JSON.stringify({
-      relPath: o.relPath,
-      contents: o.contents,
-      summary: o.summary,
-      ...(o.kind === undefined ? {} : { kind: o.kind }),
-      ...(o.requestedBy === undefined ? {} : { requestedBy: o.requestedBy }),
-    }),
-  });
+  const endpoint = `${o.url.replace(/\/$/, '')}/previews`;
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': o.token },
+      body: JSON.stringify({
+        relPath: o.relPath,
+        contents: o.contents,
+        summary: o.summary,
+        ...(o.kind === undefined ? {} : { kind: o.kind }),
+        ...(o.requestedBy === undefined ? {} : { requestedBy: o.requestedBy }),
+      }),
+    });
+  } catch (err) {
+    // A daemon that is not there used to surface as a bare `TypeError: fetch
+    // failed` from the top-level handler — no address, no hint that the CLI had
+    // chosen the address itself from ZENO_PORT. The one fact the owner needs is
+    // WHERE this went, because a wrong port is the likeliest cause and is
+    // invisible otherwise.
+    o.log('');
+    o.log(`  NOT SENT — nothing reached a daemon at ${endpoint}`);
+    o.log(`     ${err instanceof Error ? err.message : String(err)}`);
+    o.log('     Is a Zeno running there? Set --url, or ZENO_PORT to the port it announced.');
+    o.log('');
+    return { status: 0, body: null };
+  }
   const body: unknown = await res.json().catch(() => ({}));
   render(res.status, body, o.log);
   return { status: res.status, body };

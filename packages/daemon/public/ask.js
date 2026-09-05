@@ -206,16 +206,34 @@ function clearAnswer() {
   ui.dState.textContent = '';
 }
 
-/** The one sentence said after any run, in the only terms that are true. */
-function renderRunResult(proposedList, note) {
+/**
+ * The one sentence said after any run, in the only terms that are true.
+ *
+ * `ok` is read as well as the count, because the two are independent. The
+ * daemon no longer discards what a FAILED agent wrote — an agent that edits
+ * files and then exits non-zero used to have its work deleted and be reported
+ * as "no changes", which is how real edits went missing. Now those files arrive
+ * here, and a run that did not finish must not be announced in the same words
+ * as one that did: the count is stated, and so is the failure, in that order.
+ */
+function renderRunResult(proposedList, note, ok) {
   const proposed = Array.isArray(proposedList) ? proposedList.length : 0;
   if (proposed > 0) {
-    ui.dState.textContent =
-      `${proposed} change${proposed === 1 ? '' : 's'} proposed — review them in Command. ` +
-      'None has been applied; each is waiting for your approval.';
-    ui.dState.style.color = 'var(--green,#5BB98C)';
+    const many = proposed === 1 ? '' : 's';
+    const failed = ok === false;
+    ui.dState.textContent = failed
+      ? `The run did NOT finish — ${note ? String(note) : 'the agent stopped early'}. ` +
+        `It had already written ${proposed} file${many}, which ${proposed === 1 ? 'is' : 'are'} kept ` +
+        'and waiting for you in Command rather than thrown away. Read them before you approve: ' +
+        'a run that stopped early may have left them half-finished.'
+      : `${proposed} change${many} proposed — review them in Command. ` +
+        'None has been applied; each is waiting for your approval.';
+    ui.dState.style.color = failed ? 'var(--amber,#E0A128)' : 'var(--green,#5BB98C)';
     ui.dLink.hidden = false;
-    setStatus(`${proposed} change${proposed === 1 ? '' : 's'} proposed.`, 'ok');
+    setStatus(
+      failed ? `The run failed after writing ${proposed} file${many}.` : `${proposed} change${many} proposed.`,
+      failed ? 'warn' : 'ok',
+    );
     return;
   }
   // A run that changed nothing is a real outcome, said as one, with the agent's
@@ -260,7 +278,7 @@ function renderDelegation(d) {
     ui.dWhy.textContent =
       'This ran on your machine. Your code did not leave it, and nothing it wrote has been applied.';
     ui.dWhy.style.color = 'var(--ink-2,#9AA1AC)';
-    renderRunResult(d.proposed, d.note);
+    renderRunResult(d.proposed, d.note, d.ok);
     return;
   }
 
@@ -293,7 +311,7 @@ async function confirmHosted(d) {
       setStatus('The run was refused.', 'warn');
       return;
     }
-    renderRunResult(data.proposed, data.run && data.run.note);
+    renderRunResult(data.proposed, data.run && data.run.note, data.run ? data.run.ok : undefined);
   } catch (e) {
     ui.dState.textContent = `Network error during the run: ${e && e.message ? e.message : e}.`;
     ui.dState.style.color = 'var(--amber,#E0A128)';

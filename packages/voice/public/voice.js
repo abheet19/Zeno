@@ -1209,16 +1209,36 @@ function showDelegate(task, agentId, model) {
   ui.delegateState.textContent = '';
 }
 
-/** The one sentence said after any run, in the only terms that are true. */
+/**
+ * The one sentence said after any run, in the only terms that are true.
+ *
+ * `d.ok` matters as much as the count. The daemon no longer throws away what a
+ * failed agent wrote — an agent that edits files and then exits non-zero used to
+ * have its work deleted and be reported as "no changes" — so a run can now
+ * arrive here with files AND a failure. Spoken work is the surface where that
+ * matters most: the owner is not looking at the screen, so "3 changes proposed"
+ * said in a satisfied green about a run that crashed halfway would be the last
+ * thing they hear about it.
+ */
 function renderRunResult(d) {
   const proposed = Array.isArray(d.proposed) ? d.proposed.length : 0;
   if (proposed > 0) {
-    ui.delegateState.textContent =
-      `${proposed} change${proposed === 1 ? '' : 's'} proposed. ` +
-      'None of them has been applied — each is waiting for your approval in this window.';
-    ui.delegateState.style.color = 'var(--green,#5BB98C)';
+    const many = proposed === 1 ? '' : 's';
+    const failed = d.ok === false;
+    ui.delegateState.textContent = failed
+      ? `The run did NOT finish — ${d.note ? String(d.note) : 'the agent stopped early'}. ` +
+        `It had already written ${proposed} file${many}; ${proposed === 1 ? 'it is' : 'they are'} ` +
+        'kept and waiting for your approval rather than thrown away, and may be half-finished.'
+      : `${proposed} change${many} proposed. ` +
+        'None of them has been applied — each is waiting for your approval in this window.';
+    ui.delegateState.style.color = failed ? 'var(--amber,#E0A128)' : 'var(--green,#5BB98C)';
     ui.delegateLink.hidden = false;
-    setOutcome(`${proposed} change${proposed === 1 ? '' : 's'} proposed — review them in Command.`, 'ok');
+    setOutcome(
+      failed
+        ? `The run failed after writing ${proposed} file${many} — read them in Command before approving.`
+        : `${proposed} change${many} proposed — review them in Command.`,
+      failed ? 'warn' : 'ok',
+    );
     return;
   }
   // A run that changed nothing is a real outcome and is said as one, with the
@@ -1346,7 +1366,7 @@ async function confirmHosted(plan) {
     // /forge/run answers in the same terms: what it changed, and what is now
     // waiting. Rendered through the same function, so a hosted run and a local
     // one cannot end up described differently.
-    renderRunResult({ proposed: data.proposed, note: data.run && data.run.note });
+    renderRunResult({ proposed: data.proposed, note: data.run && data.run.note, ok: data.run ? data.run.ok : undefined });
   } catch (e) {
     ui.delegateState.textContent = `Network error during the run: ${e && e.message ? e.message : e}.`;
     ui.delegateState.style.color = 'var(--amber,#E0A128)';

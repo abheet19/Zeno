@@ -17,6 +17,7 @@
  *                            trackedTotal, trackedCapped }   the tree and rgE
  *   GET  /forge/file    -> { contents, lines, bytes, eol, encoding, truncated }
  *                                                            the code pane
+ *   GET  /forge/search  -> { matches[], files, total, truncated }  the Search panel
  *   GET  /forge/agents  -> { agents[], efforts[], localModels[] }  the pickers
  *   POST /forge/run     -> { run:{ok,agentId,model,effort,log,note}, changed[],
  *                            proposed[] }                    the chat
@@ -24,10 +25,12 @@
  *
  * WHERE THERE IS NO REAL SOURCE, THE PANEL SAYS SO. Forge has no test runner, no
  * CI, no terminal, no rules engine and no MCP registry — so the Tests, CI,
- * Terminal, Search, Rules, MCP, Debug and Plan surfaces render a plain sentence
+ * Terminal, Rules, MCP, Debug and Plan surfaces render a plain sentence
  * naming what is missing, and render nothing else. A panel that invented a
  * passing test run would be worse than an absent panel; it would be a lie the
  * owner cannot see through. `renderUnwired()` is the single shape all of them use.
+ * Search LEFT that list: it is `git grep -n` through /forge/search now, and its
+ * hint names exactly what git grep does and does not look at.
  *
  * NO SUCCESS BEFORE THE DAEMON CONFIRMS IT. `run.ok === true` means an agent
  * finished, not that anything landed — a run only ever PROPOSES. The one green
@@ -69,6 +72,13 @@ function btn(cls, text, onClick) {
   b.type = 'button';
   if (onClick) b.addEventListener('click', onClick);
   return b;
+}
+
+/** Wall-clock HH:MM:SS. Local time on purpose: this stamps when the owner sitting
+    at this machine last read the repository, not an instant on a shared timeline. */
+function clockOf(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 /** A decorative glyph — hidden from the accessibility tree, never the only signal. */
@@ -252,6 +262,18 @@ function renderUnwired(title, body) {
   return box;
 }
 
+/**
+ * What the Search panel actually does, said once and shown in every state of it.
+ * It is spelled out because each clause is a real limit of `git grep`, and a
+ * search box that quietly ignores a regular expression, a build directory or a
+ * .gitignore'd file is a box that answers a question nobody asked.
+ */
+const SEARCH_HINT =
+  'git grep -n over the sandbox working tree: plain text, not a regular expression, ' +
+  'and case is ignored. Tracked and untracked files are searched; files git ignores ' +
+  'and files git sees as binary are not. There is no index — every result is read ' +
+  'from the files as they are on disk right now.';
+
 function renderNote(text, channel) {
   const n = el('div', channel ? `note ${channel}` : 'note');
   add(n, el('span', null, text));
@@ -272,6 +294,8 @@ export function initForge(section) {
   const S = {
     status: null,        // GET /forge/status, verbatim
     statusErr: null,
+    reloading: false,    // an owner-asked reload is in flight
+    readAt: null,        // Date of the last completed read, so reload can prove it ran
     agents: null,        // GET /forge/agents, verbatim
     agentsErr: null,
 
@@ -299,6 +323,13 @@ export function initForge(section) {
     committing: false,
     receipt: null,
     commitErr: null,
+
+    searchQ: '',         // what is typed in the search box
+    searchScope: '',     // optional path the search is limited to
+    searchBusy: false,
+    searchErr: null,
+    searchRes: null,     // GET /forge/search, verbatim
+    searchFor: '',       // the query the result now on screen actually answers
   };
 
   /* ---- the five regions, built once and refilled in place ---------------- */
@@ -355,12 +386,22 @@ export function initForge(section) {
 
     // The workspace head. There is exactly one workspace — the sandbox — so this
     // names it and re-reads it, rather than offering a switcher over one item.
-    const head = btn('mdl', null, () => void loadStatus());
+    const head = btn('mdl', null, () => void reloadRepo());
     add(head, glyph('☰'));
     const name = el('b', null, st && st.repo ? repoName(st) : 'sandbox');
     name.title = st && st.root ? String(st.root) : 'the daemon sandbox';
     add(head, name, el('span', 'sp'));
-    add(head, el('span', null, 'reload'));
+    /* The word alone was a dead control on the common case. A repository that
+       has not changed redraws an identical tree, so a click produced no visible
+       difference whatsoever and the honest reading was "this button is broken".
+       The clock time of the read changes on every click even when the repository
+       does not, so the button now answers the only question it was being asked. */
+    head.disabled = S.reloading;
+    add(head, el('span', null,
+      S.reloading ? 'reading…' : (S.readAt ? `reload · ${clockOf(S.readAt)}` : 'reload')));
+    head.title = S.readAt
+      ? `Re-read the sandbox and the open file from disk. Last read at ${clockOf(S.readAt)}.`
+      : 'Re-read the sandbox and the open file from disk.';
 
     const body = el('div', 'panbody');
     add(body, PANEL[S.pan] ? PANEL[S.pan]() : PANEL.explorer());
@@ -544,13 +585,77 @@ export function initForge(section) {
       return wrap;
     },
 
-    /* ---- the six with no live source. Each names what is missing. -------- */
+    /* SEARCH — real: `git grep -n` over the sandbox, through GET /forge/search.
+       There is no index behind this and none is claimed. Every row is one line
+       git found in one file that is really in this working tree, and clicking a
+       row opens that file at that line in the code pane. */
     search() {
-      return renderUnwired(
-        'Search is not wired',
-        'There is no search index and no daemon route that searches the sandbox, so this panel has nothing real to return. Rather than show a box that would answer with nothing, it says so.',
-      );
+      const wrap = el('div', 'pw');
+      add(wrap, searchUI());
+
+      if (S.searchBusy) {
+        add(wrap, renderUnwired('Searching…', `Running git grep for “${short(S.searchFor, 60)}” across the sandbox.`));
+        return wrap;
+      }
+      if (S.searchErr) {
+        add(wrap, renderUnwired('The search could not run', S.searchErr));
+        return wrap;
+      }
+
+      const r = S.searchRes;
+      if (!r) {
+        add(wrap, el('div', 'hint', SEARCH_HINT));
+        return wrap;
+      }
+      if (r.repo === false) {
+        add(wrap, renderUnwired(
+          'The sandbox is not a git repository',
+          `${r.note || 'There is no repository here yet.'} git grep needs one, so there is nothing to search rather than nothing found.`,
+        ));
+        return wrap;
+      }
+
+      const matches = Array.isArray(r.matches) ? r.matches : [];
+      if (matches.length === 0) {
+        add(wrap, renderUnwired(
+          `No match for “${short(r.query, 60)}”`,
+          `git grep read every text file in the sandbox${r.scope ? ` under ${r.scope}` : ''} and found this string in none of them. That is the answer, not a failure.`,
+        ));
+        add(wrap, el('div', 'hint', SEARCH_HINT));
+        return wrap;
+      }
+
+      // One heading per file, its hits beneath it, in the order git returned
+      // them — which is path order, then line order.
+      const tree = el('div', 'tree');
+      let group = null;
+      for (const m of matches) {
+        if (m.path !== group) {
+          group = m.path;
+          const d = el('div', 'd', m.path);
+          d.title = m.path;
+          add(tree, d);
+        }
+        const b = btn(null, null, () => openFile(m.path, m.line));
+        add(b, el('span', 'sln', m.line));
+        const tx = el('span', 'nm stx', m.text + (m.clipped ? ' …' : ''));
+        add(b, tx);
+        b.title = `${m.path}:${m.line}  ${m.text}${m.clipped ? ' … (line clipped)' : ''}`;
+        b.setAttribute('aria-current', m.path === S.file && m.line === S.caret ? 'true' : 'false');
+        add(tree, b);
+      }
+      add(wrap, tree);
+
+      const files = typeof r.files === 'number' ? r.files : new Set(matches.map((m) => m.path)).size;
+      const total = typeof r.total === 'number' ? r.total : matches.length;
+      add(wrap, el('div', 'hint', r.truncated
+        ? `Showing the first ${matches.length} of ${total} matching lines, in ${files} file${files === 1 ? '' : 's'}. The rest are in the repository; they are simply not drawn here.`
+        : `${total} matching line${total === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}.`));
+      add(wrap, el('div', 'hint', SEARCH_HINT));
+      return wrap;
     },
+
+    /* ---- the five with no live source. Each names what is missing. -------- */
     rules() {
       return renderUnwired(
         'No rules engine is wired',
@@ -589,6 +694,99 @@ export function initForge(section) {
       return wrap;
     },
   };
+
+  /* ---- the search box ---------------------------------------------------- *
+   * Built ONCE and moved between repaints, never rebuilt. paintA() replaces the
+   * whole rail on every repaint, and a search box that is thrown away and made
+   * again on each one would lose the caret mid-word and drop focus the instant a
+   * result arrived. The same node going back in keeps what the owner typed. */
+  let searchForm = null;
+  let searchInput = null;
+  let searchBtn = null;
+
+  function searchUI() {
+    if (searchForm) { syncSearchBtn(); return searchForm; }
+
+    const form = el('form', 'sform');
+    form.setAttribute('role', 'search');
+
+    /* Enter searches. This is an explicit keydown and NOT the form's implicit
+       submission, which is the same choice ask.js and counsel.js make for their
+       input rows — and here it is load-bearing rather than stylistic: implicit
+       submission is what a synthetic key event does not reliably trigger, so a
+       search box that relied on it is a box nothing can prove works. The form's
+       own submit handler stays for the button. */
+    const enter = (ev) => {
+      if (ev.key !== 'Enter' || ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+      ev.preventDefault();
+      void doSearch();
+    };
+
+    const q = el('input');
+    q.type = 'search';
+    q.placeholder = 'find in the sandbox';
+    q.value = S.searchQ;
+    q.setAttribute('aria-label', 'Search the sandbox');
+    q.addEventListener('input', () => { S.searchQ = q.value; syncSearchBtn(); });
+    q.addEventListener('keydown', enter);
+
+    const sc = el('input');
+    sc.type = 'text';
+    sc.placeholder = 'in path — optional, e.g. src';
+    sc.value = S.searchScope;
+    sc.setAttribute('aria-label', 'Limit the search to this path inside the sandbox');
+    sc.addEventListener('input', () => { S.searchScope = sc.value; });
+    sc.addEventListener('keydown', enter);
+
+    const b = btn('btn sm', 'Search');
+    b.type = 'submit';
+
+    form.addEventListener('submit', (ev) => { ev.preventDefault(); void doSearch(); });
+    add(form, q, sc, b);
+
+    searchForm = form;
+    searchInput = q;
+    searchBtn = b;
+    syncSearchBtn();
+    return form;
+  }
+
+  /* A disabled control must say WHY it is disabled, or it is just a dead
+     button. Both reasons are real and both are named. */
+  function syncSearchBtn() {
+    if (!searchBtn) return;
+    const empty = S.searchQ.trim() === '';
+    searchBtn.disabled = S.searchBusy || empty;
+    searchBtn.title = S.searchBusy
+      ? 'A search is already running.'
+      : empty ? 'Type something to search for first.' : 'Run git grep over the sandbox.';
+  }
+
+  /** GET /forge/search — one git grep, and only what it returned. */
+  async function doSearch() {
+    const q = S.searchQ.trim();
+    if (q === '' || S.searchBusy) return;
+    const scope = S.searchScope.trim();
+    S.searchBusy = true;
+    S.searchErr = null;
+    S.searchRes = null;
+    S.searchFor = q;
+    paintA();
+
+    const r = await api(`/forge/search?q=${encodeURIComponent(q)}${scope ? `&path=${encodeURIComponent(scope)}` : ''}`);
+    S.searchBusy = false;
+    if (!r.ok) {
+      S.searchRes = null;
+      S.searchErr = errText(r);
+    } else {
+      S.searchRes = r.data;
+      S.searchErr = null;
+    }
+    paintA();
+    // The rail was rebuilt around the box, which takes the caret with it. Give
+    // it back, so the next query is typed where the last one was.
+    if (searchInput) searchInput.focus();
+  }
 
   function canCommit() {
     return Boolean(
@@ -1079,30 +1277,52 @@ export function initForge(section) {
 
   const DRAWER = [['terminal', 'Terminal'], ['tests', 'Tests'], ['ci', 'CI'], ['procs', 'Processes & ports']];
 
+  /* Open or shut is one attribute on :root, because the CSS owns the collapsed
+     layout. Every control that moves the drawer goes through here, for two
+     reasons: the label, the ARIA state and the attribute can then never
+     disagree, and nothing has to repaint the drawer to open it — which matters
+     because a repaint mid-drag would tear the handle out from under the pointer. */
+  const drawerMin = () => R.getAttribute('data-drawer') === 'min';
+  let colBtn = null;
+  function setDrawerMin(min) {
+    if (min) R.setAttribute('data-drawer', 'min');
+    else R.removeAttribute('data-drawer');
+    if (!colBtn) return;
+    colBtn.textContent = min ? '▲ expand' : '▼ collapse';
+    colBtn.setAttribute('aria-expanded', min ? 'false' : 'true');
+  }
+
   function paintD() {
     const drag = btn('fdrag');
-    drag.title = 'Drag to resize · double-click to reset';
+    // The shut case is named because it is the one the handle does not obey
+    // literally: the first press opens the drawer, which moves the handle out
+    // from under a second click, so a double-click on a shut drawer opens it
+    // rather than resetting it.
+    drag.title = 'Drag to resize · double-click to reset · opens the drawer if it is shut';
     drag.setAttribute('aria-label', 'Resize the drawer');
     wireDrag(drag);
 
     const hd = el('div', 'drawhd');
     hd.setAttribute('role', 'tablist');
     for (const [id, name] of DRAWER) {
-      const c = btn('chip', name, () => { S.draw = id; paintD(); });
+      /* Picking a tab while the drawer is shut used to select it underneath a
+         `display:none` body: the chip lit up and nothing appeared, which is
+         indistinguishable from a broken tab. Asking for a tab is asking to see
+         it, so choosing one opens the drawer. */
+      const c = btn('chip', name, () => {
+        S.draw = id;
+        if (drawerMin()) setDrawerMin(false);
+        paintD();
+      });
       c.setAttribute('role', 'tab');
       c.setAttribute('aria-selected', id === S.draw ? 'true' : 'false');
       if (id === S.draw) c.dataset.state = 'listening';
       add(hd, c);
     }
     add(hd, el('span', 'sp'));
-    const min = R.getAttribute('data-drawer') === 'min';
-    const col = btn('drawcol', min ? '▲ expand' : '▼ collapse', () => {
-      if (R.getAttribute('data-drawer') === 'min') R.removeAttribute('data-drawer');
-      else R.setAttribute('data-drawer', 'min');
-      paintD();
-    });
-    col.setAttribute('aria-expanded', min ? 'false' : 'true');
-    add(hd, col);
+    colBtn = btn('drawcol', drawerMin() ? '▲ expand' : '▼ collapse', () => setDrawerMin(!drawerMin()));
+    colBtn.setAttribute('aria-expanded', drawerMin() ? 'false' : 'true');
+    add(hd, colBtn);
 
     const bd = el('div', 'drawbody');
     add(bd, DRAWER_BODY[S.draw] ? DRAWER_BODY[S.draw]() : DRAWER_BODY.terminal());
@@ -1146,34 +1366,60 @@ export function initForge(section) {
     },
   };
 
-  /* The drawer resize. Pointer events so a pen and a touch drag work too; the
-     height is a CSS variable on the grid, and a double-click puts it back. */
+  /* The drawer resize. Pointer events so a pen and a touch drag work too — the
+     handle carries touch-action:none, without which the browser claims a touch
+     drag as a page scroll and cancels the gesture; the height is a CSS variable
+     on the grid, and a double-click puts it back.
+     Every entry point opens a shut drawer FIRST. Dragging a shut drawer used to
+     be worse than inert: the collapsed rule pins the track at 34px !important,
+     so the drawer did not move, while the drag still wrote a height — measured
+     from 34px — over whatever size the owner had set. You pulled a handle, saw
+     nothing move, and lost your drawer height on the way. */
   function wireDrag(handle) {
     let startY = 0;
     let startH = 0;
+    const clamp = (h) => Math.max(34, Math.min(window.innerHeight * 0.7, h));
+    /* The height the drawer HAS when open — taken from the variable, never
+       measured. Measuring is what made the shut drawer eat the owner's size:
+       while it is shut the measurement is 34px, the collapsed track, so a drag
+       started from 34px and wrote that back over a drawer the owner had sized to
+       343px. Opening it first does not help, because the layout the measurement
+       needs has not been recomputed by the time the drag reads it. 150 is the
+       stylesheet's own `var(--fdrawer,150px)` default, for a never-resized drawer. */
+    const openHeight = () => {
+      const inline = parseFloat(root.style.getPropertyValue('--fdrawer'));
+      if (Number.isFinite(inline)) return inline;
+      return drawerMin() ? 150 : rgD.offsetHeight;
+    };
     const onMove = (ev) => {
-      const next = Math.max(34, Math.min(window.innerHeight * 0.7, startH + (startY - ev.clientY)));
-      root.style.setProperty('--fdrawer', `${Math.round(next)}px`);
+      root.style.setProperty('--fdrawer', `${Math.round(clamp(startH + (startY - ev.clientY)))}px`);
     };
     const onUp = () => {
       handle.classList.remove('grab');
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
     handle.addEventListener('pointerdown', (ev) => {
       startY = ev.clientY;
-      startH = rgD.offsetHeight;
+      startH = openHeight();          // the height it has, or will have, open
+      if (drawerMin()) setDrawerMin(false);
       handle.classList.add('grab');
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
       ev.preventDefault();
     });
-    handle.addEventListener('dblclick', () => root.style.removeProperty('--fdrawer'));
+    handle.addEventListener('dblclick', () => {
+      // A reset that leaves the drawer shut is a reset with nothing to show.
+      if (drawerMin()) setDrawerMin(false);
+      root.style.removeProperty('--fdrawer');
+    });
     // Keyboard: the handle is a real button, so it must move without a pointer.
     handle.addEventListener('keydown', (ev) => {
       if (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
-      const cur = rgD.offsetHeight;
-      const next = Math.max(34, Math.min(window.innerHeight * 0.7, cur + (ev.key === 'ArrowUp' ? 24 : -24)));
+      const next = clamp(openHeight() + (ev.key === 'ArrowUp' ? 24 : -24));
+      if (drawerMin()) setDrawerMin(false);
       root.style.setProperty('--fdrawer', `${Math.round(next)}px`);
       ev.preventDefault();
     });
@@ -1268,6 +1514,50 @@ export function initForge(section) {
     paintE();
   }
 
+  /**
+   * The rgA head button. It is labelled "reload", so it must re-read everything
+   * the screen claims to be showing — not the tree alone.
+   *
+   * It used to call loadStatus() and nothing else. With a file open that was
+   * worse than a no-op: the tree came back correctly marking that file CHANGED
+   * while the pane beside it went on showing the copy read minutes earlier, so
+   * the one control whose job is freshness left two halves of the same screen
+   * disagreeing about the same file. It now re-reads the open file as well.
+   */
+  async function reloadRepo() {
+    if (S.reloading) return;
+    S.reloading = true;
+    paintA();
+    try {
+      await Promise.all([loadStatus(), rereadOpenFile()]);
+    } finally {
+      S.reloading = false;
+      S.readAt = new Date();
+      paintA();
+    }
+  }
+
+  /**
+   * Re-read the file already in the code pane. What is on screen (and the caret)
+   * stays put until the new contents land, so a reload does not blink the pane
+   * empty the way opening a file does — this is a refresh, not an open.
+   */
+  async function rereadOpenFile() {
+    const path = S.file;
+    if (!path) return;
+    const r = await api(`/forge/file?path=${encodeURIComponent(path)}`);
+    if (S.file !== path) return;   // the owner opened something else mid-read
+    if (!r.ok) {
+      S.fileData = null;
+      S.fileErr = `${path} could not be read: ${errText(r)}`;
+    } else {
+      S.fileData = r.data;
+      S.fileErr = null;
+    }
+    paintB();
+    paintE();
+  }
+
   async function loadAgents() {
     const r = await api('/forge/agents');
     if (!r.ok) {
@@ -1285,15 +1575,20 @@ export function initForge(section) {
     paintE();
   }
 
-  /** Open one sandbox file in the code pane, from GET /forge/file. */
-  async function openFile(path) {
+  /**
+   * Open one sandbox file in the code pane, from GET /forge/file. `line` is
+   * optional and 1-based: a search hit passes the line it was found on, so the
+   * pane lands on it rather than at the top of a two-thousand-line file.
+   */
+  async function openFile(path, line) {
     if (!path) return;
+    const at = Number(line);
     S.file = path;
     if (!S.open.includes(path)) S.open.push(path);
     S.fileBusy = true;
     S.fileErr = null;
     S.fileData = null;
-    S.caret = 0;
+    S.caret = Number.isInteger(at) && at > 0 ? at : 0;
     paintA();
     paintB();
     paintE();
@@ -1309,6 +1604,24 @@ export function initForge(section) {
     }
     paintB();
     paintE();
+    revealCaret();
+  }
+
+  /**
+   * Scroll the code pane to the caret line, if there is one on screen.
+   *
+   * The line may genuinely not be there: /forge/file caps a long file, so a hit
+   * past the cap has no row. In that case the pane is scrolled to the bottom,
+   * where the cap's own "file continues — N lines in total" row is — which says
+   * why the line is not shown instead of silently doing nothing.
+   */
+  function revealCaret() {
+    if (!S.caret) return;
+    const code = rgB.querySelector('.code');
+    if (!code) return;
+    const row = code.querySelector(`.row[data-line="${S.caret}"]`);
+    if (row) row.scrollIntoView({ block: 'center' });
+    else if (S.fileData && S.fileData.truncated) code.scrollTop = code.scrollHeight;
   }
 
   /** POST /forge/run — the agent proposes; nothing here applies anything. */

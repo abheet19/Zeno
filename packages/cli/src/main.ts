@@ -8,6 +8,25 @@
  *
  * Exit code 0 means the thing it claims happened, happened. Anything else is 1,
  * so every command is usable as a check.
+ *
+ * WHICH WORKSPACE, AND WHICH DAEMON. The daemon selects both from the
+ * environment: `ZENO_DIR` picks the workspace, `ZENO_PORT` picks the socket.
+ * This CLI reads THE SAME TWO VARIABLES, and it must keep doing so.
+ *
+ * It did not, and that was a silent lie rather than an inconvenience. With
+ * `ZENO_DIR=.zeno-sweep` — the very thing you must set when a second Zeno is
+ * running, so two daemons never fork one hash chain — `zeno verify` read
+ * `./.zeno` instead and printed "VERIFIED — 0 receipts, every link intact and
+ * every signature valid" about a workspace it had never opened, while the real
+ * ledger sat unexamined two directories away. A verifier that reports a clean
+ * chain for a ledger it did not read is worse than no verifier: it is the one
+ * command in this product whose whole job is to be believed. `zeno propose` had
+ * the same fault from the other end — it posted to :7317 no matter which port
+ * the daemon had announced, so the token it had just read out of the right
+ * workspace was presented to the wrong daemon and came back 401.
+ *
+ * A flag still wins over the environment, and the environment over the default,
+ * so an explicit `--dir`/`--url` continues to mean exactly what it says.
  */
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -28,10 +47,12 @@ const USAGE = `
     zeno backlog list [--all]                             what is waiting
     zeno backlog close <id>                               mark one done
 
-  --dir       Zeno's working directory (default: ./.zeno)
+  --dir       Zeno's working directory (default: $ZENO_DIR, else ./.zeno)
   --resume    keep the existing ledger instead of starting clean
-  --token     the PROPOSER token the daemon printed on startup
-  --url       daemon address (default: http://127.0.0.1:7317)
+  --token     the PROPOSER token, read for you from <dir>/proposer.token.
+              It is deliberately NOT printed on startup — a live credential
+              does not belong in shell scrollback or a redirected log.
+  --url       daemon address (default: http://127.0.0.1:$ZENO_PORT, else :7317)
   --rel       path inside the sandbox (default: src/Proposed.tsx)
   --summary   the one sentence the owner will read
   --prove     also point the same token at /approvals, to watch it be refused
@@ -89,10 +110,34 @@ function positionals(args: readonly string[]): string[] {
   return out;
 }
 
+/**
+ * The workspace this invocation means: the flag, else the environment the
+ * daemon itself reads, else the default. Kept identical to `main.ts` in the
+ * daemon (`process.env['ZENO_DIR'] ?? '.zeno'`) so the two halves of one
+ * product can never disagree about which ledger is "the" ledger.
+ */
+function workspaceDir(args: readonly string[]): string {
+  const env = process.env['ZENO_DIR'];
+  return resolve(flagValue(args, '--dir') ?? (env !== undefined && env !== '' ? env : '.zeno'));
+}
+
+/**
+ * The daemon this invocation talks to. `ZENO_PORT` is the daemon's own knob for
+ * the socket, so honouring it here is what stops the CLI posting a token minted
+ * by one daemon to a different one that never issued it.
+ */
+function daemonUrl(args: readonly string[]): string {
+  const flag = flagValue(args, '--url');
+  if (flag !== undefined) return flag;
+  const env = process.env['ZENO_PORT'];
+  const port = env !== undefined && /^\d+$/.test(env) ? env : '7317';
+  return `http://127.0.0.1:${port}`;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const command = args[0];
-  const dir = resolve(flagValue(args, '--dir') ?? '.zeno');
+  const dir = workspaceDir(args);
   const log = (s: string): void => {
     process.stdout.write(s + '\n');
   };
@@ -114,16 +159,23 @@ async function main(): Promise<number> {
         try { return readFileSync(join(dir, 'proposer.token'), 'utf8').trim() || undefined; }
         catch { return undefined; }
       };
-      const token = flagValue(args, '--token') ?? process.env['ZENO_TOKEN'] ?? tokenFile();
+      // `??` alone let an EMPTY `--token`, `ZENO_TOKEN=` or blank token file
+      // count as a credential: the CLI then posted an empty `x-zeno-token`
+      // header and reported the daemon's 401 as though a real token had been
+      // rejected, instead of saying it never had one. Blank is absent.
+      const some = (v: string | undefined): string | undefined => (v !== undefined && v.trim() !== '' ? v.trim() : undefined);
+      const token = some(flagValue(args, '--token')) ?? some(process.env['ZENO_TOKEN']) ?? tokenFile();
       if (token === undefined) {
         log('  zeno propose needs the PROPOSER token.');
-        log('  It is read automatically from <dir>/proposer.token when the daemon is running,');
-        log('  or pass --token <value> / set ZENO_TOKEN.');
+        log(`  It is read automatically from ${join(dir, 'proposer.token')} while a daemon`);
+        log('  owns that workspace — name the path, so a wrong ZENO_DIR is visible here');
+        log('  rather than three steps later as a 401 from some other daemon.');
+        log('  Or pass --token <value> / set ZENO_TOKEN.');
         return 1;
       }
       const relPath = flagValue(args, '--rel') ?? 'src/Proposed.tsx';
       const summary = flagValue(args, '--summary') ?? `rewrite ${relPath} from an agent`;
-      const url = flagValue(args, '--url') ?? 'http://127.0.0.1:7317';
+      const url = daemonUrl(args);
       const contents =
         flagValue(args, '--contents') ??
         `// proposed by an agent, approved by nobody yet
