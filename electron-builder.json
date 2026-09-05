@@ -1,16 +1,110 @@
 {
   "appId": "dev.abheet.zeno",
   "productName": "Zeno",
-  "directories": { "output": "dist-app" },
+  "directories": {
+    "output": "dist-app"
+  },
   "files": [
     "packages/desktop/main.cjs",
     "packages/desktop/package.json",
     "package.json"
   ],
   "extraResources": [
-    { "from": "packages/daemon/dist/src", "to": "daemon" },
-    { "from": "packages/daemon/public", "to": "daemon/../../public" }
+    {
+      "from": "packages/daemon/dist/src",
+      "to": "daemon"
+    },
+    {
+      "from": "packages/desktop/resources/daemon-package.json",
+      "to": "daemon/package.json"
+    },
+    {
+      "from": "packages/daemon/public",
+      "to": "daemon/../../public"
+    },
+    {
+      "from": "packages/assistant",
+      "to": "node_modules/@abheet19/zeno-assistant",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/counsel",
+      "to": "node_modules/@abheet19/zeno-counsel",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/forge",
+      "to": "node_modules/@abheet19/zeno-forge",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/intake",
+      "to": "node_modules/@abheet19/zeno-intake",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/kernel",
+      "to": "node_modules/@abheet19/zeno-kernel",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/mesh",
+      "to": "node_modules/@abheet19/zeno-mesh",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/sanitizer",
+      "to": "node_modules/@abheet19/zeno-sanitizer",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/skills",
+      "to": "node_modules/@abheet19/zeno-skills",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
+      "from": "packages/vault",
+      "to": "node_modules/@abheet19/zeno-vault",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    }
   ],
-  "win": { "target": ["portable", "nsis"], "artifactName": "Zeno-${version}-${arch}.${ext}" },
-  "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Zeno" }
+  "win": {
+    "target": [
+      "portable",
+      "nsis"
+    ],
+    "artifactName": "Zeno-${version}-${arch}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "shortcutName": "Zeno"
+  }
 }

@@ -2,6 +2,7 @@
   "name": "@abheet19/zeno-workspace",
   "version": "0.1.0",
   "private": true,
+  "main": "packages/desktop/main.cjs",
   "description": "Zeno — a private, local-first personal intelligence suite. Windows-first. Reason before action.",
   "workspaces": [
     "packages/*"
