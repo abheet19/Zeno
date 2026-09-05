@@ -1,0 +1,13 @@
+{
+  "name": "@abheet19/zeno-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zeno desktop shell — the native Windows application window that hosts the Zeno UI and owns the daemon's lifetime.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "typecheck": "node --check main.cjs",
+    "test": "node --check main.cjs && node -e \"console.log('desktop shell: syntax ok')\"",
+    "check": "npm run typecheck"
+  }
+}

@@ -382,7 +382,7 @@ A dependency-free script enforces these — so the guarantees can't rot silently
 
 ## Part 10 — This IS the thing you clicked
 
-The **Approval Capsule** in the Command prototype — *"WEBEXT-3514 — TASK patch · Approve"*,
+The **Approval Capsule** in the Command prototype — *"TASK-101 — TASK patch · Approve"*,
 and the *drift → refused* you toggled — is a picture of **this exact code**:
 
 - the capsule you read  = `preview()` returning a Binding

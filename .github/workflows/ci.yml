@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: typecheck · lint · tests · coverage
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # No lockfile-dependent install shortcut: the project has zero runtime
+      # dependencies, so a plain install is fast and proves that claim holds.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Check
+        run: npm run check
+
+      - name: Prove there are no runtime dependencies
+        shell: pwsh
+        run: |
+          $ext = @()
+          Get-ChildItem packages/*/package.json | ForEach-Object {
+            $deps = (Get-Content $_ -Raw | ConvertFrom-Json).dependencies
+            if ($deps) {
+              $deps.PSObject.Properties.Name | Where-Object { $_ -notlike '@abheet19/*' } | ForEach-Object { $ext += $_ }
+            }
+          }
+          if ($ext.Count -gt 0) { Write-Error "external runtime dependencies found: $($ext -join ', ')"; exit 1 }
+          Write-Host "zero external runtime dependencies - confirmed"

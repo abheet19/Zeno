@@ -1,0 +1,28 @@
+{
+  "name": "@abheet19/zeno-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zeno — a private, local-first personal intelligence suite. Windows-first. Reason before action.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @abheet19/zeno-kernel && npm run build -w @abheet19/zeno-intake && npm run build -w @abheet19/zeno-vault && npm run build -w @abheet19/zeno-sanitizer && npm run build -w @abheet19/zeno-voice && npm run build -w @abheet19/zeno-mesh && npm run build -w @abheet19/zeno-counsel && npm run build -w @abheet19/zeno-forge && npm run build -w @abheet19/zeno-skills && npm run build -w @abheet19/zeno-mcp && npm run build -w @abheet19/zeno-assistant && npm run build -w @abheet19/zeno-daemon && npm run build -w @abheet19/zeno-cli",
+    "check": "npm run check -w @abheet19/zeno-kernel && npm run check -w @abheet19/zeno-intake && npm run check -w @abheet19/zeno-vault && npm run check -w @abheet19/zeno-sanitizer && npm run check -w @abheet19/zeno-voice && npm run check -w @abheet19/zeno-mesh && npm run check -w @abheet19/zeno-counsel && npm run check -w @abheet19/zeno-forge && npm run check -w @abheet19/zeno-skills && npm run check -w @abheet19/zeno-mcp && npm run check -w @abheet19/zeno-assistant && npm run check -w @abheet19/zeno-daemon && npm run check -w @abheet19/zeno-cli",
+    "demo": "npm run build --silent && node packages/cli/dist/src/main.js demo",
+    "ledger:verify": "npm run build --silent && node packages/cli/dist/src/main.js verify",
+    "zeno": "node packages/cli/dist/src/main.js",
+    "up": "npm run build --silent && node packages/daemon/dist/src/main.js",
+    "propose": "npm run build --silent && node packages/cli/dist/src/main.js propose",
+    "backlog": "npm run build --silent && node packages/cli/dist/src/main.js backlog",
+    "app": "npm run build && electron packages/desktop",
+    "build:app": "npm run build && electron-builder --win --config electron-builder.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3"
+  }
+}

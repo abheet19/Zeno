@@ -32,3 +32,34 @@ __pycache__/
 dist/
 build/
 .venv/
+
+# --- runtime state: the receipt ledger and the demo sandbox ---
+.zeno/
+.daemon.log
+proposer.token
+keys/
+receipt-key.pem
+receipt-key.pub.pem
+dist-exe/
+
+# ---- runtime + test debris -------------------------------------------------
+# The daemon's workspace is .zeno by default, but every test run and every
+# parallel agent uses its OWN (the workspace lock forbids sharing one). Each of
+# those holds a PRIVATE SIGNING KEY and a live proposer token, so the glob
+# matters more than the tidiness: .zeno alone was not enough.
+.zeno*/
+*.log
+.*.log
+.probe-*.json
+dist-exe/
+dist-app/
+
+# ---- installed third-party skills -------------------------------------------
+# `npx skills add` fetches these; skills-lock.json records exactly which, so the
+# tree is reproducible without committing 800+ files of someone else's prose.
+# .claude/skills is the same content again as symlinks, so it goes too.
+.agents/skills/
+.claude/skills/
+
+# a stray build backup
+**/dist.bak/

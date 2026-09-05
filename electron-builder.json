@@ -1,0 +1,16 @@
+{
+  "appId": "dev.abheet.zeno",
+  "productName": "Zeno",
+  "directories": { "output": "dist-app" },
+  "files": [
+    "packages/desktop/main.cjs",
+    "packages/desktop/package.json",
+    "package.json"
+  ],
+  "extraResources": [
+    { "from": "packages/daemon/dist/src", "to": "daemon" },
+    { "from": "packages/daemon/public", "to": "daemon/../../public" }
+  ],
+  "win": { "target": ["portable", "nsis"], "artifactName": "Zeno-${version}-${arch}.${ext}" },
+  "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "Zeno" }
+}
