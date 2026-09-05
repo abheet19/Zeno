@@ -99,12 +99,15 @@
     "target": [
       "portable",
       "nsis"
-    ],
-    "artifactName": "Zeno-${version}-${arch}.${ext}"
+    ]
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "shortcutName": "Zeno"
+    "shortcutName": "Zeno",
+    "artifactName": "Zeno-Setup-${version}-${arch}.${ext}"
+  },
+  "portable": {
+    "artifactName": "Zeno-${version}-${arch}-portable.${ext}"
   }
 }
