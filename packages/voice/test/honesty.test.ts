@@ -259,7 +259,20 @@ test('WAKE — the disclosure is actually delivered before the microphone opens'
     false,
     'focus() on the disabled confirm button is a no-op — the disclosure is never delivered',
   );
-  assert.ok(code.includes('ui.disclosure.focus()'), 'opening the disclosure must move focus into it');
+  // Matched without the closing paren on purpose: the call carries
+  // `{ preventScroll: true }`. focus() otherwise snaps the scroller to the
+  // element — 872px in one frame, which reads as the window flipping rather
+  // than a panel opening — so the scroll is asked for separately and smoothly.
+  // What this asserts is that focus lands on the disclosure at all; the options
+  // are free to change.
+  assert.ok(code.includes('ui.disclosure.focus('), 'opening the disclosure must move focus into it');
+  // Lowercased, because `code` is: it is folded to lower case so a claim is
+  // matched against what runs. Comments are stripped from it too, so this
+  // cannot be satisfied by the note above it.
+  assert.ok(
+    code.includes('preventscroll'),
+    'focusing the disclosure must not snap the scroller — that is the flip the owner reported',
+  );
   assert.ok(
     code.includes("disclosure.setattribute('tabindex', '-1')"),
     'the disclosure must be script-focusable, or focusing it is another silent no-op',

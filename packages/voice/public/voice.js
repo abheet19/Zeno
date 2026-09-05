@@ -243,9 +243,30 @@ function mountPanel() {
   // point is that it is READ before the microphone opens.
   disclosure.setAttribute('tabindex', '-1');
   disclosure.style.outline = 'none';
+  // OVERLAID, not inserted into the flow. As an inline block this is 544px of
+  // text that appears at the bottom of a 6,000px scroller, so opening it had to
+  // scroll the view ~700px to show it — measured, and it reads as the window
+  // flipping rather than a panel opening. Asking for a smooth scroll does not
+  // help: this machine sets prefers-reduced-motion, which Chrome honours by
+  // making the scroll instant again.
+  //
+  // A consent gate is a blocking decision, so it belongs over the page rather
+  // than inside it. Nothing moves when it opens, and it cannot land off-screen.
   disclosure.style.cssText = [
-    'padding:12px 14px', 'border-radius:10px',
+    'position:fixed', 'left:50%', 'top:50%', 'transform:translate(-50%,-50%)',
+    'z-index:1000', 'width:min(560px,calc(100vw - 48px))', 'max-height:80vh', 'overflow:auto',
+    'padding:16px 18px', 'border-radius:12px',
     'border:1px solid var(--amber,#E0A128)', 'background:color-mix(in srgb,var(--amber,#E0A128) 10%,var(--g2,#101416))',
+    'box-shadow:0 24px 64px rgba(0,0,0,.55)',
+  ].join(';');
+
+  // The backdrop both dims the page and swallows clicks, so the gate cannot be
+  // answered by accident through it. It is a sibling of the panel, never its
+  // parent, so the panel's own DOM position and id are untouched.
+  const backdrop = el('div', 'zv-backdrop');
+  backdrop.hidden = true;
+  backdrop.style.cssText = [
+    'position:fixed', 'inset:0', 'z-index:999', 'background:rgba(0,0,0,.5)',
   ].join(';');
   const dTitle = el('p', 'zv-disclosure-title', DISCLOSURE_TITLE);
   dTitle.style.cssText = 'margin:0 0 8px;font-weight:700;color:var(--ink,#ECEBE6)';
@@ -366,12 +387,14 @@ function mountPanel() {
   delegate.append(delegateTask, delegateAgent, delegateWhy, delegateState, delegateButtons, delegateLink);
 
   panel.append(row, indicator, line, delegate, retention, disclosure, plain, how);
+  // The backdrop hangs off the panel too, so tearing the panel down takes it.
+  panel.appendChild(backdrop);
   host.appendChild(panel);
   return {
     panel, button, wakeToggle, status, heard, outcome,
     stateGlyph, stateWord, stateDetail,
     retention, retentionText,
-    disclosure, ack, confirm, cancel,
+    disclosure, backdrop, ack, confirm, cancel,
     delegate, delegateTask, delegateAgent, delegateWhy, delegateState,
     delegateButtons, delegateRun, delegateSkip, delegateLink,
     plain, how,
@@ -720,14 +743,44 @@ function wireRecognition() {
     paint();
   };
 
-  // Push-to-talk: hold to talk, release (or leave) to send.
+  // Push-to-talk: hold to talk, release to send.
+  //
+  // The pointer is CAPTURED on the way down. Without capture the button only
+  // hears events while the cursor stays inside its box, so a hand that drifts a
+  // few pixels mid-sentence fires `pointerleave` and the hold resets in the
+  // middle of a word — the button appeared to let go on its own. Capture routes
+  // every later event for this pointer back here, so the hold ends when the
+  // owner lets go and not before, and `pointerleave` stops being a way to end
+  // it at all.
   ui.button.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    try {
+      ui.button.setPointerCapture(e.pointerId);
+    } catch {
+      // Capture can be refused. The window-level release below is what keeps
+      // the microphone from being left open when it is.
+    }
     start();
   });
-  ui.button.addEventListener('pointerup', stop);
-  ui.button.addEventListener('pointerleave', stop);
-  ui.button.addEventListener('pointercancel', stop);
+
+  const release = (e) => {
+    try {
+      if (e && e.pointerId !== undefined && ui.button.hasPointerCapture(e.pointerId)) {
+        ui.button.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      /* no-op */
+    }
+    stop();
+  };
+
+  ui.button.addEventListener('pointerup', release);
+  ui.button.addEventListener('pointercancel', release);
+  // If capture was refused, a release anywhere on the page still ends the hold.
+  // `stop()` is a no-op when nothing is listening, so the second path costs
+  // nothing — and an open microphone is never the failure mode.
+  window.addEventListener('pointerup', release);
+  window.addEventListener('pointercancel', release);
 }
 
 // ---- wake mode: opt-in, disclosed, and always visible while it runs ---------
@@ -997,16 +1050,36 @@ function wireWake() {
     // never announced or reached. Focusing the group puts the owner at the first
     // word of what the microphone is about to do, which is the only order that
     // makes this a gate rather than a decoration.
-    ui.disclosure.focus();
+    //
+    // `preventScroll` because the panel is overlaid and already centred in the
+    // viewport: there is nothing to scroll to, and letting focus() scroll
+    // anyway would move the page underneath the gate for no reason. That
+    // movement is the flip — 694px in one frame, measured — and it is gone.
+    ui.backdrop.hidden = false;
+    ui.disclosure.focus({ preventScroll: true });
   }
 
   function closeDisclosure() {
     ui.disclosure.hidden = true;
+    ui.backdrop.hidden = true;
     ui.ack.checked = false;
     ui.confirm.disabled = true;
     ui.confirm.style.opacity = '0.5';
     ui.wakeToggle.setAttribute('aria-expanded', 'false');
+    // Put the owner back on the control they opened this from, rather than
+    // dropping focus onto <body> where the next Tab starts from the top.
+    if (typeof ui.wakeToggle.focus === 'function') ui.wakeToggle.focus({ preventScroll: true });
   }
+
+  // Escape closes the gate without turning anything on. An overlay that traps
+  // the owner with no way out but a mouse is worse than the panel it replaced.
+  ui.disclosure.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeDisclosure(); }
+  });
+  // Clicking the dimmed page means "not now" — the same as Cancel. It never
+  // means yes; nothing here can turn the microphone on except the confirm
+  // button, and that stays disabled until the box is ticked.
+  ui.backdrop.addEventListener('click', () => closeDisclosure());
 
   ui.wakeToggle.addEventListener('click', () => {
     if (wakeOn) {
