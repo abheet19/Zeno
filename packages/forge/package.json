@@ -1,0 +1,29 @@
+{
+  "name": "@abheet19/zeno-forge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeno Forge — the governed coding agent. A headless agent PROPOSES by editing an isolated git worktree; the owner DISPOSES through preview → approval → the jailed git executor. Nothing the agent writes reaches the real branch on its own.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "coverage": "tsc && node --test --experimental-test-coverage --test-coverage-include=\"dist/src/**\" --test-coverage-exclude=\"dist/src/index.js\" --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=85 \"dist/test/*.test.js\"",
+    "test": "tsc && node --test \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run coverage"
+  },
+  "dependencies": {
+    "@abheet19/zeno-kernel": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "typescript": "^5.6.3"
+  }
+}

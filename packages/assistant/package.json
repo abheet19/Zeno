@@ -1,0 +1,17 @@
+{
+  "name": "@abheet19/zeno-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ask Zeno — the owner asks about their OWN Zeno and gets an answer grounded in real local state. Computes text and structure only: it can PROPOSE, it can never approve or act.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test --experimental-test-coverage --test-coverage-exclude=\"dist/test/**\" --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=90 \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": { "@types/node": "^20.16.11", "typescript": "^5.6.3" }
+}
