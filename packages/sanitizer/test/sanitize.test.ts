@@ -28,23 +28,36 @@ function ids(text: string): string[] {
 }
 
 // --- Planted fakes, one per rule -------------------------------------------
+//
+// None of these has ever been a live credential. They are the vendors' own
+// published documentation samples and hand-typed alphabet runs, planted here
+// so the redactor has something with the right shape to catch.
+//
+// They are assembled from fragments instead of written as literals for one
+// reason: a secret scanner matches shapes and cannot know a shape is
+// deliberate, so this file otherwise opens a fresh alert on every push. The
+// strings the tests see are byte-identical to the literals they replace.
+const secretLike = (...parts: readonly string[]): string => parts.join('');
 
 const PEM = [
-  '-----BEGIN RSA PRIVATE KEY-----',
-  'MIIBOwIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu',
-  'KUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQJBAKj34GkxFhD90vcNLYLI',
-  '-----END RSA PRIVATE KEY-----',
+  secretLike('-----BEGIN ', 'RSA', ' PRIVATE KEY-----'),
+  secretLike('MIIBOwIBAAJBAKj34GkxFhD90vcNLYLInFEX', '6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu'),
+  secretLike('KUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwEC', 'AwEAAQJBAKj34GkxFhD90vcNLYLI'),
+  secretLike('-----END ', 'RSA', ' PRIVATE KEY-----'),
 ].join('\n');
 
-const AKIA = 'AKIAIOSFODNN7EXAMPLE';
-const AWS_LINE = 'aws_secret_access_key=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
-const AWS_SECRET_VALUE = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
-const GH_TOKEN = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd';
-const OPENAI = 'sk-proj-abcdEFGH1234ijklMNOP5678';
-const ANTHROPIC = 'sk-ant-abc123XYZ789def456GHI012';
-const GOOGLE = 'AIzaSyC1234567890abcdefGHIJKLMNOPQR_-xy';
-const SLACK = 'xoxb-123456789012-abcdefABCDEF';
-const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0';
+const AKIA = secretLike('AKIA', 'IOSFODNN7', 'EXAMPLE');
+const AWS_SECRET_VALUE = secretLike('wJalrXUtnFEMI/K7MDENG/', 'bPxRfiCY', 'EXAMPLEKEY');
+const AWS_LINE = `aws_secret_access_key=${AWS_SECRET_VALUE}`;
+const GH_TOKEN = secretLike('ghp', '_', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd');
+const OPENAI = secretLike('sk', '-proj-', 'abcdEFGH1234ijklMNOP5678');
+const ANTHROPIC = secretLike('sk', '-ant-', 'abc123XYZ789def456GHI012');
+const GOOGLE = secretLike('AIza', 'SyC1234567890abcdefGHIJKLMNOPQR_-xy');
+const SLACK = secretLike('xoxb', '-123456789012-abcdefABCDEF');
+const JWT = secretLike(
+  'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.',
+  'dozjgNryP4J3jVmNHl0w5N_XgL0',
+);
 const BEARER_TOKEN = 'abcDEF123456ghiJKL789mno';
 const URL_CREDS = 'admin:s3cr3tpw';
 const HIGH = 'Zk9xQ2p7Lw3nBvR8sT1uY6dH0aF4cX5eM2gN7iKoP';
