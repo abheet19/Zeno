@@ -1,0 +1,1050 @@
+/* =============================================================================
+   Zeno Glass — tokens and state grammar
+   packages/daemon/public/glass/tokens.css
+
+   Source of truth for the palette: docs/23-gate2-prototype.html :root.
+   Source of truth for the colour law and the state vocabulary:
+   docs/24-prototype-command.md §1.7, §4.10, and the invariants block.
+
+   NO RUNTIME NETWORK. Nothing in this file, and nothing it pulls in, reaches
+   off this machine. The two signature faces are self-hosted from
+   ./fonts/*.woff2, fetched once at build time. There is no @import, no CDN
+   link and no Google Fonts stylesheet anywhere in the shipped window.
+
+   NO NEW COLOURS. Every hex below appears in the approved prototype :root —
+   the dark ramp and the light ramp both — with one addition named by the
+   Gate-2 brief: --focus (#86DEEC), the dark focus-ring tint. Every other value
+   in this file is one of those hexes, a neutral white/black alpha lifted
+   verbatim from the prototype glass vocabulary, or an opaque color-mix() of
+   two approved hexes.
+
+   BOTH GROUNDS. The light palette is the bare :root. The dark palette is
+   applied twice — under `@media (prefers-color-scheme: dark)` guarded as
+   `:root:not([data-theme="light"])`, and again under `:root[data-theme="dark"]`
+   — so a system preference and an explicit toggle each win in both directions.
+   The two dark blocks are identical by construction; change one, change both.
+
+   THE COLOUR LAW HOLDS ON BOTH GROUNDS, AND IT IS THE SAME LAW. A ceiling that
+   is only true in one theme is a bug, not a nuance. Six light values are
+   therefore NOT the raw prototype light hex: they are that hex mixed toward the
+   light --ink until the identical ceiling clears. Each carries its measured
+   ratio inline. contrast.mjs runs the whole budget twice, once per palette,
+   and fails if either drifts.
+
+   Verified by: node packages/daemon/public/glass/contrast.mjs
+   ============================================================================= */
+
+/* =============================================================================
+   0. THE SIGNATURE FACES — self-hosted, latin subset, local files only.
+
+   IBM Plex Mono carries every hash, payload, receipt id and countdown.
+   Newsreader is the editorial voice: surface headings and nothing else.
+
+   The unicode-range is the Google latin subset, so anything outside it — the
+   state glyphs, box drawing, CJK — falls straight through to the next family
+   in the stack instead of rendering from a subset that lacks it.
+
+   font-display:swap: the fallback paints immediately and the real face swaps
+   in from disk. There is no network round trip to wait on, so the swap window
+   is a formality — but stating it means a cold cache never blocks first paint.
+
+   Files fetched from fonts.gstatic.com at BUILD time and committed:
+     ibm-plex-mono-latin-400.woff2   IBM Plex Mono v20 regular
+     ibm-plex-mono-latin-500.woff2   IBM Plex Mono v20 medium
+     ibm-plex-mono-latin-600.woff2   IBM Plex Mono v20 semibold
+     newsreader-latin-var.woff2      Newsreader v26 variable (opsz 6..72, wght 400..600)
+   ============================================================================= */
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-500.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-mono-latin-600.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* One file, every weight the display voice uses. Google serves this variable
+   face for 400, 500 and 600 alike, so it is declared once over that range. */
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("fonts/newsreader-latin-var.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* =============================================================================
+   THE LIGHT PALETTE — the bare :root, so every colour has a definition here
+   before any media query or theme attribute touches it.
+   ============================================================================= */
+
+:root {
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------------------
+     1. GRAPHITE RAMP — g1 is the ground, g7 the deepest neutral.
+
+     The light ramp is not a mirror of the dark one and must not be read as
+     one: it rises from the ground (g1) through three lighter planes (g2–g4)
+     and then falls to two deep neutrals (g6, g7). g7 is again the worst-case
+     backdrop, this time because it is the DARKEST surface dark-on-light text
+     may land on.
+     --------------------------------------------------------------------------- */
+  --g1: #E9E8E2;
+  --g2: #F4F3EE;
+  --g3: #FBFAF6;
+  --g4: #F0EFEA;
+  --g5: #E7E6E0;
+  --g6: #D6D4CC;
+  --g7: #C2C0B8;
+
+  /* ---------------------------------------------------------------------------
+     2. INK — the same three roles, the same three ceilings as the dark ramp.
+
+     --ink    body and every state label. Text on g1–g7 (9.58:1 at g7).
+     --ink-2  secondary text. Text on g1–g6 (4.55:1 at g6). On g7 it drops to
+              3.70:1 — graphic threshold only, exactly as on the dark ramp.
+     --ink-3  NOT A TEXT COLOUR: watermarks, disabled affordances and hairline
+              glyphs on g1–g3, at the 3:1 graphic threshold (3.03:1 at g1).
+
+     ADJUSTED, and here is why. The raw prototype light hexes miss both
+     ceilings by a hair — #565D68 is 4.48:1 on g6 (needs 4.5) and #868D98 is
+     2.73:1 on g1 (needs 3.0). Rather than declare a softer ceiling that only
+     the light theme obeys, each is mixed toward --ink until the one shared
+     ceiling clears. The mix is one RGB step for --ink-2 and eight for --ink-3.
+     --------------------------------------------------------------------------- */
+  --ink: #171A1E;
+  --ink-2: color-mix(in srgb, #565D68 99%, #171A1E);   /* #555C67 · 4.55:1 on g6 */
+  --ink-3: color-mix(in srgb, #868D98 93%, #171A1E);   /* #7E858F · 3.03:1 on g1 */
+
+  /* ---------------------------------------------------------------------------
+     3. RULES — hairline separators. Decorative: exempt from 1.4.11, never the
+     only thing carrying a boundary that matters.
+     --------------------------------------------------------------------------- */
+  --rule: #DEDCD5;
+  --rule-2: #CBC9C1;
+
+  /* ---------------------------------------------------------------------------
+     4. THE FOUR-CHANNEL COLOUR LAW — binding, not decorative, and identical on
+     both grounds. Same five meanings, same five ceilings:
+
+       --cyan    text on g1–g7      (4.54:1 at g7)
+       --gold    text on g1–g7      (4.51:1 at g7)
+       --amber   text on g1–g6      (4.55:1 at g6)
+       --green   text on g1–g6      (4.55:1 at g6)
+       --red     text on g1–g4      (4.73:1 at g1) · glyph or edge on g1–g6
+
+     ADJUSTED. Four of the five raw prototype light hexes cannot hold the
+     ceiling the dark ramp holds — #8A6D2C is 3.97:1 on the BODY GROUND, which
+     would make the owner-origin mark illegal on the page it is printed on.
+     Each is mixed toward --ink by the smallest step that clears, so the law
+     the developer is handed is one law and not two. --red needs no adjustment.
+
+     A CHANNEL COLOUR NEVER SITS DIRECTLY ON GLASS, on either ground. A status
+     on glass chrome is a .state chip, which brings its own opaque fill.
+     --------------------------------------------------------------------------- */
+  --cyan: color-mix(in srgb, #15707E 70%, #171A1E);    /* #165661 · 4.54:1 on g7 */
+  --cyan-dim: #9BCBD3;
+  --gold: color-mix(in srgb, #8A6D2C 61%, #171A1E);    /* #5D4D27 · 4.51:1 on g7 */
+  --amber: color-mix(in srgb, #8C6410 81%, #171A1E);   /* #765613 · 4.55:1 on g6 */
+  --red: #A6483C;                                      /* raw prototype · 4.73:1 on g1 */
+  --green: color-mix(in srgb, #387153 86%, #171A1E);   /* #33654C · 4.55:1 on g6 */
+
+  /* ---------------------------------------------------------------------------
+     5. FOCUS — a real 2px border, offset 2px. There is deliberately no focus
+     glow token in this file; if you want one, you cannot have one.
+
+     On the light ground the ring is the RAW prototype cyan: it is the lighter
+     tint of the (darkened) --cyan above, which is the same relationship
+     #86DEEC has to #38C3D6 on the dark ground. 3.16:1 at g7, its worst.
+     --------------------------------------------------------------------------- */
+  --focus: #15707E;
+  --focus-w: 2px;
+  --focus-off: 2px;
+
+  /* ---------------------------------------------------------------------------
+     6. SPACING — 4px scale. Nothing off-scale. --s-0 through --s-24.
+     --------------------------------------------------------------------------- */
+  --s-0: 0px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 28px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+  --s-24: 96px;
+
+  /* WCAG 2.5.8 — minimum interactive target. */
+  --target-min: 24px;
+
+  /* ---------------------------------------------------------------------------
+     7. RADII — four, and only four.
+       --r-1  chips, state pills, inputs, small controls
+       --r-2  opaque work planes: payload, code, diff, table
+       --r-3  glass: nav-adjacent controls and overlays
+       --r-full  circular only (dots, avatars, seals)
+     --------------------------------------------------------------------------- */
+  --r-1: 6px;
+  --r-2: 11px;
+  --r-3: 15px;
+  --r-full: 999px;
+
+  /* ---------------------------------------------------------------------------
+     8. TYPOGRAPHY — the two signature faces, each with a real fallback stack
+     that still renders a complete window if a woff2 is missing.
+
+     --font-display  Newsreader. The editorial voice. Surface headings only:
+                     it is the one place the product speaks in prose rather
+                     than in machine type. Never a label, never a chip.
+     --font-mono     IBM Plex Mono, FIRST in the stack now rather than buried
+                     mid-list as a hopeful fallback. Hashes, payload, receipts,
+                     countdowns.
+     --font-ui       system stack. Deliberately not a webfont: the chrome
+                     should look native to the machine it governs.
+
+     Tabular figures are ON by default at the root, so every count, countdown,
+     attempt number and hash aligns without anyone remembering to ask.
+     --------------------------------------------------------------------------- */
+  --font-display: "Newsreader", ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+  --font-glyph: "Segoe UI Symbol", "Segoe UI", system-ui, sans-serif;
+
+  --fs-0: 10.5px;  /* meta, uppercase, tracked */
+  --fs-1: 11.5px;  /* chips, state pills, controls */
+  --fs-2: 13px;    /* secondary text, table cells */
+  --fs-3: 14px;    /* body */
+  --fs-4: 17px;    /* plane title */
+  --fs-5: 21px;    /* display */
+
+  --lh-1: 1.2;     /* headings, chips */
+  --lh-2: 1.45;    /* dense lists, payload */
+  --lh-3: 1.55;    /* prose */
+
+  --fw-1: 400;
+  --fw-2: 500;
+  --fw-3: 600;
+
+  --ls-meta: 0.14em;
+  --ls-tight: -0.01em;
+
+  /* ---------------------------------------------------------------------------
+     9. ELEVATION AND GLASS — verbatim from the prototype light ramp.
+     --------------------------------------------------------------------------- */
+  --lift: 0 1px 2px rgba(23, 26, 30, .05), 0 12px 30px rgba(23, 26, 30, .08);
+
+  --gl-tint: linear-gradient(157deg, rgba(255, 255, 255, .72), rgba(255, 255, 255, .42) 46%, rgba(255, 255, 255, .60));
+  --gl-edge: rgba(23, 26, 30, .10);
+  --gl-spec: rgba(255, 255, 255, .95);
+  --gl-inner: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -1px 0 rgba(23, 26, 30, .06);
+  --gl-cast: 0 16px 40px -14px rgba(23, 26, 30, .20), 0 2px 6px rgba(23, 26, 30, .07);
+  --gl-blur: blur(24px) saturate(165%);
+
+  /* The effective worst-case backdrop BEHIND glass chrome. On the light ramp
+     the tint LIGHTENS what is behind it, so the worst case inverts: it is the
+     tint's white at its WEAKEST stop (42%) over the darkest plane glass may
+     sit above. Not a paint colour — nothing is filled with it. It exists so
+     the contrast budget can measure text on glass instead of guessing at it. */
+  --gl-worst: color-mix(in srgb, #FFFFFF 42%, var(--g7));
+
+  /* The opaque-plane shadow and the overlay scrim, as tokens rather than as
+     literals buried in a rule, because both invert with the ground. */
+  --plane-shadow: inset 0 1px 0 rgba(255, 255, 255, .90), 0 6px 18px -10px rgba(23, 26, 30, .18);
+  --scrim: rgba(23, 26, 30, .38);
+
+  /* Material washes: the recessed well a segmented control sits in, its hover,
+     and the specular top edge of that well. White on the dark ground, ink on
+     the light one — a white wash on a light ground is not a wash at all. */
+  --wash: rgba(23, 26, 30, .045);
+  --wash-2: rgba(23, 26, 30, .055);
+  --wash-hi: rgba(255, 255, 255, .75);
+
+  /* ---------------------------------------------------------------------------
+     10. THE ATMOSPHERE — the ground the glass refracts.
+
+     Glass only refracts if there is something behind it, and without this the
+     shipped window is a flat plate with a blur on it. --amb-1/2/3 are the
+     three ambient glows and --veil is the vignette that closes them back down
+     to the ground colour at the edges. All four are lifted verbatim from the
+     prototype :root.
+
+     --amb-strength is the one value here that is NOT the prototype's. The
+     prototype spends these at full strength behind a hero; this window spends
+     them behind a control plane, so they are dialled to 45%. That number is
+     measured, not chosen: at full strength the composited ground drops
+     --ink-2 to 4.21:1 on the light ramp, which would put secondary text below
+     AA on the body itself. At 45% the worst overlap of two glows still
+     measures 4.64:1 light and 5.85:1 dark, and contrast.mjs asserts it.
+
+     WHERE IT IS ALLOWED TO BE. It is body's own background-image, under
+     everything, and every work surface — payload, code, diff, table,
+     transcript, longform — is opaque and paints over it. That rule stands and
+     is now enforced by construction rather than by convention: there is no
+     element to mis-stack, no z-index to get wrong, and nothing it can end up
+     in front of.
+
+     IT DRIFTS, ON THE MOTION CONTRACT. The prototype drifts it on a 46s loop,
+     and that drift is what stops the glass reading as a printed plate: a
+     refraction only looks like refraction when the thing behind it moves. So
+     the drift is ported — but it is the ONE loop in this file, it moves the
+     ground and never the content, and it obeys the same three-state contract
+     as everything else: OFF under prefers-reduced-motion, OFF under
+     data-reduce="1", and ON under an explicit data-reduce="0" even when the
+     OS asks for reduced motion. At 46s and ±2% of the viewport it is below
+     the threshold where text becomes harder to read; --amb-strength (measured
+     for contrast, not chosen) is unchanged by it, so the AA floor the
+     contrast.mjs assertion protects is the same at every point in the cycle.
+     --------------------------------------------------------------------------- */
+  --amb-1: rgba(21, 112, 126, .20);
+  --amb-2: rgba(138, 109, 44, .15);
+  --amb-3: rgba(56, 113, 83, .10);
+  --amb-strength: 45%;
+  --veil:
+    radial-gradient(92% 84% at 62% 46%, transparent 52%, rgba(233, 232, 226, .55) 100%),
+    linear-gradient(180deg, rgba(233, 232, 226, .30) 0%, transparent 20%, transparent 62%, #E9E8E2 100%);
+
+  /* ---------------------------------------------------------------------------
+     11. MOTION — every duration below is spent by exactly one real state
+     transition. There is no loop token, no pulse token, no shimmer token and
+     no indeterminate-spinner token, because there is no honest use for one.
+     --------------------------------------------------------------------------- */
+  --dur-1: 90ms;
+  --dur-2: 180ms;
+  --dur-3: 280ms;
+  --dur-4: 420ms;
+  --ease: cubic-bezier(.2, .6, .2, 1);
+}
+
+/* =============================================================================
+   THE DARK PALETTE — the original dark-first graphite, every value unchanged.
+   Applied twice so both directions of the switch win:
+
+     · the system preference, unless an explicit light toggle overrides it
+     · the explicit dark toggle, whatever the system says
+
+   Only ground-dependent tokens appear here. Spacing, radii, the type scale,
+   motion and the font stacks do not depend on the ground and stay on :root.
+   ============================================================================= */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --g1: #0A0C0E;
+    --g2: #0F1214;
+    --g3: #151A1D;
+    --g4: #1B2124;
+    --g5: #222A2E;
+    --g6: #2C363B;
+    --g7: #384349;
+
+    /* --ink text on g1–g7 (8.51:1 at g7) · --ink-2 text on g1–g6 (4.75:1 at
+       g6) · --ink-3 never text: 3:1 graphic threshold, g1–g3 only. */
+    --ink: #ECEBE6;
+    --ink-2: #9AA1AC;
+    --ink-3: #6C7480;
+
+    --rule: #242C31;
+    --rule-2: #2C363B;
+
+    /* cyan g1–g7 4.81 · gold g1–g7 5.60 · amber g1–g6 5.48 · green g1–g6 5.16
+       · red g1–g4 4.72 as text, g1–g6 as glyph or edge. */
+    --cyan: #38C3D6;
+    --cyan-dim: #1E6B76;
+    --gold: #D8BE7E;
+    --amber: #E0A128;
+    --red: #D8695A;
+    --green: #5BB98C;
+
+    --focus: #86DEEC;
+
+    --lift: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 34px rgba(0, 0, 0, .36);
+
+    --gl-tint: linear-gradient(157deg, rgba(255, 255, 255, .075), rgba(255, 255, 255, .022) 46%, rgba(255, 255, 255, .045));
+    --gl-edge: rgba(255, 255, 255, .10);
+    --gl-spec: rgba(255, 255, 255, .30);
+    --gl-inner: inset 0 1px 0 rgba(255, 255, 255, .10), inset 0 -1px 0 rgba(0, 0, 0, .30);
+    --gl-cast: 0 18px 46px -12px rgba(0, 0, 0, .62), 0 2px 8px rgba(0, 0, 0, .34);
+    --gl-blur: blur(26px) saturate(175%);
+    --gl-worst: color-mix(in srgb, #FFFFFF 8%, var(--g6));
+
+    --plane-shadow: inset 0 1px 0 rgba(255, 255, 255, .035), 0 6px 18px -10px rgba(0, 0, 0, .5);
+    --scrim: rgba(10, 12, 14, .62);
+
+    --wash: rgba(255, 255, 255, .045);
+    --wash-2: rgba(255, 255, 255, .05);
+    --wash-hi: rgba(255, 255, 255, .07);
+
+    --amb-1: rgba(56, 195, 214, .26);
+    --amb-2: rgba(216, 190, 126, .17);
+    --amb-3: rgba(91, 185, 140, .11);
+    --veil:
+      radial-gradient(88% 78% at 62% 46%, transparent 40%, rgba(10, 12, 14, .90) 100%),
+      linear-gradient(180deg, rgba(10, 12, 14, .55) 0%, transparent 22%, transparent 58%, #0A0C0E 100%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --g1: #0A0C0E;
+  --g2: #0F1214;
+  --g3: #151A1D;
+  --g4: #1B2124;
+  --g5: #222A2E;
+  --g6: #2C363B;
+  --g7: #384349;
+
+  --ink: #ECEBE6;
+  --ink-2: #9AA1AC;
+  --ink-3: #6C7480;
+
+  --rule: #242C31;
+  --rule-2: #2C363B;
+
+  --cyan: #38C3D6;
+  --cyan-dim: #1E6B76;
+  --gold: #D8BE7E;
+  --amber: #E0A128;
+  --red: #D8695A;
+  --green: #5BB98C;
+
+  --focus: #86DEEC;
+
+  --lift: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 34px rgba(0, 0, 0, .36);
+
+  --gl-tint: linear-gradient(157deg, rgba(255, 255, 255, .075), rgba(255, 255, 255, .022) 46%, rgba(255, 255, 255, .045));
+  --gl-edge: rgba(255, 255, 255, .10);
+  --gl-spec: rgba(255, 255, 255, .30);
+  --gl-inner: inset 0 1px 0 rgba(255, 255, 255, .10), inset 0 -1px 0 rgba(0, 0, 0, .30);
+  --gl-cast: 0 18px 46px -12px rgba(0, 0, 0, .62), 0 2px 8px rgba(0, 0, 0, .34);
+  --gl-blur: blur(26px) saturate(175%);
+  --gl-worst: color-mix(in srgb, #FFFFFF 8%, var(--g6));
+
+  --plane-shadow: inset 0 1px 0 rgba(255, 255, 255, .035), 0 6px 18px -10px rgba(0, 0, 0, .5);
+  --scrim: rgba(10, 12, 14, .62);
+
+  --wash: rgba(255, 255, 255, .045);
+  --wash-2: rgba(255, 255, 255, .05);
+  --wash-hi: rgba(255, 255, 255, .07);
+
+  --amb-1: rgba(56, 195, 214, .26);
+  --amb-2: rgba(216, 190, 126, .17);
+  --amb-3: rgba(91, 185, 140, .11);
+  --veil:
+    radial-gradient(88% 78% at 62% 46%, transparent 40%, rgba(10, 12, 14, .90) 100%),
+    linear-gradient(180deg, rgba(10, 12, 14, .55) 0%, transparent 22%, transparent 58%, #0A0C0E 100%);
+}
+
+/* =============================================================================
+   BASE
+   ============================================================================= */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html {
+  /* The flat ground. color-scheme is set per palette on :root above, so the
+     form controls, scrollbars and the canvas behind an overscroll all follow
+     the theme rather than being pinned to one of them. */
+  background: var(--g1);
+}
+
+/* -----------------------------------------------------------------------------
+   THE ATMOSPHERE, on the body's own background and nowhere else.
+
+   Three ambient glows at --amb-strength, with --veil over them closing the
+   edges back down to the ground. Layer order is top-first: the veil, then the
+   glows beneath it.
+
+   This is a background-image and not a ::before, and that choice is the whole
+   safety argument. A pseudo-element has a z-index and can therefore be got
+   wrong — one positioned sibling, one stacking context, and the atmosphere is
+   suddenly in front of an approval payload. A background cannot be. It is
+   under every box in the document by definition, every work surface (payload,
+   code, diff, table, transcript, longform) paints opaque over it, and there is
+   no ordering left to break.
+
+   It drifts. The prototype's 46s ambient loop is ported here as an animation
+   of this element's own background-position: the veil layer stays pinned and
+   the three glows slide under it, so the ground breathes and the glass above
+   it has something moving to refract. Nothing in the content moves. The
+   parallax that background-attachment:fixed produces against scrolling
+   content is the other motion, and both switch off together on the same
+   contract.
+   ----------------------------------------------------------------------------- */
+body {
+  margin: 0;
+  background-color: var(--g1);
+  background-image:
+    var(--veil),
+    radial-gradient(48% 42% at 18% 88%, color-mix(in srgb, var(--amb-1) var(--amb-strength), transparent), transparent 70%),
+    radial-gradient(42% 38% at 84% 8%, color-mix(in srgb, var(--amb-2) var(--amb-strength), transparent), transparent 72%),
+    radial-gradient(56% 46% at 62% 62%, color-mix(in srgb, var(--amb-3) var(--amb-strength), transparent), transparent 74%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  line-height: var(--lh-3);
+  /* Every numeral in the product is tabular. Hashes, counts, countdowns,
+     attempt numbers and timestamps must not reflow as they tick. */
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The ambient drift: the prototype's 46s loop, moving the three glow layers
+   and leaving the veil pinned at 0 0. Percentages are of the painted area, so
+   ±2% is a few pixels of slide — enough for the glass to have something to
+   refract, far too little to pull the eye off a payload. */
+@keyframes zeno-ambient-drift {
+  0%   { background-position: 0 0,  0% 0%,     0% 0%,     0% 0%; }
+  50%  { background-position: 0 0,  2.2% -1.8%, -1.8% 2.2%, 1.6% 1.4%; }
+  100% { background-position: 0 0, -1.6% 2.4%,  2.4% -1.6%, -1.2% -1.8%; }
+}
+body { animation: zeno-ambient-drift 46s ease-in-out infinite alternate; }
+
+/* OFF when the system asks for reduced motion, and OFF on an explicit "no". */
+@media (prefers-reduced-motion: reduce) {
+  body { background-attachment: scroll; animation: none; }
+}
+:root[data-reduce="1"] body { background-attachment: scroll; animation: none; }
+
+/* ON for an explicit yes — this must beat the media query above, in both
+   directions, or an owner on a machine with reduce-motion set system-wide
+   could never turn the atmosphere back on. The attribute selector outranks the
+   bare `body` rule inside the media block, so it does. */
+:root[data-reduce="0"] body {
+  background-attachment: fixed;
+  animation: zeno-ambient-drift 46s ease-in-out infinite alternate;
+}
+
+/* An owner who has asked for more contrast gets no drift either: the glows are
+   already zeroed below, and moving a ground that is not there is pure cost. */
+@media (prefers-contrast: more) {
+  body, :root[data-reduce="0"] body { animation: none; }
+}
+
+/* An owner who has asked the OS for more contrast does not want a tinted
+   ground under their control plane. Drop the glows; keep the veil. */
+@media (prefers-contrast: more) {
+  body { --amb-strength: 0%; }
+}
+
+/* Forced colours replace the palette wholesale. Painting a gradient underneath
+   that is noise at best and an unreadable ground at worst. */
+@media (forced-colors: active) {
+  body { background-image: none; }
+}
+
+/* The one opt-out, for running prose where tabular figures look wrong. */
+.zg-prose-nums { font-variant-numeric: proportional-nums; }
+
+/* THE EDITORIAL VOICE. Newsreader, and only on the headings that name a
+   surface. This is the one place the window speaks in prose; a chip, a label,
+   a status or a hash in a serif would be a lie about what kind of text it is. */
+.zg-display {
+  font-family: var(--font-display);
+  font-weight: var(--fw-3);
+  letter-spacing: var(--ls-tight);
+  line-height: var(--lh-1);
+  /* Newsreader is an optical-size variable face: let it pick the cut. */
+  font-optical-sizing: auto;
+  /* A heading is prose, not a readout. */
+  font-variant-numeric: proportional-nums;
+}
+
+.zg-mono,
+.zg-hash,
+.zg-payload,
+code, kbd, pre, samp {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-variant-ligatures: none;
+}
+
+/* A hash is a fact, not a word: never let it hyphenate or re-wrap mid-digest. */
+.zg-hash {
+  font-size: var(--fs-2);
+  letter-spacing: 0;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  hyphens: none;
+}
+
+.zg-meta {
+  font-size: var(--fs-0);
+  letter-spacing: var(--ls-meta);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* =============================================================================
+   FOCUS — a real border. Not a glow, not a shadow, not a colour swap.
+   ============================================================================= */
+
+/* The outline already follows the element's OWN border-radius. Setting a radius
+   here would reshape the control the moment it is focused — a border-radius the
+   element does not otherwise have, inherited from whatever plane it happens to
+   sit in. Focus marks an element; it does not redraw it. */
+:where(:focus-visible) {
+  outline: var(--focus-w) solid var(--focus);
+  outline-offset: var(--focus-off);
+}
+
+/* Mouse focus does not paint a ring; keyboard focus always does. */
+:where(:focus:not(:focus-visible)) { outline: none; }
+
+/* WCAG 2.4.11 — a focused element is never obscured by sticky chrome.
+   The block margin must CLEAR the tallest sticky thing that can cover a focused
+   control, not merely separate it from the edge: the shell header is ~50px and
+   the capsule's own sticky head is ~80px, so 24px would scroll a tabbed-to
+   control neatly underneath both of them. --s-24 is that clearance. */
+:where(:focus-visible) {
+  scroll-margin-block: var(--s-24);
+  scroll-margin-inline: var(--s-6);
+}
+
+/* WCAG 2.5.8 — minimum target. */
+.zg-target {
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+}
+
+@media (forced-colors: active) {
+  :where(:focus-visible) { outline-color: Highlight; }
+  .state { forced-color-adjust: none; }
+  .state__glyph, .state__label { forced-color-adjust: auto; }
+}
+
+/* =============================================================================
+   SURFACES
+
+   Three planes, no more:
+     .zg-glass  layer 2 — nav-adjacent controls and overlays ONLY
+     .zg-plane  layer 1 — opaque work surface
+     .zg-payload  layer 1, fully opaque --g2 — the approval payload
+
+   Glass is forbidden behind code, diffs, tables, long text and the approval
+   payload. The rules below do not merely say so; they neutralise it.
+   ============================================================================= */
+
+.zg-glass {
+  position: relative;
+  isolation: isolate;
+  background: var(--gl-tint);
+  backdrop-filter: var(--gl-blur);
+  -webkit-backdrop-filter: var(--gl-blur);
+  border: 1px solid var(--gl-edge);
+  border-radius: var(--r-3);
+  box-shadow: var(--gl-inner), var(--gl-cast);
+}
+
+/* The specular seam that makes an edge read as glass and not as a panel. */
+.zg-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  border-radius: var(--r-3) var(--r-3) 0 0;
+  background: linear-gradient(90deg, transparent, var(--gl-spec) 22%, var(--gl-spec) 78%, transparent);
+  opacity: .55;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.zg-glass > * { position: relative; z-index: 3; }
+
+/* NO GLASS ON GLASS. Nested glass collapses to an opaque lift. */
+.zg-glass .zg-glass {
+  background: var(--g4);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: var(--lift);
+}
+.zg-glass .zg-glass::before { content: none; }
+
+/* Work surfaces: opaque, luminous edge, never blurred. */
+.zg-plane {
+  background: var(--g3);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-2);
+  box-shadow: var(--plane-shadow);
+}
+.zg-plane.is-lit { border-color: var(--rule-2); }
+
+/* The approval payload plane is FULLY OPAQUE. No tint, no alpha, no blur.
+   The owner reads the exact bytes they are authorising. */
+.zg-payload,
+.zg-code,
+.zg-diff,
+.zg-table,
+.zg-transcript,
+.zg-longform {
+  background: var(--g2);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-2);
+  color: var(--ink);
+}
+
+.zg-payload { padding: var(--s-4); line-height: var(--lh-2); }
+
+/* Even inside glass chrome, these stay opaque. */
+.zg-glass :is(.zg-payload, .zg-code, .zg-diff, .zg-table, .zg-transcript, .zg-longform) {
+  background: var(--g2);
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Overlay scrim — the one full-bleed glass use. Tokenised, because a scrim
+   that stays graphite-black on a paper ground is not a scrim, it is a hole. */
+.zg-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* =============================================================================
+   MOTION
+
+   Every animation in this file maps to exactly one real state. There is one
+   keyframe, it does not loop, and it is gated on a receipt.
+   ============================================================================= */
+
+@keyframes zg-seal-draw {
+  from { clip-path: inset(0 100% 0 0); opacity: 0; }
+  to   { clip-path: inset(0 0 0 0);    opacity: 1; }
+}
+
+/* THE SEAL IS THE LAST THING THAT RENDERS, AND IT RENDERS ONLY FROM A RECEIPT.
+   The default is no animation. The draw requires the verified state AND a
+   data-receipt attribute carrying the provider receipt id. A click cannot
+   produce one; only a verified receipt can. */
+.zg-seal { animation: none; }
+
+.state-verified[data-receipt]:not([data-receipt=""]) .zg-seal,
+.state[data-state="verified"][data-receipt]:not([data-receipt=""]) .zg-seal {
+  animation: zg-seal-draw var(--dur-2) var(--ease) 1 both;
+}
+
+/* The committing bar is determinate and bound to the real attempt.
+   Its width is set from the attempt, never from a timer. */
+.zg-commit-bar {
+  height: var(--s-1);
+  border-radius: var(--r-full);
+  background: var(--g5);
+  overflow: hidden;
+}
+.zg-commit-bar > i {
+  display: block;
+  height: 100%;
+  width: var(--zg-progress, 0%);
+  background: var(--cyan);
+  transition: width var(--dur-2) linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-delay: 0ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The in-product opt-in, for an owner whose OS setting does not say what they
+   want here. capsule.js already honours `:root[data-reduce="1"]`; without this
+   rule the flag would silence that one component and leave the seal draw above
+   still running, which is a worse answer than not offering the flag at all. */
+:root[data-reduce="1"] *,
+:root[data-reduce="1"] *::before,
+:root[data-reduce="1"] *::after {
+  animation-delay: 0ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  transition-delay: 0ms !important;
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* =============================================================================
+   THE STATE GRAMMAR — twelve canonical states.
+
+   MARKUP CONTRACT
+     <span class="state state-awaiting-approval">
+       <span class="state__glyph" aria-hidden="true"></span>
+       <span class="state__label"></span>
+     </span>
+
+   Leave both children empty and the grammar fills them: the glyph from
+   --st-glyph, the label from --st-label. Write your own label text to
+   override it (for a count, a countdown, a receipt id). Either way the label
+   is real text in the accessibility tree — the glyph is decorative and
+   duplicative by design.
+
+   Equivalent attribute form for a daemon rendering from JSON:
+     <span class="state" data-state="awaiting-approval"> … </span>
+
+   STATUS IS NEVER COLOUR ALONE. Every state carries three redundant channels:
+     1. GLYPH  — a distinct shape, legible at 11.5px in pure black and white
+     2. LABEL  — a distinct word, present in the DOM and in the a11y tree
+     3. FILL DELTA — a distinct surface luminance plus a 3px key bar whose
+                     contrast against that fill is measured, so the chip
+                     separates from its plane and from its neighbours with
+                     every colour channel stripped.
+
+   Remove colour entirely and all twelve remain identifiable. That is the test.
+   ============================================================================= */
+
+.state {
+  /* defaults, overridden by every .state-* below */
+  --st-glyph: "\25CB";
+  --st-label: "Idle";
+  --st-key: var(--ink-3);
+  --st-fill: var(--g4);
+  --st-ink: var(--ink);
+  --st-edge: var(--rule-2);
+  --st-bar: 3px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--target-min);
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid var(--st-edge);
+  border-left: var(--st-bar) solid var(--st-key);
+  border-radius: var(--r-1);
+  background: var(--st-fill);
+  color: var(--st-ink);
+  font-family: var(--font-ui);
+  font-size: var(--fs-1);
+  font-weight: var(--fw-2);
+  line-height: var(--lh-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.state__glyph {
+  font-family: var(--font-glyph);
+  font-variant-emoji: text;
+  color: var(--st-key);
+  font-size: var(--fs-2);
+  line-height: 1;
+  flex: none;
+}
+.state__glyph::before { content: var(--st-glyph); }
+
+.state__label { color: var(--st-ink); }
+.state__label:empty::before { content: var(--st-label); }
+
+/* A secondary fact on the chip — a countdown, an attempt, a receipt id. */
+.state__note {
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- 1. idle — nothing is owed and nothing is running. ---------------------- */
+.state-idle,
+.state[data-state="idle"] {
+  --st-glyph: "\25CB";   /* ○  hollow dot */
+  --st-label: "Idle";
+  --st-key: var(--ink-3);
+  --st-fill: var(--g4);
+  --st-ink: var(--ink-2);
+  --st-bar: 3px;
+}
+
+/* --- 2. listening — cyan. Information channel. ------------------------------ */
+.state-listening,
+.state[data-state="listening"] {
+  --st-glyph: "\25C9";   /* ◉  filled ring */
+  --st-label: "Listening";
+  --st-key: var(--cyan);
+  --st-fill: color-mix(in srgb, var(--cyan) 5%, var(--g5));
+  --st-ink: var(--ink);
+  --st-bar: 3px;
+}
+
+/* --- 3. awaiting-approval — amber. It rests. It never pulses. --------------- */
+.state-awaiting-approval,
+.state[data-state="awaiting-approval"] {
+  --st-glyph: "\25B8";   /* ▸  caret */
+  --st-label: "Awaiting approval";
+  --st-key: var(--amber);
+  --st-fill: color-mix(in srgb, var(--amber) 19%, var(--g5));
+  --st-ink: var(--ink);
+  --st-edge: var(--rule-2);
+  --st-bar: 4px;
+}
+
+/* --- 4. approved — amber. The decision is taken; the effect is NOT proven. -
+   Deliberately not green and deliberately not gold: green would claim a
+   receipt that does not exist, and gold is owner origin, never a status. --- */
+.state-approved,
+.state[data-state="approved"] {
+  --st-glyph: "\21E2";   /* ⇢  decision taken, effect pending */
+  --st-label: "Approved";
+  --st-key: var(--amber);
+  --st-fill: color-mix(in srgb, var(--amber) 5%, var(--g6));
+  --st-ink: var(--ink);
+  --st-bar: 4px;
+}
+
+/* --- 5. committing — cyan. Determinate, bound to the real attempt. ---------- */
+.state-committing,
+.state[data-state="committing"] {
+  --st-glyph: "\25D1";   /* ◑  half-filled: work in flight, quantity known */
+  --st-label: "Committing";
+  --st-key: var(--cyan);
+  --st-fill: color-mix(in srgb, var(--cyan) 24%, var(--g5));
+  --st-ink: var(--ink);
+  --st-bar: 3px;
+}
+
+/* --- 6. verified — green. THE ONLY GREEN. A receipt exists. ----------------- */
+.state-verified,
+.state[data-state="verified"] {
+  --st-glyph: "\2713";   /* ✓ */
+  --st-label: "Verified";
+  --st-key: var(--green);
+  --st-fill: color-mix(in srgb, var(--green) 21%, var(--g5));
+  --st-ink: var(--ink);
+  --st-bar: 4px;
+}
+
+/* --- 7. refused — red. The KERNEL refused: policy, or drift at compare-and-
+   swap. Not the owner's decision. Distinct glyph and fill from denied. ------ */
+.state-refused,
+.state[data-state="refused"] {
+  --st-glyph: "\2298";   /* ⊘  circle-slash */
+  --st-label: "Refused";
+  --st-key: var(--red);
+  --st-fill: color-mix(in srgb, var(--red) 16%, var(--g5));
+  --st-ink: var(--ink);
+  --st-bar: 3px;
+}
+
+/* --- 8. denied — red. The OWNER's recorded decision, with reason and receipt.
+   A denial must never read as a dismissal, so it keeps the red channel and a
+   full chip; it is separated from refused by glyph, label and fill. -------- */
+.state-denied,
+.state[data-state="denied"] {
+  --st-glyph: "\2715";   /* ✕ */
+  --st-label: "Denied";
+  --st-key: var(--red);
+  --st-fill: color-mix(in srgb, var(--red) 12%, var(--g4));
+  --st-ink: var(--ink);
+  --st-bar: 4px;
+}
+
+/* --- 9. blocked — red. A real guard failed; the reason is mandatory. -------- */
+.state-blocked,
+.state[data-state="blocked"] {
+  --st-glyph: "\25A0";   /* ■  square-stop, per 24-prototype-command §1.7 */
+  --st-label: "Blocked";
+  --st-key: var(--red);
+  --st-fill: color-mix(in srgb, var(--red) 22%, var(--g5));
+  --st-ink: var(--ink);
+  --st-bar: 4px;
+}
+
+/* --- 10. expired — neutral. Not an error and not a decision: the preview
+   outlived its window. The only forward action is Regenerate. -------------- */
+.state-expired,
+.state[data-state="expired"] {
+  --st-glyph: "\25CC";   /* ◌  dotted circle */
+  --st-label: "Expired";
+  --st-key: var(--ink-2);
+  --st-fill: color-mix(in srgb, var(--ink-3) 24%, var(--g4));
+  --st-ink: var(--ink);
+  --st-edge: var(--rule);
+  --st-bar: 3px;
+}
+
+/* --- 11. stale — neutral. The row cannot prove it is current. --------------- */
+.state-stale,
+.state[data-state="stale"] {
+  --st-glyph: "\2248";   /* ≈  approximately, not currently */
+  --st-label: "Stale";
+  --st-key: var(--ink-2);
+  --st-fill: color-mix(in srgb, var(--ink-3) 10%, var(--g4));
+  --st-ink: var(--ink);
+  --st-edge: var(--rule);
+  --st-bar: 3px;
+}
+
+/* --- 12. outcome-unknown — amber warning, and the most important state here.
+   The effect could not be proven either way. Not green: no receipt. Not red:
+   nothing is known to have failed. Retry is frozen by policy, not by CSS. -- */
+.state-outcome-unknown,
+.state[data-state="outcome-unknown"] {
+  --st-glyph: "?";
+  --st-label: "Outcome unknown";
+  --st-key: var(--amber);
+  --st-fill: color-mix(in srgb, var(--amber) 15%, var(--g6));
+  --st-ink: var(--ink);
+  --st-edge: var(--rule-2);
+  --st-bar: 4px;
+}
+
+/* Owner origin — gold. A provenance mark, never a status, and never applied
+   to a .state chip. It says who this came from, not how it is going. */
+.zg-owner {
+  color: var(--gold);
+  font-size: var(--fs-0);
+  letter-spacing: var(--ls-meta);
+  text-transform: uppercase;
+}
+.state .zg-owner { display: none; } /* gold may not enter the status chip */
+
+/* Stale watermark and expiry countdown: mono, tabular, secondary. */
+.zg-as-of,
+.zg-countdown {
+  font-family: var(--font-mono);
+  font-size: var(--fs-0);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}

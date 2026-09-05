@@ -1,0 +1,32 @@
+{
+  "name": "@abheet19/zeno-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeno MCP — the model-facing edge. An MCP client sees tools that let it PROPOSE and READ, never act. There is deliberately no approve tool: approval is a human act in the Zeno window, never over the pipe.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "bin": {
+    "zeno-mcp": "./dist/src/main.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test \"dist/test/*.test.js\"",
+    "coverage": "tsc && node --test --experimental-test-coverage --test-coverage-include=\"dist/src/**\" --test-coverage-exclude=\"dist/src/main.js\" --test-coverage-exclude=\"dist/src/index.js\" --test-coverage-lines=90 --test-coverage-functions=90 --test-coverage-branches=85 \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run coverage"
+  },
+  "dependencies": {
+    "@abheet19/zeno-kernel": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "typescript": "^5.6.3"
+  }
+}

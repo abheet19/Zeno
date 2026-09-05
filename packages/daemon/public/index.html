@@ -1,0 +1,1716 @@
+<!doctype html>
+<!--
+  No data-theme here on purpose. The window follows the machine: /glass/tokens.css
+  carries the light palette on bare :root and the dark palette under both
+  `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
+
+  Setting data-theme="light" or "dark" on this element is the explicit override,
+  and it wins over the system preference in either direction. Nothing in the
+  shipped window sets it; it is the contract a theme control would use.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zeno · Command · Forge · Counsel</title>
+
+<!--
+  The Zeno window.
+
+  This page is served by the local daemon at http://127.0.0.1:7317/ and is now a
+  three-product window: a glass nav on top switches between three surfaces —
+
+    Command  the owner's approval surface (this file's original job, unchanged)
+    Forge    the build surface   (an empty shell here, for another agent to fill)
+    Counsel  the meeting surface (an empty shell here, for another agent to fill)
+
+  Command talks to the same four routes it always did and nothing else:
+
+    GET  /state        -> { pending, receipts, chain, lastEventId }
+    GET  /stream       -> SSE: "preview" | "receipt" | "chain" (+ "gap")
+    POST /approvals    -> { actionHash } with header  x-zeno-token: <owner token>
+    GET  /glass/tokens.css, /app.js, /capsule.js, /timeline.js, /nav.js, /voice.js
+         (/voice.js imports the compiled voice core: /session.js, /wake.js,
+          /grammar.js, /listen.js — served as siblings from this directory)
+
+  What this file is: the shell, and only the shell. Every surface renders a
+  complete, legible resting state — because "nothing awaiting approval" is what
+  the owner sees ninety-nine times out of a hundred, and a blank page would be a
+  lie about a control plane whose whole job is to say what is and is not
+  happening. Everything live is mounted by the modules into the elements marked
+  data-mount. No framework, no bundler, no CDN, no build step.
+
+  Design: Zeno Glass (/glass/tokens.css). Glass appears only on nav-adjacent
+  chrome — the top bar — and never behind the approval payload, receipts or long
+  text. Every colour is a token; nothing here invents a hex.
+-->
+
+<!-- The daemon rewrites this content attribute with the owner token before
+     serving. Empty means "not injected": app.js/voice.js must then treat this
+     browser as unable to approve or propose, and say so, rather than posting an
+     empty token. -->
+<meta name="zeno-token" content="">
+
+<!--
+  Zeno Glass tokens, inlined as a FALLBACK ONLY, and deliberately placed BEFORE
+  the stylesheet link so /glass/tokens.css wins every value it defines. It
+  mirrors that file's structure exactly — light on bare :root, dark under both
+  the media query and the explicit attribute — so a window that fails to load
+  the stylesheet still renders in the right theme rather than in the wrong one.
+  Nothing here invents a colour, and the display serif is deliberately absent:
+  if the stylesheet is missing so are its @font-face rules, and a fallback that
+  named Newsreader would only ask for a face that cannot arrive.
+-->
+<style>
+:root{
+  color-scheme:light;
+  --g1:#E9E8E2; --g2:#F4F3EE; --g3:#FBFAF6; --g4:#F0EFEA; --g5:#E7E6E0; --g6:#D6D4CC; --g7:#C2C0B8;
+  --ink:#171A1E; --ink-2:#555C67; --ink-3:#7E858F;
+  --rule:#DEDCD5; --rule-2:#CBC9C1;
+  --cyan:#165661; --cyan-dim:#9BCBD3; --gold:#5D4D27; --amber:#765613;
+  --red:#A6483C; --green:#33654C;
+  --lift:0 1px 2px rgba(23,26,30,.05),0 12px 30px rgba(23,26,30,.08);
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.72),rgba(255,255,255,.42) 46%,rgba(255,255,255,.60));
+  --gl-edge:rgba(23,26,30,.10);
+  --gl-spec:rgba(255,255,255,.95);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(23,26,30,.06);
+  --gl-cast:0 16px 40px -14px rgba(23,26,30,.20),0 2px 6px rgba(23,26,30,.07);
+  --gl-blur:blur(24px) saturate(165%);
+  --wash:rgba(23,26,30,.045); --wash-2:rgba(23,26,30,.055); --wash-hi:rgba(255,255,255,.75);
+  --focus:#15707E; --focus-w:2px; --focus-off:2px;
+  --r-1:6px; --r-2:11px; --r-3:15px; --r-full:999px;
+  --target-min:24px;
+  --dur-2:180ms; --dur-3:280ms; --ease:cubic-bezier(.2,.6,.2,1);
+  --font-ui:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Roboto,sans-serif;
+  --font-mono:ui-monospace,"Cascadia Mono","Segoe UI Mono",Consolas,"Liberation Mono",monospace;
+  --font-glyph:"Segoe UI Symbol","Segoe UI",system-ui,sans-serif;
+  --font-display:ui-serif,Georgia,Cambria,"Times New Roman",serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --g1:#0A0C0E; --g2:#0F1214; --g3:#151A1D; --g4:#1B2124; --g5:#222A2E; --g6:#2C363B; --g7:#384349;
+  --ink:#ECEBE6; --ink-2:#9AA1AC; --ink-3:#6C7480;
+  --rule:#242C31; --rule-2:#2C363B;
+  --cyan:#38C3D6; --cyan-dim:#1E6B76; --gold:#D8BE7E; --amber:#E0A128;
+  --red:#D8695A; --green:#5BB98C;
+  --lift:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.36);
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.075),rgba(255,255,255,.022) 46%,rgba(255,255,255,.045));
+  --gl-edge:rgba(255,255,255,.10);
+  --gl-spec:rgba(255,255,255,.30);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(0,0,0,.30);
+  --gl-cast:0 18px 46px -12px rgba(0,0,0,.62),0 2px 8px rgba(0,0,0,.34);
+  --gl-blur:blur(26px) saturate(175%);
+  --wash:rgba(255,255,255,.045); --wash-2:rgba(255,255,255,.05); --wash-hi:rgba(255,255,255,.07);
+  --focus:#86DEEC;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --g1:#0A0C0E; --g2:#0F1214; --g3:#151A1D; --g4:#1B2124; --g5:#222A2E; --g6:#2C363B; --g7:#384349;
+  --ink:#ECEBE6; --ink-2:#9AA1AC; --ink-3:#6C7480;
+  --rule:#242C31; --rule-2:#2C363B;
+  --cyan:#38C3D6; --cyan-dim:#1E6B76; --gold:#D8BE7E; --amber:#E0A128;
+  --red:#D8695A; --green:#5BB98C;
+  --lift:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.36);
+  --gl-tint:linear-gradient(157deg,rgba(255,255,255,.075),rgba(255,255,255,.022) 46%,rgba(255,255,255,.045));
+  --gl-edge:rgba(255,255,255,.10);
+  --gl-spec:rgba(255,255,255,.30);
+  --gl-inner:inset 0 1px 0 rgba(255,255,255,.10),inset 0 -1px 0 rgba(0,0,0,.30);
+  --gl-cast:0 18px 46px -12px rgba(0,0,0,.62),0 2px 8px rgba(0,0,0,.34);
+  --gl-blur:blur(26px) saturate(175%);
+  --wash:rgba(255,255,255,.045); --wash-2:rgba(255,255,255,.05); --wash-hi:rgba(255,255,255,.07);
+  --focus:#86DEEC;
+}
+</style>
+
+<link rel="stylesheet" href="/glass/tokens.css">
+
+<style>
+/* ==========================================================================
+   The shell. Opaque graphite ground, 4px spacing scale.
+
+   Glass appears exactly once, on the top nav — nav-adjacent chrome, the only
+   place the material is permitted. Every work surface below it (approval
+   payloads, receipts, long text) is opaque --g2. No glass-on-glass anywhere.
+   ========================================================================== */
+
+*{ box-sizing:border-box; }
+html,body{ margin:0; }
+body{
+  /* The shell is exactly one viewport tall and the document itself never
+     scrolls — the prototype's model. Without this the whole page scrolled as one
+     block, so the left rail slid away with the content instead of staying put.
+     Everything that scrolls now does so inside its own pane. */
+  height:100vh; overflow:hidden;
+  display:flex; flex-direction:column;
+  /* background-COLOR only. tokens.css paints the atmosphere — the ambient
+     glows and the veil — into body's background-image, and a `background`
+     shorthand here would silently reset it back to nothing. */
+  background-color:var(--g1);
+  color:var(--ink);
+  font:14px/1.55 var(--font-ui);
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums;
+}
+
+/* Focus is a real 2px border, never a glow. Same ring everywhere. No radius
+   here: the outline already follows whatever radius the element itself has. */
+:focus-visible{ outline:2px solid var(--focus,#86DEEC); outline-offset:2px; }
+
+.skip{
+  position:absolute; left:8px; top:-40px; z-index:20;
+  background:var(--g4); color:var(--ink); border:1px solid var(--rule-2);
+  border-radius:6px; padding:8px 12px; font-size:12px; text-decoration:none;
+}
+.skip:focus{ top:8px; }
+
+/* ---------------------------------------------------- the top nav (the glass) */
+.bar{
+  position:sticky; top:0; z-index:5;
+  display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center;
+  padding:10px 20px;
+  background:var(--gl-tint), var(--g2);
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border-bottom:1px solid var(--gl-edge);
+  box-shadow:var(--gl-inner);
+}
+/* The brand, ported: the editorial serif wordmark, a cyan ring, and a mono
+   sublabel. It is a real button — it takes you home to Command · Today. */
+.brand{
+  font-family:var(--font-display); font-optical-sizing:auto;
+  font-size:17px; font-weight:600; letter-spacing:-.01em;
+  display:inline-flex; align-items:center; gap:8px; min-width:0;
+  padding:4px 9px 4px 7px; border-radius:9px; border:0; background:none; color:var(--ink);
+  cursor:pointer; transition:background .18s ease;
+}
+.brand:hover{ background:var(--wash-2); }
+.brand-mark{ color:var(--cyan); font-size:13px; line-height:1; }
+.brand-word{ white-space:nowrap; }
+.brand-sub{ font-family:var(--font-mono); font-size:9px; color:var(--ink-3); letter-spacing:.14em; text-transform:uppercase; margin-left:5px; }
+
+/* ---- the journey breadcrumb -----------------------------------------------
+   The prototype's five-step stepper. Here it is NOT a demo control: field.js
+   drives it from real daemon state, and a step is only marked done when the
+   daemon actually reports that stage. It is a readout, not a scrubber, so the
+   steps are <span>s — nothing here is clickable, because clicking could not
+   change what the system has actually done. */
+.step{
+  display:flex; background:var(--wash); border:1px solid var(--gl-edge); border-radius:10px; padding:3px;
+  box-shadow:inset 0 1px 0 var(--wash-hi);
+}
+.step .stp{
+  font-family:var(--font-ui); font-size:10.5px; padding:4px 9px; border-radius:6px; color:var(--ink-3);
+  display:flex; gap:5px; align-items:center; white-space:nowrap;
+}
+.step .stp .d{ width:6px; height:6px; border-radius:50%; background:var(--g6); flex:none; }
+.step .stp.done .d{ background:var(--green); }
+.step .stp[aria-current="step"]{ background:var(--wash-2); color:var(--ink); border-radius:8px; box-shadow:inset 0 1px 0 var(--wash-hi); }
+.step .stp[aria-current="step"] .d{ background:var(--amber); }
+@media (max-width:1100px){ .step{ display:none; } }
+
+/* The product switcher — a segmented nav, glass-adjacent chrome. The active
+   item is painted with FOUR redundant channels so the selection never rests on
+   colour alone: a filled pill (fill delta), bold weight, a filled glyph (shape)
+   and aria-current (a11y). Remove colour and all three visible ones remain. */
+.nav{
+  display:flex; gap:2px; padding:3px;
+  background:var(--wash);
+  border:1px solid var(--gl-edge);
+  border-radius:10px;
+  box-shadow:inset 0 1px 0 var(--wash-hi);
+}
+.nav-item{
+  display:inline-flex; align-items:center; gap:8px;
+  min-height:var(--target-min,24px);
+  padding:6px 14px;
+  border:0; border-radius:8px;
+  background:transparent; color:var(--ink-2);
+  font-family:var(--font-ui); font-size:12.5px; font-weight:500; line-height:1.2; letter-spacing:-.004em;
+  cursor:pointer;
+  transition:background var(--dur-2,180ms) var(--ease), color var(--dur-2,180ms) var(--ease);
+}
+.nav-item:hover{ color:var(--ink); background:var(--wash-2); }
+.nav-glyph{ font-family:var(--font-glyph); font-size:13px; line-height:1; color:currentColor; flex:none; }
+.nav-glyph-on{ display:none; }
+.nav-item.is-current{
+  background:var(--cyan); color:var(--g1); font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 3px 12px -3px color-mix(in srgb,var(--cyan) 60%,transparent);
+}
+.nav-item.is-current .nav-glyph-off{ display:none; }
+.nav-item.is-current .nav-glyph-on{ display:inline; }
+
+.bar-sp{ flex:1 1 0; min-width:0; }
+.bar-ctl{ display:flex; gap:6px; align-items:center; flex-wrap:nowrap; }
+/* The control cluster, ported: glass-adjacent pills, cyan when engaged. */
+.ctl{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-2);
+  background:var(--wash); border:1px solid var(--gl-edge); border-radius:9px; padding:5px 11px;
+  box-shadow:inset 0 1px 0 var(--wash-hi);
+  cursor:pointer; white-space:nowrap;
+  transition:border-color .18s ease,color .18s ease,background .18s ease;
+}
+.ctl:hover{ color:var(--ink); background:var(--wash-2); }
+.ctl[aria-pressed="true"]{
+  border-color:color-mix(in srgb,var(--cyan) 55%,transparent);
+  color:var(--cyan); background:color-mix(in srgb,var(--cyan) 12%,transparent);
+}
+@media (max-width:900px){ .bar-ctl .ctl:not(#ctl-theme){ display:none; } }
+
+/* -------------------------------------------------------------- the surfaces */
+.stage{ position:relative; flex:1; min-height:0; overflow:hidden; }
+/* Visibility is the [hidden] attribute and only that. Each surface sets its own
+   display when shown, so this rule is what lets `.hidden = true` win. */
+[data-surface][hidden]{ display:none; }
+
+/* THE authoritative hidden rule. Any component that sets `display:flex` outranks
+   the UA's `[hidden]{display:none}`, so an element the code had hidden renders
+   anyway — that is how "Run it / Not now" appeared with no delegation behind it,
+   and it had already been patched twice, per class. Once, here, for all of it. */
+[hidden]{ display:none !important; }
+
+.surface{
+  max-width:920px; margin:0 auto; padding:24px 20px 32px;
+  display:flex; flex-direction:column; gap:20px;
+  /* the document no longer scrolls, so each surface carries its own */
+  overflow:auto; max-height:100%;
+}
+
+/* ---- the Command surface's own header: role mark + status chips ----------- */
+.cmd-head{
+  display:flex; flex-wrap:wrap; gap:10px 16px; align-items:center; justify-content:space-between;
+}
+.cmd-role{
+  font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-2);
+  font-family:var(--font-mono);
+}
+.chips{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+
+/* ==========================================================================
+   COMMAND — ported from docs/23-gate2-prototype.html.
+
+   Rail + main, then the full-bleed Standing Field hero with the masthead laid
+   OVER it. This is the prototype's information architecture, not a restatement
+   of it: the field is the page's ground, the veil fades it into the page rather
+   than ending it at a border, and the masthead sits inside that ground on the
+   left. Every rule below is the prototype's, with only the token names and the
+   mount hooks changed.
+   ========================================================================== */
+.surface[data-surface="command"]{ max-width:none; padding:0; gap:0; }
+.cmd{ display:grid; grid-template-columns:212px 1fr; gap:0; align-items:stretch; height:100%; min-height:0; }
+.rail{
+  background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.012));
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border-right:1px solid var(--gl-edge); padding:14px 11px; overflow:auto; min-height:0;
+  display:flex; flex-direction:column;
+}
+.rail>.k{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3); font-weight:600; margin:0 0 9px; padding-left:4px; }
+.rail nav{ display:flex; flex-direction:column; gap:1px; }
+.rail-n{
+  text-align:left; font:inherit; font-size:12.5px; padding:7px 9px; border-radius:7px;
+  color:var(--ink-2); background:none; border:0; cursor:pointer;
+  display:flex; align-items:center; gap:8px; width:100%;
+  transition:background .18s ease,color .18s ease;
+}
+.rail-n:hover{ background:var(--wash-2); color:var(--ink); }
+.rail-n[aria-current="true"]{ background:var(--wash-2); color:var(--ink); box-shadow:inset 0 1px 0 var(--wash-hi); }
+/* The live count. Empty renders NOTHING — a zero badge would claim a queue
+   that does not exist. field.js writes the number or clears the element. */
+.rail-n .n{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
+.rail-n .n:empty{ display:none; }
+.rail-n .n[data-att="needs"]{ color:var(--amber); font-weight:600; }
+.rail .legend{ margin-top:auto; display:flex; gap:12px; flex-wrap:wrap; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); padding:14px 4px 0; }
+.legend .lg{ display:inline-flex; align-items:center; gap:4px; }
+.legend .lg::before{ content:""; width:8px; height:8px; border-radius:2px; background:currentColor; }
+.lg-green{ color:var(--green); } .lg-amber{ color:var(--amber); } .lg-red{ color:var(--red); }
+
+.cmdduo{ display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; align-items:start; }
+.cmdmain{ overflow:auto; min-height:0; padding:16px 18px 30px; min-width:0; position:relative; display:flex; flex-direction:column; gap:16px; }
+
+/* ---- the hero: the field IS the ground, the masthead sits on it ----------- */
+.hero{
+  position:relative; height:clamp(430px,64vh,660px);
+  margin:-16px -18px 6px; overflow:hidden;
+  border-bottom:1px solid var(--gl-edge); flex:none;
+}
+.fieldbox{ position:absolute; inset:0; }
+.field-atmos{
+  position:absolute; inset:0; pointer-events:none;
+  background:
+    radial-gradient(48% 42% at 18% 88%, var(--amb-1), transparent 70%),
+    radial-gradient(42% 38% at 84% 8%, var(--amb-2), transparent 72%),
+    radial-gradient(56% 46% at 62% 62%, var(--amb-3), transparent 74%);
+}
+.field-mount{ position:absolute; inset:0; }
+#field{ position:absolute; inset:0; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
+/* the field fades into the page rather than ending at a border */
+.heroveil{ position:absolute; inset:0; pointer-events:none; background:var(--veil); }
+
+.heromast{ position:absolute; left:26px; top:50%; transform:translateY(-50%); right:auto; pointer-events:none; max-width:31ch; z-index:2; }
+.hero-eyebrow{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); margin:0 0 11px; }
+.hero-h1{
+  margin:0; font-family:var(--font-display); font-optical-sizing:auto; font-variant-numeric:proportional-nums;
+  font-weight:500; font-size:clamp(24px,3.4vw,35px); line-height:1.14; letter-spacing:-.018em;
+  color:var(--ink); text-wrap:balance;
+  text-shadow:0 2px 22px color-mix(in srgb,var(--g1) 85%,transparent);
+}
+.hero-cap{ font-size:12.5px; color:var(--ink-2); margin:9px 0 0; max-width:34ch; line-height:1.5; }
+.hchips{ display:flex; gap:7px; flex-wrap:wrap; margin-top:14px; pointer-events:auto; }
+.hchip{
+  display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10px;
+  padding:5px 10px; border-radius:8px; color:var(--ink-2);
+  background:var(--wash); border:1px solid var(--gl-edge);
+  backdrop-filter:blur(14px) saturate(150%); -webkit-backdrop-filter:blur(14px) saturate(150%);
+  box-shadow:inset 0 1px 0 var(--wash-hi);
+}
+.hchip b{ color:var(--ink); font-weight:600; }
+.hchip i{ width:6px; height:6px; border-radius:50%; background:var(--ink-3); flex:none; }
+.hchip.am i{ background:var(--amber); } .hchip.cy i{ background:var(--cyan); } .hchip.gr i{ background:var(--green); }
+/* UNREAD — the read that would have produced this number did not answer. It gets
+   no status colour, because a colour is a claim and there is nothing to claim
+   with; a green zero here would read as "all clear" on a page that does not
+   know. The dash and the dashed edge say the number is missing, not nought. */
+.hchip.un{ border-style:dashed; }
+.hchip.un i{ background:transparent; border:1px solid var(--ink-3); }
+.hchip.un b{ color:var(--ink-2); }
+
+.hcap{
+  position:absolute; left:20px; bottom:14px; font-family:var(--font-mono); font-size:9.5px;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-2); opacity:.9; pointer-events:none; z-index:2;
+}
+.fieldleg{
+  position:absolute; left:16px; bottom:34px; z-index:2; display:flex; gap:11px; flex-wrap:wrap; align-items:center;
+  font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2); pointer-events:none;
+}
+.fieldleg span{ display:inline-flex; align-items:center; gap:4px; }
+.fieldleg .gl{ width:7px; height:7px; border-radius:50%; box-shadow:0 0 5px 1px currentColor; }
+.fieldleg .gl.am{ background:var(--amber); color:var(--amber); }
+.fieldleg .gl.rd{ background:var(--red); color:var(--red); }
+.fieldleg .gl.cy{ background:var(--cyan); color:var(--cyan); }
+.fieldleg .gl.gr{ background:var(--green); color:var(--green); }
+.fieldleg .gl.wt{ background:var(--ink-3); color:var(--ink-3); box-shadow:none; opacity:.6; }
+.fieldleg .gl.eg{ background:var(--amber); color:var(--amber); box-shadow:none; }
+.fieldleg .lgd{ color:var(--ink-3); opacity:.75; font-style:italic; }
+@media (max-width:560px){ .fieldleg{ display:none; } }
+
+/* Layer 2 — glass, on nav-adjacent chrome and decision surfaces only. Never
+   behind code, diffs, long text or the approval payload. */
+.l2{
+  position:relative; background:var(--gl-tint);
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border:1px solid var(--gl-edge); border-radius:15px;
+  box-shadow:var(--gl-inner),var(--gl-cast); isolation:isolate;
+}
+.l2::before{
+  content:""; position:absolute; inset:0 0 auto; height:1px; border-radius:15px 15px 0 0;
+  background:linear-gradient(90deg,transparent,var(--gl-spec) 22%,var(--gl-spec) 78%,transparent);
+  opacity:.55; pointer-events:none; z-index:2;
+}
+.l2::after{
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; z-index:1;
+  background:radial-gradient(120% 80% at 12% -12%,var(--wash-hi),transparent 58%);
+}
+.l2>*{ position:relative; z-index:3; }
+
+.field-tog{ position:absolute; right:10px; top:9px; z-index:3; display:flex; gap:5px; }
+.nodecard{ position:absolute; left:12px; bottom:12px; z-index:3; width:290px; padding:13px 15px; }
+/* In list mode the card is rendered inside the list instead of over it, so it
+   drops out of the overlay geometry entirely: in flow, above the rows, scrolling
+   with them. Same card, same actions — the list is the field's text equivalent
+   and must not be the form that loses them. */
+.nodecard--inline{ position:static; width:auto; max-width:520px; margin:0 0 10px; }
+.nodecard .nck{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.06em; }
+.nodecard .ncl{ font-weight:600; font-size:14px; margin:3px 0 5px; color:var(--ink); }
+.nodecard .ncd{ color:var(--ink-2); font-size:12px; line-height:1.5; }
+.ncnote{ margin-top:9px; font-size:11px; line-height:1.5; color:var(--ink-3); border-left:2px solid var(--rule-2); padding-left:8px; }
+.ncnote b{ color:var(--ink-2); }
+.nodecard .acts{ display:flex; gap:7px; flex-wrap:wrap; margin-top:12px; }
+
+
+/* ---- the list equivalent: the same field, read rather than rotated -------- */
+.fieldlist{ display:none; position:absolute; inset:0; z-index:2; overflow:auto; padding:44px 14px 14px; background:color-mix(in srgb,var(--g1) 88%,transparent); }
+.fieldlist.on{ display:block; }
+.field-list{ list-style:none; margin:0; padding:0; display:grid; gap:2px; max-width:520px; }
+.flrow{ display:flex; gap:10px; padding:7px 9px; border-radius:7px; align-items:center; font-size:12px; cursor:pointer; width:100%; text-align:left; border:0; background:none; color:var(--ink); font-family:inherit; }
+.flrow:hover{ background:var(--g4); }
+.flrow[aria-selected="true"]{ background:var(--g5); }
+.field-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; border:1.5px solid var(--cyan); }
+.field-dot--core{ border-color:var(--gold); }
+/* Things at rest read neutral; the live kinds (a surface, a work source, the
+   local model runtime) keep the cyan the dot defaults to. */
+.field-dot--dev, .field-dot--repo, .field-dot--ticket,
+.field-dot--vault, .field-dot--mem, .field-dot--meet, .field-dot--model{ border-color:var(--ink-3); }
+.field-l{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.field-k{ margin-left:auto; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); }
+.field-att{ font-family:var(--font-mono); font-size:9px; padding:2px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:.05em; flex:none; }
+.field-att--needs{ color:var(--amber); } .field-att--active{ color:var(--cyan); }
+.field-att--error, .field-att--blocked{ color:var(--red); } .field-att--verified{ color:var(--green); }
+.field-att--waiting{ color:var(--ink-3); }
+.field-d{ margin:0 0 7px 27px; font-size:11.5px; color:var(--ink-2); line-height:1.45; max-width:520px; }
+.field-empty{ color:var(--ink-3); font-size:12px; padding:6px 2px; }
+
+/* ---- the header under the hero: title left, live tally right -------------- */
+.h2row{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.h2row h2{ margin:0 0 3px; font-family:var(--font-display); font-optical-sizing:auto; font-weight:500; font-size:23px; letter-spacing:-.012em; color:var(--ink); }
+.h2row .sub{ color:var(--ink-2); font-size:12.5px; margin:0; }
+.tally{ display:flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px; color:var(--ink-3); flex-wrap:wrap; margin-bottom:6px; }
+.tally span:not(.sep){ font-weight:600; }
+.tally .am{ color:var(--amber); } .tally .cy{ color:var(--cyan); } .tally .rd{ color:var(--red); } .tally .gr{ color:var(--green); }
+.tally .sep{ width:1px; height:11px; background:var(--rule-2); margin:0 3px; }
+
+.btn{ border:1px solid var(--rule-2); background:var(--g4); color:var(--ink); border-radius:8px; padding:8px 14px; font:inherit; font-size:12px; font-weight:500; cursor:pointer; }
+.btn.p{ background:var(--cyan); color:var(--g1); border-color:transparent; }
+.btn.g{ background:transparent; color:var(--ink-2); }
+.btn.sm{ padding:5px 10px; font-size:11px; border-radius:6px; }
+
+/* ---- Today: the prototype's work-surface row ------------------------------
+   .pl is the prototype's work surface — opaque graphite with a luminous edge,
+   never glass, because rows carry payload text, refs and reasons. .item is its
+   row: a mono badge, the title with its status pill on the same baseline, a
+   meta line of facts and an italic waiting line. command.js fills them from
+   real daemon state; the classes and colours here are the prototype's. */
+.pl{
+  background:color-mix(in srgb,var(--g2) 92%,transparent);
+  border:1px solid var(--rule); border-radius:11px;
+  box-shadow:inset 0 1px 0 var(--wash-hi),0 6px 18px -10px rgba(0,0,0,.5);
+}
+.pl.lit{ border-color:color-mix(in srgb,var(--cyan) 34%,var(--rule-2)); }
+
+.today{ display:block; }
+.item{ padding:11px 13px; display:flex; gap:11px; margin-bottom:8px; align-items:flex-start; }
+.item .b{
+  font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; text-transform:uppercase;
+  padding:2px 6px; border-radius:3px; background:var(--g5); color:var(--ink-2);
+  white-space:nowrap; margin-top:1px; flex:none;
+}
+.item .ibd{ flex:1; min-width:0; }
+.itop{ display:flex; align-items:baseline; gap:9px; justify-content:space-between; }
+.item .t{ font-weight:600; font-size:13px; color:var(--ink); min-width:0; overflow-wrap:anywhere; }
+.item .m{ color:var(--ink-3); font-size:11.5px; margin-top:2px; line-height:1.5; overflow-wrap:anywhere; }
+.item .w{ color:var(--ink-2); font-size:11.5px; margin-top:5px; font-style:italic; line-height:1.5; }
+
+/* the status pill — the four-channel law, and a word in every one of them so it
+   survives greyscale: colour is never the only carrier of the status. */
+.ist{
+  flex:none; font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; text-transform:uppercase;
+  padding:2px 8px; border-radius:99px; color:var(--ink-3); background:var(--g4);
+  border:1px solid var(--rule); white-space:nowrap;
+}
+.ist.am{ color:var(--amber); border-color:color-mix(in srgb,var(--amber) 40%,var(--rule)); background:color-mix(in srgb,var(--amber) 9%,transparent); }
+.ist.cy{ color:var(--cyan);  border-color:color-mix(in srgb,var(--cyan) 38%,var(--rule));  background:color-mix(in srgb,var(--cyan) 9%,transparent); }
+.ist.gr{ color:var(--green); border-color:color-mix(in srgb,var(--green) 36%,var(--rule)); background:color-mix(in srgb,var(--green) 9%,transparent); }
+.ist.rd{ color:var(--red);   border-color:color-mix(in srgb,var(--red) 40%,var(--rule));   background:color-mix(in srgb,var(--red) 9%,transparent); }
+
+/* the one affordance on a row: go to the capsule that already exists below */
+.ichev{
+  display:inline-block; margin-top:6px; font-family:var(--font-mono); font-size:9.5px;
+  color:var(--cyan); opacity:.85; background:none; border:0; padding:0; cursor:pointer;
+}
+.ichev:hover{ opacity:1; text-decoration:underline; }
+
+/* group headings carry their own real count — an array length, never a guess */
+.tgrp{ margin:14px 0 7px; display:flex; align-items:center; gap:7px; }
+.today > .tgrp:first-child{ margin-top:2px; }
+.tgn{ font-family:var(--font-mono); font-size:10px; color:var(--ink-2); font-weight:600; letter-spacing:0; }
+
+/* the standing note, in the prototype's amber-ruled shape */
+.tnote{ font-size:11.5px; color:var(--ink-2); margin-top:12px; display:flex; gap:8px; padding-left:2px; line-height:1.55; }
+.tnote::before{ content:""; width:3px; background:var(--amber); border-radius:2px; flex:none; }
+
+/* masked mode: shape and counts stay, identifiers go */
+.mk{
+  display:inline-block; font-family:var(--font-mono); letter-spacing:-.06em;
+  color:var(--g7); background:var(--g4); border-radius:3px; padding:0 3px; user-select:none;
+}
+.item.mkd .m, .item.mkd .w{ color:var(--ink-3); font-style:italic; }
+
+/* ---- the summary strip: six tiles, each a real number ----------------------
+   The dashboard's first line, and the only place the headline numbers live.
+   app.js writes every one of them from a read that actually returned. A tile
+   whose source is absent or unreadable says so IN WORDS — "not reported" — and
+   never shows 0, because 0 is a claim about a source and "not reported" is the
+   truth about a silence. A tile with somewhere to go is a <button>; a tile with
+   nowhere to go is a <div>, so nothing on this strip pretends to be clickable. */
+.strip{ display:grid; grid-template-columns:repeat(auto-fit,minmax(146px,1fr)); gap:8px; }
+.tile{
+  display:flex; flex-direction:column; gap:3px; text-align:left; min-width:0;
+  padding:11px 13px 12px; border-radius:11px;
+  background:color-mix(in srgb,var(--g2) 92%,transparent);
+  border:1px solid var(--rule); box-shadow:inset 0 1px 0 var(--wash-hi);
+  font:inherit; color:var(--ink);
+}
+button.tile{ cursor:pointer; transition:border-color .18s ease,background .18s ease; }
+button.tile:hover{ border-color:var(--rule-2); background:var(--g3); }
+button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+.tk{ font-family:var(--font-mono); font-size:9px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); }
+.tv{
+  font-family:var(--font-display); font-optical-sizing:auto; font-variant-numeric:tabular-nums;
+  font-size:25px; line-height:1.12; font-weight:500; letter-spacing:-.02em; color:var(--ink);
+}
+/* "not reported" is a sentence, not a figure, so it is set as one. */
+.tv.na{ font-family:var(--font-mono); font-size:11.5px; line-height:1.5; font-weight:400; letter-spacing:0; color:var(--ink-2); }
+.tn{ font-size:11px; line-height:1.45; color:var(--ink-2); overflow-wrap:anywhere; }
+.tile[data-tone="am"]{ border-color:color-mix(in srgb,var(--amber) 44%,var(--rule)); }
+.tile[data-tone="am"] .tv{ color:var(--amber); }
+.tile[data-tone="cy"] .tv{ color:var(--cyan); }
+.tile[data-tone="gr"] .tv{ color:var(--green); }
+.tile[data-tone="rd"]{ border-color:color-mix(in srgb,var(--red) 44%,var(--rule)); }
+.tile[data-tone="rd"] .tv{ color:var(--red); }
+
+/* ---- What needs you: ONE LINE per held action -----------------------------
+   The row is a summary, a tier, a status word and a way in. It carries no
+   hash, no provenance and no payload: those are the capsule's, and the capsule
+   opens underneath the row that asked for it. This is the whole difference
+   between a dashboard and the debug view it replaces. */
+.nlist{ display:flex; flex-direction:column; }
+.nrow{
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto auto auto;
+  gap:10px; align-items:center; padding:9px 2px;
+  border-bottom:1px solid var(--rule);
+}
+.nlist > .nrow:last-child{ border-bottom:0; }
+.nrow[data-open="1"]{ border-bottom:0; }
+.ntier{
+  font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; text-transform:uppercase;
+  padding:2px 6px; border-radius:3px; background:var(--g5); color:var(--ink-2); white-space:nowrap;
+}
+.nsum{ margin:0; font-size:13px; line-height:1.4; color:var(--ink); min-width:0; overflow-wrap:anywhere; }
+/* The daemon does not stamp a proposal with the time it was made, so this is
+   the only age that exists: when THIS window first saw it. The title says so. */
+.nage{ font-family:var(--font-mono); font-size:10px; color:var(--ink-2); white-space:nowrap; }
+.nopen{
+  font:inherit; font-size:11px; font-family:var(--font-mono); color:var(--cyan);
+  background:none; border:1px solid color-mix(in srgb,var(--cyan) 32%,var(--rule));
+  border-radius:6px; padding:4px 10px; cursor:pointer; white-space:nowrap;
+}
+.nopen:hover{ border-color:var(--cyan); }
+.nopen:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+.ndetail{ padding:2px 0 14px; border-bottom:1px solid var(--rule); }
+.nlist > .ndetail:last-child{ border-bottom:0; }
+/* ---- Recently settled: the timeline's own rows, with a way into one -------
+   timeline.js draws the rows and says, in its own stylesheet, that a row is not
+   a control and must not behave like one. It is still not: the control is this
+   button INSIDE the row, and the receipt it opens is drawn underneath. */
+.zt-open{
+  font:inherit; font-size:10.5px; font-family:var(--font-mono); color:var(--cyan);
+  background:none; border:1px solid color-mix(in srgb,var(--cyan) 30%,var(--rule-2));
+  border-radius:5px; padding:2px 8px; margin-top:4px; cursor:pointer; white-space:nowrap;
+}
+.zt-open:hover{ border-color:var(--cyan); }
+.zt-open:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+.rdetail{ padding:12px 16px 14px; border-bottom:1px solid var(--rule); background:var(--g1); }
+.rdetail h3{ margin:0 0 2px; font-size:12.5px; font-weight:600; color:var(--ink); }
+.rdetail .rsub{ margin:0 0 10px; font-size:11px; line-height:1.5; color:var(--ink-2); }
+.rkv{ margin:0; display:grid; grid-template-columns:minmax(120px,max-content) minmax(0,1fr); gap:4px 14px; }
+.rkv dt{ font-family:var(--font-mono); font-size:10px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-3); padding-top:2px; }
+.rkv dd{ margin:0; font-family:var(--font-mono); font-size:11.5px; line-height:1.5; color:var(--ink-2); overflow-wrap:anywhere; }
+.rkv dd.absent{ font-style:italic; color:var(--ink-3); }
+.rclose{
+  margin-top:10px; font:inherit; font-size:11px; font-family:var(--font-mono); color:var(--ink-2);
+  background:none; border:1px solid var(--rule-2); border-radius:6px; padding:4px 10px; cursor:pointer;
+}
+.rclose:hover{ color:var(--ink); }
+
+/* ---- the voice control, compacted ----------------------------------------
+   voice.js owns this panel and every one of its states; these rules only give
+   its "how this works" disclosure a shape. The one-line vendor sentence above
+   it is NOT in the disclosure and is never hidden — the disclosure holds the
+   long form, and voice.js forces it open whenever the microphone is armed. */
+.zv-how{ font-size:11.5px; color:var(--ink-2); }
+.zv-how > summary{
+  cursor:pointer; list-style:none; display:inline-flex; align-items:center; gap:6px;
+  font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--ink-3); padding:2px 0;
+}
+.zv-how > summary::-webkit-details-marker{ display:none; }
+.zv-how > summary::before{ content:"▸"; font-size:9px; }
+.zv-how[open] > summary::before{ content:"▾"; }
+.zv-how > summary:hover{ color:var(--ink-2); }
+.zv-how > summary:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+
+/* ---- the approval capsule and the receipt timeline, restyled ---------------
+   Their DOM, their states and every one of their honesty rules are untouched:
+   the capsule still owns POST /approvals and still draws the seal only from a
+   receipt, and the timeline still declares its own gaps. What changes here is
+   presentation only — the prototype's 15px decision-surface radius, its rule
+   colour, and its serif section heading, so these read as the same product as
+   the hero above them. They stay OPAQUE: the prototype puts glass on chrome and
+   never behind payloads, diffs or transcripts, and these are all three. */
+.cmdmain .zn-caps{ border-radius:15px; max-width:660px; }
+.cmdmain .zn-caps .zn-head{ padding:13px 16px; border-bottom:1px solid var(--rule-2); }
+.cmdmain .zn-caps .zn-title{ font-family:var(--font-display); font-optical-sizing:auto; font-weight:600; letter-spacing:-.012em; font-size:16px; }
+.cmdmain .zt{ border-radius:15px; }
+.cmdmain .zt .zt-h{ font-family:var(--font-display); font-optical-sizing:auto; font-weight:500; letter-spacing:-.012em; font-size:19px; }
+/* Recent, not endless: the ledger is all still here and still scrolls, but a
+   dashboard shows the last few outcomes rather than the whole history. The
+   footer under it keeps saying how many receipts there really are. */
+.cmdmain .zt .zt-list{ max-height:300px; }
+.cmdmain .plane{ border-radius:15px; }
+.cmdmain .plane-h{ font-family:var(--font-display); font-optical-sizing:auto; font-weight:500; letter-spacing:-.012em; font-size:19px; }
+
+@media (max-width:820px){
+  .cmd{ grid-template-columns:1fr; min-height:0; }
+  /* COMMAND: the rail becomes a horizontal strip above the work column */
+  .rail{ border-right:0; border-bottom:1px solid var(--rule); padding:8px 10px; overflow:hidden; min-width:0; }
+  .rail>.k{ display:none; }
+  .rail nav{ flex-direction:row; gap:5px; overflow-x:auto; padding-bottom:3px; }
+  .rail-n{ white-space:nowrap; flex:none; width:auto; padding:5px 10px; font-size:11.5px; background:var(--g3); border:1px solid var(--rule); }
+  .rail .legend{ display:none; }
+  .cmdmain{ padding:16px; }
+  .hero{ margin:-16px -16px 6px; height:clamp(360px,52vh,520px); }
+  .heromast{ left:18px; right:18px; max-width:none; }
+  .nodecard{ width:auto; right:12px; }
+}
+.chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:5px 10px; border-radius:7px;
+  border:1px solid var(--rule-2); background:var(--g3);
+  font-size:11px; letter-spacing:.01em; color:var(--ink-2);
+  font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.chip-glyph{ color:var(--ink-3); line-height:1; }
+.chip b{ color:var(--ink); font-weight:600; }
+/* Set by app.js from real state — never by this file, which knows nothing yet. */
+.chip[data-state="listening"]{ color:var(--cyan); border-color:color-mix(in srgb,var(--cyan) 45%,var(--rule-2)); }
+.chip[data-state="listening"] .chip-glyph{ color:var(--cyan); }
+.chip[data-state="owner"]{ color:var(--gold); border-color:color-mix(in srgb,var(--gold) 45%,var(--rule-2)); }
+.chip[data-state="owner"] .chip-glyph{ color:var(--gold); }
+.chip[data-state="warn"]{ color:var(--amber); border-color:color-mix(in srgb,var(--amber) 48%,var(--rule-2)); }
+.chip[data-state="warn"] .chip-glyph{ color:var(--amber); }
+
+/* voice.js mounts its voice panel here — push-to-talk by default, plus the
+   opt-in wake-word mode and its always-visible LISTENING/HEARD/OFF indicator. It
+   disables itself, with a note, when the browser has no Web Speech API — so this
+   slot is honest whether or not recognition exists. It is opaque graphite, never
+   glass: it is Command content. */
+.cmd-voice{ display:block; }
+
+/* Amber, because a dropped stream or an unreplayable gap is a warning. */
+.notice{
+  display:flex; gap:8px; align-items:flex-start;
+  padding:10px 12px; border-radius:8px;
+  border:1px solid color-mix(in srgb,var(--amber) 50%,var(--rule-2));
+  background:color-mix(in srgb,var(--amber) 12%,var(--g2));
+  font-size:12px; line-height:1.5; color:var(--ink);
+}
+.notice[hidden]{ display:none; }
+.notice-glyph{ color:var(--amber); flex:none; }
+.notice > [data-mount="notice-text"]{ min-width:0; overflow-wrap:anywhere; }
+
+/* Work surfaces: opaque --g2. This is where payloads, diffs and receipts live. */
+.plane{
+  background:var(--g2);
+  border:1px solid var(--rule);
+  border-radius:12px;
+}
+.plane-head{ padding:16px 16px 12px; border-bottom:1px solid var(--rule); }
+.plane-h{ margin:0; font-size:15px; font-weight:600; letter-spacing:-.01em; color:var(--ink); }
+.plane-sub{ margin:4px 0 0; font-size:12px; line-height:1.5; color:var(--ink-2); max-width:64ch; }
+.plane-body{ padding:16px; }
+
+/* The approval payload plane, for app.js: fully opaque, mono, never blurred. */
+.payload{
+  background:var(--g1);
+  border:1px solid var(--rule-2);
+  border-radius:8px;
+  padding:12px;
+  max-height:40vh; overflow:auto;
+  font-family:var(--font-mono);
+  font-size:12px; line-height:1.5; color:var(--ink-2);
+  white-space:pre-wrap; overflow-wrap:anywhere;
+}
+
+/* Empty states are content, not absence. */
+.empty{ display:flex; gap:12px; align-items:flex-start; }
+.empty-glyph{ color:var(--ink-3); font-size:14px; line-height:20px; }
+.empty-title{ margin:0; font-size:13px; font-weight:600; color:var(--ink-2); }
+.empty-sub{ margin:4px 0 0; font-size:12px; line-height:1.55; color:var(--ink-2); max-width:64ch; overflow-wrap:anywhere; }
+
+/* ---- the Forge and Counsel shells: a heading, and an honest resting note --- */
+.surface-head{ display:flex; flex-direction:column; gap:6px; }
+.surface-eyebrow{
+  margin:0; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-2);
+  font-family:var(--font-mono);
+}
+/* The editorial voice. Newsreader is the one serif in the window and it is
+   spent here and nowhere else: a surface heading is the only text in a control
+   plane that is prose rather than a readout. Optical sizing is on because the
+   face is a variable one; figures are proportional because a heading is not a
+   count. Falls back through ui-serif → Georgia if the woff2 is missing. */
+.surface-h{
+  margin:0;
+  font-family:var(--font-display);
+  font-optical-sizing:auto;
+  font-variant-numeric:proportional-nums;
+  font-size:21px; font-weight:600; letter-spacing:-.012em; line-height:1.2;
+  color:var(--ink);
+}
+.surface-sub{ margin:0; font-size:13px; line-height:1.55; color:var(--ink-2); max-width:66ch; }
+
+.foot{
+  max-width:920px; margin:0 auto; padding:0 20px 28px;
+  font-size:11px; line-height:1.6; color:var(--ink-2);
+}
+.foot code{ font-family:var(--font-mono); color:var(--ink-2); }
+
+/* ==========================================================================
+   FORGE — ported from docs/23-gate2-prototype.html (rForge, and the CSS block
+   it renders into).
+
+   The prototype's Forge is a FULL IDE in five regions and this is that IDE, not
+   a restatement of it: rgA the explorer rail, rgB the code pane, rgC the agent
+   chat, rgD the bottom drawer, rgE the status bar — the same grid, the same
+   class names, the same measurements. Only three things are changed from the
+   prototype, and each is changed for the same reason:
+
+     · the two web fonts become var(--font-mono) / var(--font-display), which
+       resolve to the faces self-hosted under /glass/fonts. Nothing here reaches
+       the network at runtime — no CDN, no Google Fonts, no @import.
+     · the prototype's white glass tints (rgba(255,255,255,…)) become the
+       neutral wash the Command port already uses, so the panels are glass in
+       BOTH themes rather than only the dark one.
+     · every rule is scoped under .forge. The prototype owned the whole
+       document and could call a class `.code` or `.tabs`; this window does not,
+       and an unscoped `.tree` would reach into Command.
+
+   D-GLASS still holds: glass is the two rails and the status bar — chrome.
+   The code pane, the drawer and the chat body are opaque --g2/--g3, because
+   code, logs and long text must never sit on a blur.
+   ========================================================================== */
+.surface[data-surface="forge"]{ max-width:none; padding:0; gap:0; }
+
+.forge{
+  display:grid;
+  grid-template-columns:186px minmax(0,1fr) 300px;
+  grid-template-rows:minmax(0,1fr) var(--fdrawer,150px) 26px;
+  height:calc(100vh - 47px); min-height:520px;
+  position:relative;
+}
+.forge>.rgA{ grid-column:1; grid-row:1/3; }
+.forge>.rgB{ grid-column:2; grid-row:1; }
+.forge>.rgD{ grid-column:2; grid-row:2; }
+.forge>.rgC{ grid-column:3; grid-row:1/3; }
+.forge>.rgE{ grid-column:1/-1; grid-row:3; }
+@media (max-width:1000px) and (min-width:901px){ .forge{ grid-template-columns:160px minmax(0,1fr) 250px; } }
+
+.forge .rgA{
+  background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.012));
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border-right:1px solid var(--gl-edge); overflow:hidden; padding:10px 8px;
+  display:flex; flex-direction:column; min-height:0;
+}
+.forge .panbody{ flex:1; overflow:auto; min-height:0; margin:0 -2px; padding:0 2px; }
+.forge .panbar{ flex:none; border-top:1px solid var(--rule); margin-top:8px; padding-top:7px; }
+.forge .panbar .tree{ display:grid; grid-template-columns:1fr 1fr; gap:1px; }
+.forge .panbar .tree button{ padding:4px 5px; font-size:10px; }
+.forge .rgB{ background:var(--g2); overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+.forge .rgC{
+  background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.012));
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border-left:1px solid var(--gl-edge); overflow:hidden; display:flex; flex-direction:column; min-height:0;
+}
+.forge .rgD{
+  position:relative; background:var(--g2);
+  border-top:1px solid var(--gl-edge); border-left:1px solid var(--rule);
+  box-shadow:inset 0 1px 0 var(--wash-hi); overflow:auto; padding:14px 12px 9px; min-height:0;
+}
+.forge .fdrag{
+  position:absolute; top:0; left:0; right:0; height:9px; cursor:ns-resize; z-index:6;
+  display:flex; align-items:center; justify-content:center; background:none; border:0; padding:0;
+}
+.forge .fdrag::before{ content:""; width:34px; height:3px; border-radius:2px; background:var(--g6); transition:background .15s ease; }
+.forge .fdrag:hover::before, .forge .fdrag.grab::before, .forge .fdrag:focus-visible::before{ background:var(--cyan); }
+.forge .drawhd{ display:flex; align-items:center; gap:8px; margin-bottom:7px; flex-wrap:wrap; }
+.forge .drawhd .sp{ flex:1; }
+.forge .drawcol{ background:none; border:1px solid var(--rule); border-radius:6px; padding:2px 8px; font:inherit; font-size:10px; color:var(--ink-2); cursor:pointer; }
+.forge .drawcol:hover{ color:var(--ink); border-color:var(--rule-2); }
+/* Collapsed sets the track DIRECTLY as well as the variable. The variable alone
+   was not enough: a height dragged onto `.forge` as an inline `--fdrawer` beats
+   any stylesheet value, so collapse silently did nothing after a resize. Writing
+   the track here overrides both, and `!important` keeps the variable honest for
+   anything else reading it. */
+:root[data-drawer="min"] .forge{
+  --fdrawer:34px !important;
+  grid-template-rows:minmax(0,1fr) 34px 26px;
+}
+:root[data-drawer="min"] .forge .rgD .drawbody{ display:none; }
+/* At 34px the drawer is exactly its own tab strip, so the open-state padding
+   would clip the strip it is collapsed down to. */
+:root[data-drawer="min"] .forge .rgD{ padding:4px 12px; overflow:hidden; }
+:root[data-drawer="min"] .forge .drawhd{ margin-bottom:0; flex-wrap:nowrap; overflow-x:auto; }
+.forge .drawbody{ font-family:var(--font-mono); font-size:11px; line-height:1.7; color:var(--ink-2); }
+.forge .drawbody b{ color:var(--ink); font-weight:600; }
+.forge .rgE{
+  background:linear-gradient(180deg,rgba(127,140,160,.06),rgba(127,140,160,.02));
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border-top:1px solid var(--gl-edge); display:flex; align-items:center; gap:12px; padding:0 12px;
+  font-family:var(--font-mono); font-size:10px; color:var(--ink-2); overflow-x:auto; white-space:nowrap;
+}
+.forge .rgE b{ color:var(--ink); font-weight:600; }
+.forge .rgE .sp{ flex:1; }
+.forge .rgE .chip{ font-size:9.5px; padding:3px 7px; gap:5px; }
+.forge .rgE .state{ font-size:10px; padding:3px 8px; }
+/* The drawer's tabs are chips that are also buttons: they must inherit the type
+   ramp rather than the browser's default control font. */
+.forge .drawhd .chip{ font:inherit; font-size:11px; cursor:pointer; }
+
+/* ---- rgB: crumbs, file tabs, the code pane, the minimap ------------------- */
+.forge .crumbs{
+  display:flex; align-items:center; gap:7px; font-size:10px; color:var(--ink-2); padding:7px 12px;
+  background:var(--wash-2); border-bottom:1px solid var(--gl-edge); flex-shrink:0;
+  font-family:var(--font-mono); overflow-x:auto; white-space:nowrap;
+}
+.forge .crumbs b{ color:var(--ink); font-weight:600; }
+.forge .crumbs i{ font-style:normal; color:var(--ink-3); opacity:.6; }
+/* The prototype's crumb separator is an <i>; forge.js draws it as an aria-hidden
+   span so it never reaches a screen reader as the word it looks like. Same look. */
+.forge .crumbs .sep{ color:var(--ink-3); opacity:.6; flex:none; }
+.forge .crumbs .sp{ flex:1; }
+.forge .crumbs .chip{ font-size:9.5px; padding:2px 7px; gap:5px; }
+.forge .tabs{
+  display:flex; gap:1px; padding:6px 8px 0; border-bottom:1px solid var(--rule); flex-shrink:0;
+  align-items:center; background:var(--wash-2); overflow-x:auto;
+}
+.forge .tabs .tb{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-2); padding:6px 11px;
+  border-radius:7px 7px 0 0; cursor:pointer; background:none; border:0;
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+}
+.forge .tabs .tb[aria-selected="true"]{ background:var(--g3); color:var(--ink); box-shadow:inset 0 -2px 0 var(--cyan); }
+.forge .fdot{ width:6px; height:6px; border-radius:50%; background:var(--green); flex:none; }
+.forge .fdot.clean{ background:var(--ink-3); }
+.forge .edwrap{ display:flex; flex:1; min-height:0; }
+.forge .code{
+  font-family:var(--font-mono); font-size:12px; line-height:1.8; padding:12px 0;
+  overflow:auto; flex:1; background:var(--g3); min-width:0; color:var(--ink);
+}
+.forge .code .row{ padding:0 14px; display:flex; gap:12px; }
+.forge .code .row.hl{ background:color-mix(in srgb,var(--gold) 10%,transparent); box-shadow:inset 2px 0 0 var(--gold); }
+.forge .code .row.add{ background:color-mix(in srgb,var(--green) 11%,transparent); box-shadow:inset 2px 0 0 var(--green); }
+.forge .code .ln{ color:var(--ink-2); width:38px; text-align:right; flex-shrink:0; user-select:none; }
+.forge .code .tx{ white-space:pre; }
+/* The prototype's three code colours. Applied only to file types forge.js can
+   actually lex; everything else renders in --ink and stays perfectly readable. */
+.forge .code .kw{ color:var(--cyan); }
+.forge .code .st{ color:var(--gold); }
+.forge .code .cm{ color:var(--ink-2); }
+.forge .code .empty-pane{ padding:14px; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-2); line-height:1.7; white-space:normal; max-width:60ch; }
+.forge .mini{ position:relative; width:30px; flex:none; background:var(--g2); border-left:1px solid var(--rule); overflow:hidden; }
+.forge .mini i{ position:absolute; left:6px; height:2px; border-radius:1px; background:var(--g6); }
+/* The prototype's viewport rectangle. In the prototype it sits at a fixed 40%
+   because there is nothing to track; here it is the code pane's REAL scroll
+   position and its real visible fraction, moved by forge.js on every scroll. */
+.forge .mini i.vp{ left:2px; right:2px; width:auto; height:auto; background:none;
+  border:1px solid var(--g7); border-radius:3px; pointer-events:none; }
+@media (max-width:1100px){ .forge .mini{ display:none; } }
+
+/* ---- rgA: the explorer tree, and the panel switcher ---------------------- */
+.forge .tree{ font-size:12px; }
+.forge .tree .d{
+  color:var(--ink-2); font-family:var(--font-mono); font-size:10px; letter-spacing:.06em;
+  text-transform:uppercase; margin:9px 0 4px; padding-left:4px; overflow:hidden; text-overflow:ellipsis;
+}
+.forge .tree button{
+  display:flex; gap:7px; padding:4px 7px; border-radius:6px; font:inherit; font-size:12px;
+  color:var(--ink-2); width:100%; text-align:left; background:none; border:0; cursor:pointer;
+  align-items:center; overflow:hidden;
+}
+.forge .tree button:hover{ background:var(--g4); color:var(--ink); }
+.forge .tree button[aria-current="true"]{ background:var(--g4); color:var(--ink); box-shadow:inset 2px 0 0 var(--cyan); }
+.forge .tree button .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .mdl{
+  display:flex; gap:7px; align-items:center; padding:7px 9px; background:var(--g4);
+  border:1px solid var(--rule); border-radius:8px; font:inherit; font-size:11.5px;
+  cursor:pointer; margin-bottom:9px; color:var(--ink); width:100%; text-align:left;
+}
+.forge .mdl .sp{ flex:1; }
+.forge .pw{ font-size:12px; color:var(--ink-2); }
+.forge .pw .d{
+  color:var(--ink-2); font-family:var(--font-mono); font-size:10px; letter-spacing:.06em;
+  text-transform:uppercase; margin:9px 0 4px; padding-left:4px;
+}
+.forge .frow{ display:flex; align-items:center; gap:7px; padding:4px 7px; border-radius:6px; font-size:11.5px; }
+.forge .frow .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .frow .tag{ margin-left:auto; font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2); flex:none; }
+.forge .hint{ margin-top:9px; font-size:10.5px; line-height:1.55; color:var(--ink-2); padding-left:4px; }
+.forge .unwired{
+  margin:6px 2px; padding:9px 10px; border-radius:8px;
+  border:1px dashed var(--rule-2); background:var(--g3);
+  font-size:11.5px; line-height:1.55; color:var(--ink-2);
+}
+.forge .unwired b{ display:block; color:var(--ink); font-weight:600; font-size:12px; margin-bottom:3px; }
+/* The same box, solid-edged, for content that IS real: a run card, a receipt.
+   The dashed edge above is reserved for an absence, so the two never read alike. */
+.forge .box{
+  margin:6px 2px; padding:9px 10px; border-radius:8px;
+  border:1px solid var(--rule); background:var(--g3);
+  font-size:11.5px; line-height:1.55; color:var(--ink-2);
+}
+.forge .box b{ display:block; color:var(--ink); font-weight:600; font-size:12px; margin-bottom:5px; }
+.forge .acts{ display:flex; gap:7px; flex-wrap:wrap; margin-top:10px; }
+
+/* ---- rgC: the session row, the inspector tabs, the agent chat ------------- */
+.forge .sesrow{ display:flex; align-items:center; gap:8px; padding:7px 10px 0; font-size:10px; color:var(--ink-2); font-family:var(--font-mono); }
+.forge .sesname{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .insp-tabs{ display:flex; gap:1px; padding:8px 8px 0; border-bottom:1px solid var(--rule); flex:none; overflow-x:auto; }
+.forge .insp-tabs button{
+  font:inherit; font-size:11px; padding:5px 9px; border-radius:6px 6px 0 0; color:var(--ink-2);
+  background:none; border:0; cursor:pointer; white-space:nowrap;
+}
+.forge .insp-tabs button[aria-selected="true"]{ color:var(--ink); box-shadow:inset 0 -2px 0 var(--cyan); }
+.forge .insp-bd{ padding:11px; overflow:auto; flex:1; min-height:0; font-size:12px; background:var(--g2); }
+.forge .msg{ margin-bottom:10px; }
+.forge .msg .who{
+  font-family:var(--font-mono); font-size:9px; color:var(--ink-2); letter-spacing:.06em;
+  text-transform:uppercase; margin-bottom:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+}
+.forge .msg .who .mchip{
+  font-family:var(--font-mono); font-size:8.5px; color:var(--ink-2); background:var(--g4);
+  border:1px solid var(--rule); border-radius:4px; padding:1px 5px; text-transform:none; letter-spacing:0;
+}
+.forge .msg .bub{ background:var(--g4); border-radius:8px; padding:8px 10px; font-size:12px; line-height:1.5; color:var(--ink); overflow-wrap:anywhere; }
+.forge .msg.me .bub{ background:var(--g5); }
+.forge .msg .bub pre{
+  margin:6px 0 0; font-family:var(--font-mono); font-size:11px; line-height:1.6;
+  white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink-2); max-height:40vh; overflow:auto;
+}
+.forge .tool{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--ink-2); background:var(--g3);
+  border:1px solid var(--rule); border-radius:7px; padding:5px 9px; margin-bottom:7px;
+  display:flex; align-items:center; gap:7px;
+}
+.forge .tool .th{ color:var(--cyan); flex:none; }
+.forge .tool .pth{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .tool .ok{ color:var(--green); margin-left:auto; flex:none; }
+.forge .think{ font-size:11px; color:var(--ink-2); font-style:italic; margin:0 0 6px; padding-left:9px; border-left:2px solid var(--rule-2); }
+.forge .cite{ font-family:var(--font-mono); font-size:10px; color:var(--cyan); margin-top:5px; display:inline-block; background:none; border:0; padding:0; cursor:pointer; }
+.forge .cite:hover{ text-decoration:underline; }
+.forge .compose{ border-top:1px solid var(--rule); padding:9px; display:flex; gap:6px; flex:none; }
+.forge .compose input{
+  flex:1; min-width:0; background:var(--g1); border:1px solid var(--rule-2); border-radius:8px;
+  padding:8px 10px; color:var(--ink); font:inherit; font-size:12px;
+}
+.forge .crow{ display:flex; align-items:center; gap:8px; padding:0 9px 9px; font-size:9.5px; flex-wrap:wrap; font-family:var(--font-mono); color:var(--ink-2); flex:none; }
+.forge .crow select{
+  font:inherit; font-size:10px; font-family:var(--font-mono); background:var(--g3); color:var(--ink);
+  border:1px solid var(--rule); border-radius:6px; padding:3px 6px; max-width:150px;
+}
+.forge .crow .sp{ flex:1; }
+.forge .ev{ display:flex; gap:9px; font-size:11.5px; margin-bottom:8px; }
+.forge .ev .tm{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2); width:40px; flex:none; padding-top:2px; }
+.forge .ev .tx{ color:var(--ink-2); min-width:0; overflow-wrap:anywhere; }
+.forge .ev .tx b{ color:var(--ink); font-weight:600; }
+.forge .note{ font-size:11.5px; color:var(--ink-2); margin-top:10px; display:flex; gap:8px; padding-left:2px; line-height:1.55; }
+.forge .note::before{ content:""; width:3px; background:var(--amber); border-radius:2px; flex:none; }
+.forge .note.cy::before{ background:var(--cyan); }
+.forge .note.rd::before{ background:var(--red); }
+.forge .note.gr::before{ background:var(--green); }
+.forge .kv{ display:grid; grid-template-columns:auto minmax(0,1fr); gap:4px 12px; margin:8px 0 0; font-family:var(--font-mono); font-size:10.5px; }
+.forge .kv dt{ color:var(--ink-2); }
+.forge .kv dd{ margin:0; color:var(--ink); overflow-wrap:anywhere; }
+/* The explorer rail is 186px wide: a two-column list there breaks a hash into
+   three-character shreds. In the rail the pairs stack instead. */
+.forge .rgA .kv{ grid-template-columns:minmax(0,1fr); gap:0; }
+.forge .rgA .kv dt{ font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; margin-top:6px; }
+
+/* ---- masked mode ---------------------------------------------------------
+   The shell's `masked` control sets data-lock on :root. This is the prototype's
+   own rule for it, scoped to Forge: the WORK SURFACES are veiled — the code, the
+   chat, the drawer, the tree, the tabs, the minimap — and nothing else is.
+
+   Note what it deliberately does NOT do. It does not stop the run, it does not
+   empty the panels and it does not claim the surfaces are gone: the layout, the
+   status bar and the region shapes stay exactly where they were, so masking
+   reads as "withheld from this screen", which is what it is. The pill says so in
+   words, because a blur alone could be mistaken for a rendering fault.
+
+   The veil must SNAP, never animate. tokens.css gives every element a 1ms
+   transition under reduced motion, and `transition-property` is `all` by
+   default — so without this the mask becomes a 1ms filter animation, which the
+   compositor does not reliably settle: the pane stays blurred after unmasking.
+   Masking is a privacy control; a stale veil that outlives the toggle is a bug
+   with real consequences, so these six surfaces opt out of transitions entirely
+   and the filter is applied and removed in one frame. */
+.forge .code, .forge .insp-bd, .forge .drawbody,
+.forge .panbody, .forge .tabs, .forge .mini{ transition-property:none; }
+:root[data-lock="1"] .forge .code,
+:root[data-lock="1"] .forge .insp-bd,
+:root[data-lock="1"] .forge .drawbody,
+:root[data-lock="1"] .forge .panbody,
+:root[data-lock="1"] .forge .tabs,
+:root[data-lock="1"] .forge .mini{
+  filter:blur(9px) saturate(60%); pointer-events:none; user-select:none;
+}
+.forge .fglock{
+  position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:30;
+  display:flex; align-items:center; gap:8px; padding:9px 16px; border-radius:99px;
+  font-family:var(--font-mono); font-size:11px; color:var(--ink); white-space:nowrap;
+  background:var(--gl-tint); backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+  border:1px solid var(--gl-edge); box-shadow:var(--gl-cast);
+}
+.forge .fglock .dot{ width:7px; height:7px; border-radius:50%; background:var(--amber); flex:none; }
+/* `display:flex` above outranks the UA's `[hidden]{display:none}`, so the pill
+   stayed on screen with masking off, announcing a state that was not true.
+   Visibility is the attribute, and this is what lets the attribute win. */
+.forge .fglock[hidden]{ display:none; }
+
+/* One column below 900px: every region stacked, none hidden. The prototype's
+   own small-screen rule, kept — a narrow window loses the grid, not the IDE. */
+@media (max-width:900px){
+  /* Not a one-column grid — plain block flow. An auto grid row kept sizing the
+     rail to its head alone and clipping the tree, and a stacked IDE has no
+     column relationships left to express: each region is simply the next thing
+     down the page. `display:block` also drops every grid-area placement, so no
+     region can land back on top of another. */
+  .forge{ display:block; overflow:visible; height:auto; }
+  .forge>.rgA,.forge>.rgB,.forge>.rgC,.forge>.rgD,.forge>.rgE{ width:auto; }
+  .forge .fdrag{ display:none; }
+  /* The rail caps its LIST, not itself: capping the rail pushed the panel
+     switcher off the bottom, and the switcher is how you reach the other panels. */
+  .forge .rgA{
+    border-right:0; border-bottom:1px solid var(--rule); max-height:none;
+    /* Not a clipped flex column here. As a column in an auto grid row the rail
+       collapsed to the height of its head and `overflow:hidden` then ate the
+       tree AND the panel switcher — the two things the rail is for. */
+    display:block; overflow:visible;
+  }
+  .forge .rgA .panbody{ max-height:210px; overflow:auto; }
+  .forge .rgB{ min-height:300px; }
+  /* A min as well as a max: with only a max, the chat body (flex:1, min-height:0)
+     collapsed to a sliver between the tabs and the composer. */
+  .forge .rgC{ border-left:0; border-top:1px solid var(--rule); min-height:340px; max-height:70vh; }
+  .forge .rgD{ max-height:220px; }
+  .forge .rgE{ white-space:normal; flex-wrap:wrap; gap:8px; padding:8px 12px; height:auto; }
+}
+
+@media (max-width:560px){
+  .bar{ padding:10px 16px; }
+  .surface{ padding:16px 16px 24px; }
+  .nav-item{ padding:6px 11px; }
+}
+</style>
+</head>
+
+<body>
+<a class="skip" href="#pending">Skip to what needs you</a>
+
+<!-- ============================ the top nav (glass) ====================== -->
+<header class="bar">
+  <button type="button" class="brand" id="home" title="Home — Command · Today">
+    <span class="brand-mark" aria-hidden="true">◉</span>
+    <span class="brand-word">Zeno</span>
+    <span class="brand-sub" aria-hidden="true">local</span>
+  </button>
+
+  <!-- Three destinations. Each is glyph + label, an ordinary <button> (so it is
+       reachable by Tab and activated by Enter/Space), and carries a hollow and a
+       filled glyph so the selected one changes shape, not only colour. nav.js
+       toggles aria-current + .is-current; CSS paints the four channels. -->
+  <nav class="nav" data-nav-root aria-label="Zeno products">
+    <button type="button" class="nav-item" data-nav="command">
+      <span class="nav-glyph nav-glyph-off" aria-hidden="true">◇</span>
+      <span class="nav-glyph nav-glyph-on" aria-hidden="true">◆</span>
+      <span class="nav-label">Command</span>
+    </button>
+    <button type="button" class="nav-item" data-nav="forge">
+      <span class="nav-glyph nav-glyph-off" aria-hidden="true">▤</span>
+      <span class="nav-glyph nav-glyph-on" aria-hidden="true">▦</span>
+      <span class="nav-label">Forge</span>
+    </button>
+    <button type="button" class="nav-item" data-nav="counsel">
+      <span class="nav-glyph nav-glyph-off" aria-hidden="true">◎</span>
+      <span class="nav-glyph nav-glyph-on" aria-hidden="true">◉</span>
+      <span class="nav-label">Counsel</span>
+    </button>
+  </nav>
+
+  <!-- The journey breadcrumb. field.js sets .done / aria-current="step" from
+       real daemon state — never from a demo counter. With nothing in flight
+       every step is inert and the first one is current, which is the truth:
+       the system is waiting for work, not part-way through some. -->
+  <div class="step" id="journey" role="group" aria-label="Where the work is">
+    <span class="stp" data-step="intake"><span class="d" aria-hidden="true"></span>Intake</span>
+    <span class="stp" data-step="context"><span class="d" aria-hidden="true"></span>Context</span>
+    <span class="stp" data-step="approve"><span class="d" aria-hidden="true"></span>Approve</span>
+    <span class="stp" data-step="build"><span class="d" aria-hidden="true"></span>Build</span>
+    <span class="stp" data-step="receipt"><span class="d" aria-hidden="true"></span>Receipt</span>
+  </div>
+
+  <span class="bar-sp"></span>
+  <div class="bar-ctl" aria-label="Window controls">
+    <button type="button" class="ctl" id="ctl-cmdk" title="Command palette (coming soon)">⌘K</button>
+    <button type="button" class="ctl" id="ctl-mask" aria-pressed="false" title="Masked mode — redact identifiers on screen">◐ masked</button>
+    <button type="button" class="ctl" id="ctl-motion" aria-pressed="false" title="Reduce motion">↺ reduce motion</button>
+    <button type="button" class="ctl" id="ctl-flat" aria-pressed="false" title="Flatten the field to 2D">▱ 2D</button>
+    <button type="button" class="ctl" id="ctl-theme" title="Theme: system / light / dark">◑ theme</button>
+  </div>
+</header>
+
+<main class="stage">
+
+  <!-- ========================================================================
+       COMMAND — the default surface. Every mount point app.js uses lives here,
+       with its id and markup UNCHANGED, so the working approval surface keeps
+       working exactly as before.
+       ==================================================================== -->
+  <section class="surface" data-surface="command" aria-label="Zeno Command">
+
+   <div class="cmd">
+    <aside class="rail" aria-label="Command sections">
+      <p class="k">Zeno Command</p>
+      <nav>
+        <button type="button" class="rail-n" aria-current="true" data-jump="cmd-hero">Today &amp; Attention <span class="n" data-mount="rail-today"></span></button>
+        <button type="button" class="rail-n" data-jump="voice">Ask Zeno</button>
+        <button type="button" class="rail-n" data-jump="pending">Approvals <span class="n" data-mount="rail-approvals"></span></button>
+        <button type="button" class="rail-n" data-jump="timeline">Agents &amp; runs</button>
+        <button type="button" class="rail-n" data-jump="sec-workstation">Workstation <span class="n" data-mount="rail-workstation"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-vault">Vault <span class="n" data-mount="rail-vault"></span></button>
+        <button type="button" class="rail-n" data-jump="devices">Devices <span class="n" data-mount="rail-devices"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-integrations">Integrations <span class="n" data-mount="rail-integrations"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-settings">Settings</button>
+      </nav>
+      <div class="legend">
+        <span class="lg lg-green">verified</span>
+        <span class="lg lg-amber">needs you</span>
+        <span class="lg lg-red">blocked</span>
+      </div>
+    </aside>
+    <div class="cmdmain">
+
+    <!-- ============================ Command hero ========================= -->
+    <!-- Two columns, like the Gate-2 prototype: the headline, live status and
+         approval-kernel chips on the LEFT; the live Standing Field orb on the
+         RIGHT. field.js mounts the orb into [data-mount="field"] and sets the
+         headline from real /state — honest empties, never synthetic nodes. -->
+    <!-- ======================= the Standing Field hero =======================
+         The prototype's hero, ported: the field is the ground of the page, the
+         veil fades it out rather than framing it, and the masthead sits ON the
+         field at the left. Every number in it is written by field.js from real
+         /state, /work and /forge/status — the resting state says "nothing is
+         waiting on you", it never invents a queue to look busy.
+         ==================================================================== -->
+    <section class="hero" tabindex="-1">
+      <div class="fieldbox">
+        <div class="field-atmos" aria-hidden="true"></div>
+        <!-- field.js puts its <canvas id="field"> here. -->
+        <div class="field-mount" data-mount="field"></div>
+        <div class="heroveil" aria-hidden="true"></div>
+        <div class="fieldleg mono" aria-hidden="true">
+          <span><i class="gl am"></i>needs you</span>
+          <span><i class="gl rd"></i>blocked / error</span>
+          <span><i class="gl cy"></i>running</span>
+          <span><i class="gl gr"></i>verified</span>
+          <span><i class="gl wt"></i>waiting</span>
+          <span><i class="gl eg"></i>⚡ egress</span>
+          <span class="lgd">◎ ping = act now</span>
+        </div>
+      </div>
+
+      <div class="heromast">
+        <p class="hero-eyebrow" data-mount="hero-eyebrow">Zeno Command · reason before action</p>
+        <h1 class="hero-h1" data-mount="hero-headline">Reading the field…</h1>
+        <p class="hero-cap" data-mount="hero-sub">Every approval waiting on you, and the system it moves through — one living map.</p>
+        <!-- field.js writes these three from real counts. -->
+        <div class="hchips" data-mount="hero-chips"></div>
+      </div>
+
+      <!-- The field has a full text equivalent. The button reveals it in place;
+           it is the same nodes, read rather than rotated. -->
+      <div class="field-tog">
+        <button type="button" class="ctl" id="fl-t" aria-pressed="false" aria-controls="fl">☰ list</button>
+      </div>
+      <div class="fieldlist" id="fl" data-mount="field-list" hidden></div>
+
+      <!-- field.js fills this when a node is selected, and empties it otherwise. -->
+      <div data-mount="node-card"></div>
+    </section><!-- /.hero -->
+
+    <!-- The live readouts that used to sit in the hero column. They belong with
+         the section heading, under the field: the field says WHAT wants you, and
+         this row says whether the window can be trusted to know. -->
+    <div class="h2row">
+      <div>
+        <h2>Today</h2>
+        <p class="sub" data-mount="today-sub">Everything Zeno is holding, and what it is waiting for.</p>
+      </div>
+    </div>
+
+    <!-- ============================ the summary strip ======================
+         Six tiles, and in five seconds they answer: what needs me, what
+         happened, what is next. app.js replaces the children of #summary from
+         its own reads — /state for the first two, and /work, /forge/status,
+         /counsel/meetings and /memory each settled on its own so one silent
+         source cannot blank the rest.
+
+         The tiles below are what is true before any of that: NOT READ. A tile
+         only ever shows a figure it counted; a source that answered 404, or
+         did not answer at all, says "not reported" in words, because a 0 there
+         would be a claim about a source this window never heard from.
+
+         Where a tile's detail is a section on this page the tile scrolls to it
+         and moves real keyboard focus there; where the detail is another
+         product — the meeting archive — it opens that surface through nav.js.
+         A tile with no destination would be rendered as a plain <div>, so
+         nothing on this strip can look clickable without being so. -->
+    <div class="strip" id="summary" data-mount="summary" role="group" aria-label="Live summary">
+      <div class="tile"><span class="tk">needs you</span><span class="tv na">not read</span><span class="tn">The daemon's state has not been read into this window yet.</span></div>
+      <div class="tile"><span class="tk">verified today</span><span class="tv na">not read</span><span class="tn">The receipt ledger has not been read yet.</span></div>
+      <div class="tile"><span class="tk">in the sandbox</span><span class="tv na">not read</span><span class="tn">The sandbox repository has not been read yet.</span></div>
+      <div class="tile"><span class="tk">in the backlog</span><span class="tv na">not read</span><span class="tn">No work source has been read yet.</span></div>
+      <div class="tile"><span class="tk">meetings</span><span class="tv na">not read</span><span class="tn">The meeting archive has not been read yet.</span></div>
+      <div class="tile"><span class="tk">memories</span><span class="tv na">not read</span><span class="tn">The vault has not been read yet.</span></div>
+    </div>
+
+    <div class="cmd-head">
+      <span class="cmd-role">approval kernel</span>
+
+      <div class="chips">
+        <!-- Chain-integrity badge mount. app.js replaces these children with
+             renderChainBadge(chain, receipts.length) from /timeline.js. Until then
+             it says the only true thing available: nothing has been reported. -->
+        <div id="chain-badge" data-mount="chain">
+          <span class="chip"><span class="chip-glyph" aria-hidden="true">—</span> chain not reported</span>
+        </div>
+
+        <!-- Live-transport state. Cyan only once the stream is genuinely open. -->
+        <span class="chip" id="stream-chip" data-mount="stream">
+          <span class="chip-glyph" aria-hidden="true">—</span> stream not connected
+        </span>
+
+        <!-- Owner origin. Gold ONLY here, and only when the daemon injected a real
+             owner token; gold is provenance, never a status. -->
+        <span class="chip" id="owner-chip" data-mount="owner">
+          <span class="chip-glyph" aria-hidden="true">—</span> owner token unknown
+        </span>
+
+        <!-- Which rules were in force. /state does not report a policy hash, so
+             app.js reads it off the newest receipt — which records the policy that
+             governed it — and the chip's title says which source it came from. -->
+        <span class="chip mono" id="policy-chip" data-mount="policy">policy —</span>
+      </div>
+    </div>
+
+    <!-- voice.js mounts its voice panel here. Push-to-talk ("Hold to talk") is
+         the default and opens the microphone only while you hold the button. An
+         opt-in "Listen for Zeno" mode holds it open until switched off; it is
+         gated behind a disclosure, because recognition is the browser's cloud
+         Web Speech API and the room is streamed to the browser maker to be
+         transcribed — it is not on-device. Either way speech becomes a PROPOSAL
+         (POST /previews) and can never approve; that stays your click below.
+         With no Web Speech API the panel disables both and says so. -->
+      <div class="cmdduo">
+    <div class="cmd-voice" data-mount="voice" tabindex="-1"></div>
+
+    <!-- ask.js mounts the typed half of Ask Zeno here. One question over POST
+         /assistant/ask: a local model reads a snapshot of your own Zeno and every
+         claim it makes is checked against that snapshot before you see it, so an
+         ungrounded reply is shown as one rather than as an answer. An answer may
+         suggest a file to write, or DELEGATE a job to a coding agent — a local
+         agent runs here on this machine, a hosted one does not run until you
+         click, because it costs money and sends your code off the machine.
+         Either way what comes back is changes WAITING for your approval below;
+         nothing on this panel is ever applied. -->
+    <div class="cmd-ask" data-mount="ask" tabindex="-1"></div>
+      </div><!-- /.cmdduo -->
+
+    <!-- An honest place for a real transport failure: a dropped stream, or the
+         daemon's "gap" event when a reconnect cannot be replayed. app.js writes
+         the sentence and clears the hidden attribute; it stays empty otherwise. -->
+    <div id="notice" class="notice" role="status" hidden>
+      <span class="notice-glyph" aria-hidden="true">⚠</span>
+      <span data-mount="notice-text"></span>
+    </div>
+
+    <noscript>
+      <div class="notice">
+        <span class="notice-glyph" aria-hidden="true">⚠</span>
+        <span>
+          This page needs its module to read the daemon. With scripting off it can show you the
+          shell but not the state — so treat everything below as unknown, not as empty. The same
+          history is readable from the ledger file and the CLI.
+        </span>
+      </div>
+    </noscript>
+
+    <!-- ============================ what needs you ========================= -->
+    <!-- tabindex="-1" so the skip link moves real keyboard focus here, not just
+         the scroll position: without it some browsers jump the viewport and leave
+         the next Tab back at the top of the document. -->
+    <section id="pending" class="plane" tabindex="-1" aria-labelledby="pending-h">
+      <div class="plane-head">
+        <h2 class="plane-h" id="pending-h">What needs you</h2>
+        <p class="plane-sub">Waiting on your decision.</p>
+      </div>
+      <div class="plane-body">
+        <!-- app.js replaces the children of #pending-list with ONE COMPACT ROW
+             per Preview from /state.pending and from each "preview" SSE event,
+             and writes its own "Nothing awaiting approval" block once a read has
+             actually succeeded. The capsule that capsule.js renders — hashes,
+             provenance, the exact payload and the single-use Approve control —
+             is mounted here too, but only for the row you open, and it is the
+             same capsule node throughout its life: a spent control, a running
+             countdown and a rendered seal are states the owner has already
+             seen, and re-rendering them would be a lie about that.
+
+             This block does NOT say the queue is empty, and that is the point:
+             before /state answers, this file has not read the daemon, so "nothing
+             is awaiting your approval" would be a claim about a control plane it
+             has never spoken to — and it would still be on screen if the read
+             failed outright. Same discipline as the timeline block below. -->
+        <div id="pending-list" data-mount="pending">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">Pending approvals not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the daemon's state yet, so it cannot say whether an agent is
+                holding an action against your yes. Treat this list as unknown, not as empty. Once the
+                state is read, anything awaiting you appears here with its tier, the reasons policy
+                gave it, the exact target and the payload itself.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ recently settled ======================= -->
+    <!-- app.js replaces the children of #timeline with
+         renderTimeline(receipts, chain, { badgeMount: '#chain-badge', … })
+         from /timeline.js, which brings its own styles and its own rows. This
+         file does not draw a receipt: it names the section and app.js adds one
+         control per row — "receipt ›" — which opens that receipt's full record
+         underneath it. The list scrolls to the last few outcomes; its own
+         footer keeps saying how many receipts the ledger really holds.
+
+         The block below is the same statement in static markup, so the page is
+         complete at rest. -->
+    <div id="timeline" data-mount="timeline" tabindex="-1">
+      <section class="plane" aria-labelledby="timeline-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="timeline-h">Recently settled</h2>
+          <p class="plane-sub">
+            Every terminal outcome, read straight from the receipt ledger. Nothing here is inferred.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">○</span>
+            <div>
+              <p class="empty-title">No receipts loaded.</p>
+              <p class="empty-sub">
+                The ledger has not been read into this page yet. Once it is, every verified, refused,
+                denied, expired and unknown outcome appears here in order, each with its own hash.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================== on the desk ==========================
+         The prototype's Today list, ported — .pl.item rows with a badge, a
+         status pill and a waiting line. command.js replaces the children of
+         #today with one row per thing the daemon ACTUALLY reported on this
+         read: the sandbox's uncommitted changes, every work item the intake
+         sources returned, and a row for any source that could not be read in
+         full, so a short list is never mistaken for a quiet one.
+
+         What is NOT here is the approval queue. It used to be restated in this
+         list as well as rendered above, which meant two writers on one number
+         and the same action read twice; pending is app.js's, in "What needs
+         you", and this section is the work that is not yet an action.
+
+         The block below is what is true before that read: not "nothing", which
+         would be a claim about a daemon this page has not yet spoken to, but
+         "not loaded". command.js writes "nothing is on the desk" only after a
+         read succeeds. -->
+    <section class="plane" id="desk" tabindex="-1" aria-labelledby="desk-h">
+      <div class="plane-head">
+        <h2 class="plane-h" id="desk-h">On the desk</h2>
+        <p class="plane-sub">
+          The backlog every intake source actually returned, the sandbox's uncommitted changes, and
+          any source that could not be read in full. Nothing here has had an effect.
+        </p>
+      </div>
+      <div class="plane-body">
+        <div id="today" class="today" data-mount="today">
+          <div class="pl item">
+            <span class="b">—</span>
+            <div class="ibd">
+              <div class="itop">
+                <div class="t">The desk is not loaded.</div>
+                <span class="ist">unread</span>
+              </div>
+              <div class="m">This page has not read the daemon's backlog or sandbox yet.</div>
+              <div class="w">
+                Treat this list as unknown, not as empty. Everything Zeno is holding appears here
+                once the read succeeds.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ workstation =========================== -->
+    <!-- The rail's "Workstation" destination. sections.js replaces the children
+         of #workstation with the sandbox repository as GET /forge/status reports
+         it: branch, HEAD, uncommitted files, recent commits, and the tracked
+         count with its cap stated. The block below is what is true before that
+         read — "not loaded", never "the sandbox is clean". -->
+    <div id="sec-workstation" data-mount="sec-workstation" tabindex="-1">
+      <section class="plane" aria-labelledby="sec-workstation-boot-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="sec-workstation-boot-h">Workstation</h2>
+          <p class="plane-sub">
+            The sandbox repository as git reports it right now.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">The sandbox not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the daemon's repository state yet, so it cannot say what branch
+                you are on or whether anything is uncommitted. Treat this as unknown, not as clean.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================ vault ================================= -->
+    <!-- The rail's "Vault" destination. sections.js fills #vault from
+         GET /memory (recent notes), GET /memory?q= (the daemon's own recall,
+         with the matched terms and score shown) and GET /brief. A daemon started
+         without a vault directory answers 404 no-vault, and the section says
+         that plainly rather than rendering an empty memory. -->
+    <div id="sec-vault" data-mount="sec-vault" tabindex="-1">
+      <section class="plane" aria-labelledby="sec-vault-boot-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="sec-vault-boot-h">Vault</h2>
+          <p class="plane-sub">
+            Governed local memory — notes are files on this disk.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">Memory not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the vault yet, so it cannot say what is remembered — or whether
+                this daemon has a vault at all. Treat this as unknown, not as an empty memory.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================ devices (Zeno Mesh) =================== -->
+    <!-- Devices are part of the control plane, NOT a fourth product: Command,
+         Forge and Counsel are the three, and this panel lives inside Command.
+
+         mesh.js replaces the children of #devices once GET /mesh/devices has
+         answered, and not before — same discipline as the pending list. The
+         block below therefore does NOT say "one device" or "nothing paired":
+         until the daemon is read, this page has no idea, and the one thing it
+         must never do here is imply a phone. -->
+    <div id="devices" data-mount="devices" tabindex="-1">
+      <section class="plane" aria-labelledby="devices-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="devices-h">Devices</h2>
+          <p class="plane-sub">
+            Trust is per-device and earned, never assumed.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">Devices not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the daemon's device list yet, so it cannot say which devices
+                exist or whether a pairing is open. Treat this as unknown, not as empty. Once it is
+                read, this machine appears with its own device id, and you can start a pairing here.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================ integrations ========================== -->
+    <!-- The rail's "Integrations" destination. sections.js fills #integrations
+         from GET /work (every source with its TRUE state) and GET /forge/agents
+         (the installed Ollama models and the agents Forge can run). Each row
+         states three things and never fewer: configured, reachable, and whether
+         using it leaves this machine. The two things no route reports — the MCP
+         edge and the installed skills — say exactly that instead of being drawn
+         as plausible rows. -->
+    <div id="sec-integrations" data-mount="sec-integrations" tabindex="-1">
+      <section class="plane" aria-labelledby="sec-integrations-boot-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="sec-integrations-boot-h">Integrations</h2>
+          <p class="plane-sub">
+            What this Zeno is actually connected to, and what leaves this machine.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">Integrations not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the daemon's sources or its local runtime yet. Treat this as
+                unknown, not as "nothing is connected".
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================ settings ============================== -->
+    <!-- The rail's "Settings" destination. sections.js fills #settings from
+         GET /state — the policy hash is read off the newest receipt, which is
+         the record of the rules that actually governed it, and the chain's own
+         verdict comes with it. The two capability tokens are reported by
+         PRESENCE only: no token value ever reaches this DOM. The ledger path is
+         served by no route, and the section says so rather than printing a path
+         it cannot verify. -->
+    <div id="sec-settings" data-mount="sec-settings" tabindex="-1">
+      <section class="plane" aria-labelledby="sec-settings-boot-h">
+        <div class="plane-head">
+          <h2 class="plane-h" id="sec-settings-boot-h">Settings</h2>
+          <p class="plane-sub">
+            The rules in force, the two capabilities, and what this window has been told.
+          </p>
+        </div>
+        <div class="plane-body">
+          <div class="empty">
+            <span class="empty-glyph" aria-hidden="true">—</span>
+            <div>
+              <p class="empty-title">Settings not loaded.</p>
+              <p class="empty-sub">
+                This page has not read the daemon's state yet, so it cannot say which policy was in
+                force or whether the receipt chain verifies. Treat this as unknown.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    </div><!-- /.cmdmain -->
+   </div><!-- /.cmd -->
+  </section>
+
+  <!-- ========================================================================
+       FORGE — the build surface. forge.js fills this in on first show, via
+       data-init="/forge.js" (nav.js imports it once and calls init(section)).
+       The resting copy below is what shows for the instant before that runs,
+       so it must describe the surface truthfully — never claim it is unbuilt.
+       ==================================================================== -->
+  <section class="surface" data-surface="forge" aria-label="Zeno Forge" data-init="/forge.js" hidden>
+    <header class="surface-head">
+      <p class="surface-eyebrow">Zeno Forge</p>
+      <h1 class="surface-h">Forge</h1>
+      <p class="surface-sub">
+        Point a coding agent at the sandbox. It runs headless in an isolated worktree, and every
+        file it changes comes back as an ordinary approval capsule on Command. Forge proposes —
+        it never approves. The one write it lands, a commit, still goes through the same gate.
+      </p>
+    </header>
+    <div class="plane">
+      <div class="plane-body">
+        <div class="empty">
+          <span class="empty-glyph" aria-hidden="true">▤</span>
+          <div>
+            <p class="empty-title">Loading the build surface…</p>
+            <p class="empty-sub">
+              Reading the sandbox repository and the available agents. If this message stays,
+              the page could not load /forge.js — check the daemon is still running.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================
+       COUNSEL — the meeting surface. An empty shell, same contract as Forge:
+       add  data-init="/counsel.js"  to opt into lazy init on first show.
+       ==================================================================== -->
+  <section class="surface" data-surface="counsel" aria-label="Zeno Counsel" data-init="/counsel.js" hidden>
+    <header class="surface-head">
+      <p class="surface-eyebrow">Zeno Counsel</p>
+      <h1 class="surface-h">Counsel</h1>
+      <p class="surface-sub">
+        A meeting copilot that takes notes and nothing more. It records only when you press
+        Record, you mark who is speaking, and it draws a summary whose every decision and action
+        cites the line it came from. It never whispers answers and never approves anything.
+      </p>
+    </header>
+    <div class="plane">
+      <div class="plane-body">
+        <div class="empty">
+          <span class="empty-glyph" aria-hidden="true">◎</span>
+          <div>
+            <p class="empty-title">Loading the meeting surface…</p>
+            <p class="empty-sub">
+              Nothing is being recorded. If this message stays, the page could not load
+              /counsel.js — check the daemon is still running.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  Local approval kernel on <code>127.0.0.1</code>. This page renders only what the receipt ledger
+  proves: a green seal means a verified receipt exists, and it is drawn after that receipt arrives,
+  never on a click.
+</footer>
+
+<!-- Command's own wiring, unchanged. -->
+<script type="module" src="/app.js"></script>
+<!-- The Standing Field orb. Self-mounts into Command's [data-mount="field"];
+     binds to real /state, /work, /forge/status with honest empty states. -->
+<script type="module" src="/field.js"></script>
+<!-- Today. Mounts into Command's [data-mount="today"] and writes one row per
+     thing the daemon actually reported: pending approvals, sandbox changes,
+     the real backlog, and any work source that could not be read in full. It
+     only ever GETs; the approvals below stay the one place anything is sent. -->
+<script type="module" src="/command.js"></script>
+<!-- The nav shell: shows/hides surfaces, remembers the last, lazily inits the others. -->
+<script type="module" src="/nav.js"></script>
+<!-- Push-to-talk for Command. Mounts into [data-mount="voice"]; disables itself,
+     with a note, when the browser has no Web Speech API. -->
+<script type="module" src="/voice.js"></script>
+<!-- Ask Zeno, typed. Mounts into [data-mount="ask"]; renders a grounded answer,
+     a flagged (ungrounded) reply, or an honest note — and, when the answer
+     delegates work, says which agent would run it and what that costs before
+     any hosted one is allowed to start. -->
+<script type="module" src="/ask.js"></script>
+<!-- Devices (Zeno Mesh) for Command. Mounts into [data-mount="devices"]; shows
+     this machine, starts a real pairing, and says plainly that no second device
+     can complete one because the phone client is not built. -->
+<script type="module" src="/mesh.js"></script>
+<!-- The four Command sections the rail used to promise and not have:
+     Workstation, Vault, Integrations and Settings. Every one renders live
+     daemon state, and the two things no route reports — the MCP edge and the
+     installed skills — say so rather than being stubbed. Read-only: every
+     fetch in it is a GET. -->
+<script type="module" src="/sections.js"></script>
+</body>
+</html>

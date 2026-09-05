@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="880" height="200" role="img" aria-label="Zeno">
+  <title>Zeno</title>
+  <!--
+    Horizontal lockup: the extruded Z blade, then the wordmark.
+
+    The wordmark is set in Cinzel — a Roman-inscriptional face, which is where
+    the "carved, imperial" of the mark comes from. It is DRAWN AS PATHS, not as
+    live text, for two reasons: the lockup must render identically on a machine
+    that has never heard of Cinzel, and the window is forbidden from reaching a
+    font CDN at runtime. Letterforms are geometric approximations of the
+    inscriptional capitals — flared stems, sharp serifs, wide aperture.
+
+    Palette: #0A0607 char · #7A0E1C blood · #C81E33 crimson · #FF5A3C ember · #ECE9E6 bone
+  -->
+  <defs>
+    <linearGradient id="lface" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#E0384C"/>
+      <stop offset="0.45" stop-color="#C81E33"/>
+      <stop offset="1" stop-color="#8E1524"/>
+    </linearGradient>
+    <linearGradient id="lflank" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7A0E1C"/>
+      <stop offset="1" stop-color="#4A0710"/>
+    </linearGradient>
+  </defs>
+
+  <!-- the blade -->
+  <g transform="translate(40,28) scale(0.56)">
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="#0A0607" transform="translate(13,13)"/>
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="url(#lflank)" transform="translate(7,7)"/>
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="url(#lface)"/>
+  </g>
+
+  <!-- ZENO — inscriptional capitals, bone, letter-spaced wide like carved stone -->
+  <g fill="#ECE9E6">
+    <!-- Z -->
+    <path d="M232 62 H344 V84 L268 138 H346 V160 H230 V138 L306 84 H232 Z"/>
+    <!-- E -->
+    <path d="M372 62 H472 V84 H396 V100 H454 V121 H396 V138 H474 V160 H372 Z"/>
+    <!-- N -->
+    <path d="M500 62 H524 L578 130 V62 H602 V160 H578 L524 92 V160 H500 Z"/>
+    <!-- O -->
+    <path d="M690 60 C724 60 746 82 746 111 C746 140 724 162 690 162 C656 162 634 140 634 111 C634 82 656 60 690 60 Z
+             M690 84 C671 84 659 95 659 111 C659 127 671 138 690 138 C709 138 721 127 721 111 C721 95 709 84 690 84 Z"/>
+  </g>
+
+  <!-- the rule and the promise, in bone at low weight -->
+  <rect x="232" y="178" width="514" height="1.5" fill="#ECE9E6" opacity="0.28"/>
+  <text x="232" y="196" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"
+        font-size="15" letter-spacing="5.6" fill="#ECE9E6" opacity="0.62">REASON BEFORE ACTION</text>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Zeno">
+  <title>Zeno</title>
+  <!--
+    Monochrome / stencil. One colour, no gradients, no extrusion — for a favicon
+    at 16px, an embroidered patch, a laser cut, or anywhere the full mark would
+    turn to mud. It inherits `currentColor`, so it takes the colour of whatever
+    it sits in rather than carrying its own.
+
+    The extrusion survives as a single cut line, which is the only part of the
+    depth that still reads when the mark is 16 pixels wide.
+  -->
+  <path fill="currentColor"
+        d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"/>
+  <path fill="currentColor" opacity="0.45"
+        d="M196 88 L112 168 H88 L172 88 Z"/>
+</svg>

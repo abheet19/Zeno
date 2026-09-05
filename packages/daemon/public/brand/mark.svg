@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Zeno">
+  <title>Zeno</title>
+  <!--
+    The mark: an extruded Z, forged from a single blade — carved, imperial, still.
+    The crimson is not decoration; it is the light on a held weapon.
+
+    Palette, from the brand artifact:
+      #0A0607 char · #7A0E1C blood · #C81E33 crimson · #FF5A3C ember · #ECE9E6 bone
+
+    Built as three stacked layers so the extrusion reads as one solid object cut
+    from a single piece, not as a glyph with a drop shadow:
+      1. the cast   — the deepest edge, char, where the blade meets its ground
+      2. the flank  — the extruded side face in blood, offset down-right
+      3. the face   — the front plane, crimson, with an ember edge catching light
+  -->
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#E0384C"/>
+      <stop offset="0.45" stop-color="#C81E33"/>
+      <stop offset="1" stop-color="#8E1524"/>
+    </linearGradient>
+    <linearGradient id="flank" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7A0E1C"/>
+      <stop offset="1" stop-color="#4A0710"/>
+    </linearGradient>
+    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="0.6">
+      <stop offset="0" stop-color="#FF5A3C" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="#FF5A3C" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#FF5A3C" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="#0A0607"/>
+
+  <!-- the blade, drawn once and reused for each depth plane -->
+  <g>
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="#0A0607" transform="translate(13,13)"/>
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="url(#flank)" transform="translate(7,7)"/>
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="url(#face)"/>
+    <!-- the light along the upper edges: where the blade catches it -->
+    <path d="M62 52 H196 V88 L112 168 H196 V204 H62 V168 L146 88 H62 Z"
+          fill="none" stroke="url(#ember)" stroke-width="3" stroke-linejoin="miter"/>
+  </g>
+</svg>
