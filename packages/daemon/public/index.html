@@ -910,6 +910,44 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   border:1px solid var(--g7); border-radius:3px; pointer-events:none; }
 @media (max-width:1100px){ .forge .mini{ display:none; } }
 
+/* ---- rgB: the editor host ------------------------------------------------
+   Exactly one of the two children is ever visible. `.edmon` is Monaco's own
+   container — it is created once and never rebuilt, because a repaint that
+   tore it down would take the cursor, the undo stack and the folding state
+   with it. `.edaux` is everything else the pane can be: the honest empty
+   states, and the plain reader kept as the fallback for a build with no
+   /vendor/monaco.
+
+   `.edaux` sets `display:flex`, which outranks the UA's `[hidden]` rule, so
+   the hidden case is stated explicitly — the same footnote the masked-mode
+   pill carries a few rules further down, for the same reason. */
+.forge .edhost{ display:flex; flex:1; min-height:0; min-width:0; }
+.forge .edhost > [hidden]{ display:none !important; }
+.forge .edmon{ flex:1; min-width:0; min-height:0; }
+.forge .edaux{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+
+/* Monaco paints its own ground from the theme monaco.js builds out of
+   glass/tokens.css; these two only stop it inheriting a body font it does not
+   want, and keep its widgets above the drawer's drag handle. */
+.forge .edmon .monaco-editor{ --vscode-font-family:var(--font-mono); }
+.monaco-editor .overflowingContentWidgets,
+.monaco-editor .overflowingOverlayWidgets{ z-index:60; }
+
+/* ---- rgB: the strip that says what is checked, and what a save is -------- */
+.forge .edbar{
+  display:flex; align-items:center; gap:7px; flex:none; flex-wrap:wrap;
+  padding:5px 10px; border-bottom:1px solid var(--rule); background:var(--g3);
+  font-size:10.5px; color:var(--ink-2); min-height:30px;
+}
+.forge .edbar .sp{ flex:1; }
+.forge .edbar .chip{ font-size:9.5px; padding:2px 7px; gap:5px; }
+.forge .edbar button.chip{ font:inherit; font-size:9.5px; cursor:pointer; }
+.forge .edbar button.chip:disabled{ cursor:default; opacity:.75; }
+.forge .edwhy{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); }
+.forge .edwhy.ro{ color:var(--ink-2); }
+.forge .edwhy.dirty{ color:var(--amber); }
+.forge .edwhy.err{ color:var(--red); overflow-wrap:anywhere; }
+
 /* ---- rgA: the explorer tree, and the panel switcher ---------------------- */
 .forge .tree{ font-size:12px; }
 .forge .tree .d{
@@ -1055,15 +1093,31 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    with real consequences, so these six surfaces opt out of transitions entirely
    and the filter is applied and removed in one frame. */
 .forge .code, .forge .insp-bd, .forge .drawbody,
-.forge .panbody, .forge .tabs, .forge .mini{ transition-property:none; }
+.forge .panbody, .forge .tabs, .forge .mini,
+.forge .edmon, .forge .edaux{ transition-property:none; }
 :root[data-lock="1"] .forge .code,
 :root[data-lock="1"] .forge .insp-bd,
 :root[data-lock="1"] .forge .drawbody,
 :root[data-lock="1"] .forge .panbody,
 :root[data-lock="1"] .forge .tabs,
-:root[data-lock="1"] .forge .mini{
+:root[data-lock="1"] .forge .mini,
+/* The editor is a work surface like any other, and the most revealing one on
+   this screen. It was `.code` before rgB became Monaco; both are listed so a
+   build that falls back to the plain reader is masked too. Monaco's own
+   overlays (find, suggest, hover) sit INSIDE .edmon, and a filter on an
+   ancestor blurs even position:fixed descendants — so they are veiled by the
+   rule below along with the text. forge.js closes the ones it can close by
+   command as well, and drops focus out of the buffer. */
+:root[data-lock="1"] .forge .edmon,
+:root[data-lock="1"] .forge .edaux{
   filter:blur(9px) saturate(60%); pointer-events:none; user-select:none;
 }
+/* The right-click menu is the exception: monaco mounts it on the BODY through
+   its context-view service, where no veil above can reach it. A menu is chrome,
+   not content, and it can simply be gone while masking is on — it would
+   otherwise sit sharp over a blurred pane, with the selected line's text in it. */
+:root[data-lock="1"] .context-view,
+:root[data-lock="1"] .monaco-menu-container{ display:none !important; }
 .forge .fglock{
   position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:30;
   display:flex; align-items:center; gap:8px; padding:9px 16px; border-radius:99px;
@@ -1076,6 +1130,145 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    stayed on screen with masking off, announcing a state that was not true.
    Visibility is the attribute, and this is what lets the attribute win. */
 .forge .fglock[hidden]{ display:none; }
+
+/* ==========================================================================
+   THE AGENT-ONLY VIEW
+   --------------------------------------------------------------------------
+   One attribute on :root, exactly as the drawer's collapsed state works, and
+   the CSS owns the whole layout change — forge.js only owns the attribute and
+   the preference behind it. rgA, rgB and rgD collapse; rgC becomes the window.
+
+   It is not a smaller IDE with panes hidden. The measure is capped at 84ch
+   because a chat line that runs the width of a 1600px monitor is unreadable,
+   the turns are separated by a rule rather than by bubbles because a wall of
+   tinted blocks is not, and the owner's own turn keeps its bubble so the two
+   voices stay tellable apart at a glance. The composer keeps the same measure
+   as the conversation it belongs to.
+
+   THE APPROVAL CAPSULES ARE THE POINT OF IT. They render in line, at full
+   measure, from the same component Command uses — see forge.js section 3b.
+   ========================================================================== */
+:root[data-forge-view="agent"] .forge{
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr) 26px;
+}
+:root[data-forge-view="agent"] .forge>.rgA,
+:root[data-forge-view="agent"] .forge>.rgB,
+:root[data-forge-view="agent"] .forge>.rgD{ display:none; }
+:root[data-forge-view="agent"] .forge>.rgC{
+  grid-column:1; grid-row:1; border-left:0; background:var(--g2);
+}
+:root[data-forge-view="agent"] .forge>.rgE{ grid-column:1; grid-row:2; }
+
+/* ONE MEASURE, shared by the header, the tabs, the thread and the composer, so
+   nothing in the column is off-axis with anything else.
+
+   It is done with PADDING rather than a centred max-width box, and that is not
+   a stylistic preference: the rules above and below the thread, and the
+   scrollbar on it, must stay at the window's edge — an inset rule reads as a
+   card, and a card is the one thing this view is not. `max()` keeps the gutter
+   at 18px on a narrow window, where 84ch is wider than the pane. */
+:root[data-forge-view="agent"] .forge .sesrow,
+:root[data-forge-view="agent"] .forge .insp-tabs,
+:root[data-forge-view="agent"] .forge .insp-bd,
+:root[data-forge-view="agent"] .forge .compose,
+:root[data-forge-view="agent"] .forge .crow{
+  padding-left:max(18px, calc((100% - 84ch) / 2));
+  padding-right:max(18px, calc((100% - 84ch) / 2));
+}
+:root[data-forge-view="agent"] .forge .sesrow{ padding-top:15px; font-size:10.5px; }
+:root[data-forge-view="agent"] .forge .insp-tabs{ padding-top:11px; border-bottom:0; }
+:root[data-forge-view="agent"] .forge .insp-bd{ padding-top:6px; padding-bottom:30px; font-size:13.5px; }
+:root[data-forge-view="agent"] .forge .compose{ padding-top:12px; padding-bottom:12px; }
+:root[data-forge-view="agent"] .forge .compose input{ font-size:13.5px; padding:11px 13px; }
+:root[data-forge-view="agent"] .forge .crow{ padding-bottom:12px; font-size:10.5px; }
+:root[data-forge-view="agent"] .forge .crow select{ font-size:11px; max-width:220px; }
+
+/* Turn separation by rule, not by tint. */
+:root[data-forge-view="agent"] .forge .msg{
+  margin:0; padding:17px 0 19px; border-bottom:1px solid var(--rule);
+}
+:root[data-forge-view="agent"] .forge .msg .who{ font-size:10px; margin-bottom:8px; }
+:root[data-forge-view="agent"] .forge .msg .bub{
+  background:none; padding:0; font-size:13.5px; line-height:1.62;
+}
+/* The owner's own turn keeps a bubble: two voices, told apart without colour. */
+:root[data-forge-view="agent"] .forge .msg:not(.me) .bub{
+  background:var(--g4); border-radius:10px; padding:10px 14px; display:inline-block; max-width:100%;
+}
+:root[data-forge-view="agent"] .forge .think{ font-size:12px; padding-left:11px; }
+:root[data-forge-view="agent"] .forge .tool{ font-size:11.5px; padding:7px 11px; }
+:root[data-forge-view="agent"] .forge .cite{ font-size:11px; }
+:root[data-forge-view="agent"] .forge .unwired{ margin:16px 0; padding:14px 16px; font-size:13px; }
+:root[data-forge-view="agent"] .forge .unwired b{ font-size:14px; }
+
+/* ---- the gate, in line ---------------------------------------------------
+   The capsule brings its own opaque styling (L-GLASS: a capsule is never
+   glass), so almost nothing is said about it here. What IS said: it gets the
+   full measure of the column, and it is announced by a line naming who is
+   asking and when — a capsule that appears with no attribution reads like a
+   dialog box, and this is not a dialog box, it is a turn in the conversation. */
+.forge .fgate{ margin:12px 0 16px; min-width:0; }
+.forge .fgate .zn-caps{ max-width:100%; }
+.forge .fghead{
+  display:flex; align-items:center; gap:8px; margin-bottom:7px;
+  font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--amber);
+}
+.forge .fgate[data-settled="1"] .fghead{ color:var(--ink-2); }
+.forge .fghead .sp{ flex:1; }
+.forge .fghead .fgglyph{ font-size:11px; }
+.forge .fghead .fgkind, .forge .fghead .fgat{
+  color:var(--ink-2); letter-spacing:0; text-transform:none;
+}
+:root[data-forge-view="agent"] .forge .fgate{ margin:20px 0 24px; }
+:root[data-forge-view="agent"] .forge .fghead{ font-size:10.5px; }
+
+/* ---- a run in flight -----------------------------------------------------
+   The clock is the only real number this window has while a POST is open, so
+   it is the only number shown. The mark beside it turns; it does NOT fill,
+   because a progress bar with nothing behind it is a lie told slowly. */
+.forge .fgrun{
+  display:flex; align-items:center; gap:9px; font-family:var(--font-mono);
+  font-size:11px; color:var(--ink-2); margin-bottom:8px;
+}
+.forge .fgrun .sp{ flex:1; }
+.forge .fgrun-el{ color:var(--ink); }
+.forge .fgspin{
+  width:9px; height:9px; border-radius:50%; flex:none;
+  border:1.5px solid var(--rule-2); border-top-color:var(--cyan);
+  animation:fgspin 900ms linear infinite;
+}
+@keyframes fgspin{ to{ transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce){
+  .forge .fgspin{ animation:none; border-top-color:var(--cyan); border-right-color:var(--cyan); }
+}
+
+/* ---- code inside the conversation, coloured by monaco -------------------- */
+.forge .fgcode{
+  margin:9px 0; border:1px solid var(--rule); border-radius:8px;
+  background:var(--g2); overflow:hidden;
+}
+.forge .fgcode-h{
+  display:flex; align-items:center; gap:8px; padding:5px 10px;
+  border-bottom:1px solid var(--rule); background:var(--g3);
+  font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2);
+}
+.forge .fgcode-h .fgcode-p{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .fgcode-h .fgcode-l{ margin-left:auto; color:var(--ink-3); flex:none; }
+.forge .fgcode pre{
+  margin:0; padding:9px 11px; font-family:var(--font-mono); font-size:11px; line-height:1.6;
+  color:var(--ink); overflow-x:auto; max-height:44vh; overflow-y:auto; white-space:pre;
+}
+/* Monaco's colorizer writes its own <span> tree and its own font size into the
+   node; keep the measure this pane chose rather than the editor's. */
+.forge .fgcode pre .monaco-tokenized-source{ font-family:inherit; font-size:inherit; }
+:root[data-forge-view="agent"] .forge .fgcode pre{ font-size:12px; }
+:root[data-lock="1"] .forge .fgcode{ filter:blur(9px) saturate(60%); }
+
+/* ---- the view switch in rgE ---------------------------------------------- */
+.forge .rgE .fgview{ font:inherit; font-size:9.5px; cursor:pointer; }
+.forge .rgE .fgview:hover{ color:var(--ink); }
 
 /* One column below 900px: every region stacked, none hidden. The prototype's
    own small-screen rule, kept — a narrow window loses the grid, not the IDE. */

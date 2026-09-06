@@ -9,6 +9,29 @@
  * status bar — with the CSS living in index.html beside the Command port, which
  * is the pattern this window already follows (index.html + field.js).
  *
+ * TWO THINGS HERE ARE NOT THE PROTOTYPE'S, and both are documented where they
+ * are built rather than only here:
+ *
+ *   rgB IS MONACO, VS Code's own editor core, served from this machine out of
+ *   /vendor/monaco (see monaco.js). Real tokenisation, rainbow bracket pairs,
+ *   folding, multi-cursor, find and replace, a minimap, a right-click menu, and
+ *   the TypeScript / JSON / CSS language services. A SAVE IS A PROPOSAL: Ctrl+S
+ *   POSTs the buffer to /previews, the same gate an agent's write crosses, and
+ *   what comes back is a capsule with a tier and a receipt. Nothing in this file
+ *   writes to the sandbox.
+ *
+ *   THE AGENT-ONLY VIEW collapses rgA, rgB and rgD and gives rgC the window.
+ *   Ctrl+Shift+A, or the control in rgE; the choice is remembered. It is where
+ *   the approval capsules live IN LINE, which is the point of it — a run that
+ *   has to ask is asking on the same surface it is running on. See section 3b.
+ *
+ * A SECOND NETWORK RULE, adopted with the editor: EVERY BYTE MONACO NEEDS IS
+ * SERVED BY THIS DAEMON. The loader, the editor bundle, every lazily-required
+ * language chunk and every web worker resolve to same-origin paths under
+ * /vendor/monaco/, which `tools/vendor-monaco.mjs` fills at build time from a
+ * ROOT devDependency. monaco-editor is never a runtime dependency of any
+ * package — the zero-dependency check in ci.yml stays true, and stays honest.
+ *
  * WHAT IS NOT PORTED IS THE PROTOTYPE'S DATA. The prototype ships synthetic
  * content and says so in its own footer. None of it is here. Every value on this
  * surface comes from the live daemon:
@@ -44,11 +67,23 @@
  *
  * EVERY VALUE IS WRITTEN WITH textContent. Git output, file contents and model
  * output are all attacker-adjacent strings; none of them is ever handed to
- * innerHTML. There is no innerHTML in this file.
+ * innerHTML. There is no innerHTML in this file. The one place markup is
+ * produced from data is `monaco.editor.colorizeElement`, which is handed a node
+ * whose text was set with textContent and which escapes every byte it tokenises
+ * — the rule is unchanged: this file never builds markup out of a string.
  *
  * Exports init / initForge / default — nav.js lazy-imports this once, via
  * data-init="/forge.js", and calls `mod.init || mod.default` with the section.
  */
+
+/* The approval capsule Command already uses, unchanged and not re-implemented:
+   it re-hashes the binding in front of the owner, refuses Approve on an
+   unresolved field, spends the control after one click, and seals only from a
+   receipt. Forge renders that component, not a friendlier copy of it. */
+import { renderCapsule } from './capsule.js';
+/* The editor, the theme built from glass/tokens.css, and the honest statement
+   of which languages actually have a checker behind them. */
+import { DIAGNOSED, ZENO_THEME, languageForPath, loadMonaco, monacoIfLoaded, onThemeChange } from './monaco.js';
 
 /* ================================================================== *
  * 0 · DOM helpers, the owner token, and the one fetch shape           *
@@ -314,10 +349,23 @@ export function initForge(section) {
     model: '',
     effort: 'medium',
 
-    chat: [],            // real turns only: {who:'you'|'agent', ...}
+    chat: [],            // real turns only: {who:'you'|'agent', at, ...}
     runs: [],            // this session's runs: {at, task, ok, agentId, model, effort, files, waiting, applied}
     proposals: [],       // the newest run's proposed[] capsules
     running: false,
+    runAt: null,         // when the run in flight was sent — the one real number
+
+    // The editor, and the one write it can make: a proposal.
+    saving: false,
+    saveErr: null,
+
+    // The gate, made visible. Every entry is a capsule the daemon really holds
+    // (or really held): {hash, at, tier, kind, summary, settled, outcome}.
+    gates: [],
+    gatesErr: null,
+    streamDown: false,
+
+    view: 'ide',         // 'ide' (five regions) or 'agent' (rgC takes the window)
 
     commitMsg: '',
     committing: false,
@@ -347,6 +395,35 @@ export function initForge(section) {
   add(root, rgA, rgB, rgD, rgC, rgE);
   section.replaceChildren(root);
 
+  /* ---- the editor's host and its state, declared before anything can reach
+     for them ---------------------------------------------------------------
+     The host is built ONCE and never rebuilt. paintB refreshes the chrome above
+     it and leaves the host alone, because tearing a Monaco instance down on
+     every repaint would throw away the cursor, the undo stack, the folding
+     state and the selection — everything that makes an editor an editor rather
+     than a viewer. `edMon` is monaco's container; `edAux` is every other thing
+     the pane can show, and exactly one of the two is ever visible.
+
+     These sit here, above the masked-mode block, and not down in the rgB
+     section where they are used: `syncLock` runs on the very next lines and
+     reaches for `ed`, and a `let` read before its declaration is a
+     ReferenceError, not an undefined. */
+  const edHost = el('div', 'edhost');
+  const edMon = el('div', 'edmon');
+  const edAux = el('div', 'edaux');
+  edMon.hidden = true;
+  add(edHost, edMon, edAux);
+
+  let M = null;              // the monaco namespace, once it is loaded
+  let ed = null;             // the editor instance, once it is created
+  let edErr = null;          // why the editor is absent, in the owner's words
+  const models = new Map();  // path -> monaco ITextModel
+  const modelSubs = [];      // listeners on the model currently on screen
+  /** Paths whose buffer has been touched since it was read. Guards modelFor:
+      a repaint must never overwrite unsaved edits with the bytes on disk. */
+  const dirtyPaths = new Set();
+  let lastCaretPainted = -1;
+
   /* ---- masked mode ------------------------------------------------------- *
    * The shell's `masked` control sets data-lock on :root, and the CSS veils
    * Forge's work surfaces the way the prototype does. This is the prototype's
@@ -362,7 +439,26 @@ export function initForge(section) {
   add(lockPill, glyph('', 'dot'), el('span', null, 'work surfaces withheld · masked'));
   lockPill.hidden = true;
   add(root, lockPill);
-  const syncLock = () => { lockPill.hidden = R.getAttribute('data-lock') !== '1'; };
+  const syncLock = () => {
+    const masked = R.getAttribute('data-lock') === '1';
+    lockPill.hidden = !masked;
+    /* The editor's find widget, suggestions and parameter hints float above the
+       pane, and its right-click menu is mounted on the BODY by monaco's own
+       context-view service — outside anything the masked-mode CSS can veil. A
+       menu or a suggestion list left open would sit unblurred over a blurred
+       pane and show the very text the owner just withheld. So masking closes
+       the three that CAN be closed by command, and drops focus out of the
+       buffer, which dismisses the rest. The body-mounted menu is handled in
+       CSS, beside the rest of the veil, because it is not this editor's to
+       close. */
+    if (masked && ed) {
+      ed.trigger('zeno.mask', 'closeFindWidget', null);
+      ed.trigger('zeno.mask', 'hideSuggestWidget', null);
+      ed.trigger('zeno.mask', 'closeParameterHints', null);
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && rgB.contains(focused)) focused.blur();
+    }
+  };
   syncLock();
   new MutationObserver(syncLock).observe(R, { attributes: true, attributeFilter: ['data-lock'] });
 
@@ -796,8 +892,110 @@ export function initForge(section) {
   }
 
   /* ================================================================ *
-   * rgB — crumbs, file tabs, the code pane, the minimap               *
-   * ================================================================ */
+   * rgB — crumbs, file tabs, the editor, and the gate a save goes through
+   * ================================================================ *
+   * THE PANE IS MONACO — VS Code's own editor core — served from this
+   * machine out of /vendor/monaco. monaco.js holds the loader, the
+   * no-egress reasoning and the theme, which is built by resolving
+   * glass/tokens.css rather than by inventing a palette. What monaco
+   * brings is real and none of it is drawn here: tokenisation for every
+   * language it knows, rainbow bracket pairs, folding, multi-cursor,
+   * find and replace, a minimap, a right-click menu, sticky scroll, and
+   * the TypeScript, JSON and CSS language services.
+   *
+   * WHAT IT DELIBERATELY DOES NOT BRING is set out in monaco.js beside
+   * the setting that withholds it, and the strip under the tabs repeats
+   * it per file, in words, on screen:
+   *   · TypeScript SEMANTIC checking is off. This pane holds ONE file
+   *     with no tsconfig, no node_modules and no sibling module, so a
+   *     semantic pass would report every import as unresolved and every
+   *     Node global as undefined — errors about things that exist. Syntax
+   *     checking IS on, because a parse error is decided by these bytes
+   *     alone and is therefore true whatever the rest of the tree holds.
+   *   · a language with no service behind it (markdown, and everything
+   *     monaco only tokenises) gets NO problems chip at all. An empty one
+   *     would report a check that never ran.
+   *   · the Format action is shown only where monaco itself reports a
+   *     formatter for the current model — asked at the moment of drawing,
+   *     via the action's own isSupported(). There is no button that
+   *     would do nothing.
+   *
+   * A SAVE IS A PROPOSAL, NEVER A WRITE. Ctrl+S does not touch the
+   * sandbox. It POSTs the buffer to /previews — the identical gate an
+   * agent's write goes through — and what comes back is an approval
+   * capsule carrying a tier and an action hash. A routine edit is
+   * committed by the kernel on the spot and returns a receipt; anything
+   * larger, or anything touching a sensitive path, waits for the owner.
+   * Either way the capsule lands in the session beside the agent's own,
+   * and either way there is a receipt at the end. There is no path from
+   * this pane to the disk that does not cross L6.
+   *
+   * TWO STATES ARE READ-ONLY ON PURPOSE, and each says so on screen:
+   * a file /forge/file truncated at its 4000-line cap (saving that buffer
+   * would propose the file with the remainder cut off — silent data
+   * loss), and any file at all in a window that holds no owner token.
+   *
+   * LINE ENDINGS SURVIVE. /forge/file normalises CRLF to LF on the wire,
+   * so the model's EOL is set back from the reported `eol` before any
+   * save: a CRLF file is proposed as CRLF, not silently reformatted.
+   */
+
+  /* One kick at init. Either branch repaints, and the pane then says which of
+     the two it is showing — the editor, or the plain pane with the reason. */
+  loadMonaco().then(
+    (m) => {
+      M = m;
+      registerEditorActions();
+      onThemeChange(() => { paintC(); });
+      paintB();
+    },
+    (err) => {
+      edErr = (err && err.message) ? err.message : String(err);
+      paintB();
+    },
+  );
+
+  /** The bytes /forge/file last handed us for the file on screen. */
+  function diskText() {
+    return S.fileData && typeof S.fileData.contents === 'string' ? S.fileData.contents : null;
+  }
+
+  /**
+   * The buffer as /forge/file would have sent it: LF endings, always.
+   *
+   * This matters. /forge/file normalises CRLF to LF on the wire, and the model
+   * is set back to CRLF for a CRLF file so a save proposes the file's real
+   * endings — which means `model.getValue()` on a CRLF file NEVER equals the
+   * bytes we were handed, and a plain comparison would call every CRLF file
+   * dirty the moment it opened, with a Propose-save button armed over an edit
+   * nobody made. Compare on the wire form; propose in the file's own form.
+   */
+  function bufferLF(model) {
+    return model.getValue(M.editor.EndOfLinePreference.LF);
+  }
+
+  /** Whether the buffer differs from what is on disk, as last read. */
+  function isDirty() {
+    if (!ed || !S.file || !M) return false;
+    const model = models.get(S.file);
+    const disk = diskText();
+    if (!model || disk === null) return false;
+    return bufferLF(model) !== disk;
+  }
+
+  /**
+   * Whether this file may be edited, and — when it may not — the sentence that
+   * says why. Never a bare disabled control.
+   */
+  function readOnlyReason() {
+    if (!OWNER_TOKEN) {
+      return 'This window was opened without an owner token, so it can read the sandbox but cannot propose a change to it.';
+    }
+    if (S.fileData && S.fileData.truncated) {
+      return `Only the first ${diskText() === null ? 0 : diskText().split('\n').length} lines of this ${S.fileData.lines}-line file were read, so the buffer is not the whole file. Saving it would propose the file with the rest cut off.`;
+    }
+    return null;
+  }
 
   function paintB() {
     /* crumbs: repository › directory › file, then the branch. */
@@ -846,69 +1044,480 @@ export function initForge(section) {
     }
     add(tabs, el('span', 'sp'));
 
-    /* the pane itself */
+    rgB.replaceChildren(crumbs, tabs, editorBar(), edHost);
+    syncEditor();
+  }
+
+  /** Repaint the strip alone. Markers and the dirty flag move often; the tabs do not. */
+  function paintBar() {
+    const bar = rgB.querySelector('.edbar');
+    if (bar) rgB.replaceChild(editorBar(), bar);
+  }
+
+  /* ---- the strip under the tabs: what is checked, and the two actions ---- */
+
+  function editorBar() {
+    const bar = el('div', 'edbar');
+    const model = S.file ? models.get(S.file) : null;
+    const lang = model ? model.getLanguageId() : null;
+
+    if (edErr) {
+      fmtDrawn = false;
+      add(bar, el('span', 'edwhy', `plain pane — ${edErr}`));
+      add(bar, el('span', 'sp'));
+      return bar;
+    }
+    if (!S.file || !S.fileData || S.fileData.binary) {
+      fmtDrawn = false;
+      add(bar, el('span', 'edwhy', M === null ? 'loading the editor…' : 'no file open'));
+      add(bar, el('span', 'sp'));
+      return bar;
+    }
+
+    /* 1 · what monaco thinks this file is. `plaintext` is monaco's own answer
+       for an extension it has no language for, and it is reported as that
+       rather than dressed up as a language. */
+    const langChip = el('span', 'chip');
+    add(langChip, glyph('◆', 'chip-glyph'));
+    add(langChip, document.createTextNode(lang && lang !== 'plaintext' ? lang : 'plain text'));
+    langChip.title = lang && lang !== 'plaintext'
+      ? `Monaco is tokenising this file as ${lang}.`
+      : 'Monaco has no language for this file extension, so it is shown as plain text. Nothing is guessed.';
+    add(bar, langChip);
+
+    /* 2 · diagnostics, and ONLY where something really checks. */
+    if (lang && DIAGNOSED.has(lang) && model && M) {
+      const marks = M.editor.getModelMarkers({ resource: model.uri });
+      const errs = marks.filter((k) => k.severity === M.MarkerSeverity.Error).length;
+      const warns = marks.filter((k) => k.severity === M.MarkerSeverity.Warning).length;
+      const chip = btn('chip fgproblems', null, () => jumpToFirstMarker(marks));
+      chip.dataset.state = errs > 0 ? 'warn' : 'listening';
+      add(chip, glyph(errs > 0 ? '✕' : '○', 'chip-glyph'));
+      add(chip, document.createTextNode(
+        errs === 0 && warns === 0
+          ? (lang === 'typescript' || lang === 'javascript' ? 'no syntax errors' : 'no problems')
+          : `${errs} ${errs === 1 ? 'error' : 'errors'}${warns ? ` · ${warns} warning${warns === 1 ? '' : 's'}` : ''}`,
+      ));
+      chip.disabled = marks.length === 0;
+      chip.title = (lang === 'typescript' || lang === 'javascript')
+        ? 'The real TypeScript parser, over this file alone: syntax only. Types are NOT checked here — one file with no tsconfig and no node_modules cannot be type-checked without reporting imports that exist as missing. `npm run check` is what type-checks this repository.'
+        : `Monaco's ${lang} language service, over this document alone.`;
+      add(bar, chip);
+    } else if (lang && model) {
+      const none = el('span', 'edwhy', 'not checked');
+      none.title = `Nothing in this bundle checks ${lang === 'plaintext' ? 'plain text' : lang}, so no problem count is shown. An empty one would report a check that never ran.`;
+      add(bar, none);
+    }
+
+    add(bar, el('span', 'sp'));
+
+    /* 3 · Format — present only where monaco reports a formatter for THIS
+       model. Asked of the action itself, so the answer cannot drift from what
+       is actually registered, and so a language with no formatter gets no
+       button rather than a button that does nothing. */
+    fmtDrawn = formatSupported();
+    if (fmtDrawn) {
+      const f = btn('btn sm', 'Format', () => {
+        const act = ed.getAction('editor.action.formatDocument');
+        if (act) void act.run();
+      });
+      f.title = `Monaco's registered formatter for ${lang}. Shift+Alt+F.`;
+      add(bar, f);
+    }
+
+    /* 4 · the save, and the truth about what a save is. */
+    const ro = readOnlyReason();
+    if (ro) {
+      const why = el('span', 'edwhy ro', 'read-only');
+      why.title = ro;
+      add(bar, why);
+    } else {
+      const dirty = isDirty();
+      if (dirty) {
+        const d = el('span', 'edwhy dirty', 'unsaved edits');
+        d.title = 'This buffer differs from the bytes read from the sandbox.';
+        add(bar, d);
+      }
+      const save = btn('btn sm', S.saving ? 'Proposing…' : 'Propose save', () => void proposeSave());
+      save.disabled = S.saving || !dirty;
+      save.title = dirty
+        ? 'Ctrl+S. Sends the buffer to /previews — the same gate an agent write crosses. A routine edit is committed and receipted by the kernel; anything larger waits for your approval. This never writes to the sandbox directly.'
+        : 'Nothing has changed in this buffer, so there is nothing to propose.';
+      add(bar, save);
+    }
+
+    if (S.saveErr) add(bar, el('span', 'edwhy err', S.saveErr));
+
+    return bar;
+  }
+
+  /* ---- is there a formatter for what is on screen? ----------------------- *
+   * Asked of monaco, never asserted by a table here — `isSupported()` reads the
+   * action's own precondition, which includes "a document formatting provider
+   * is registered for this model".
+   *
+   * It has to be asked more than once. A language's mode is a chunk monaco
+   * fetches on demand, and its providers appear a beat AFTER the model does —
+   * so the first strip drawn for a file is drawn while the honest answer is
+   * still "no". There is no public event for "a formatter was registered", so
+   * the strip re-asks on a short, bounded, self-cancelling watch and redraws
+   * the moment the answer stops matching what is on screen. Nothing polls
+   * forever, and nothing claims a formatter before monaco says there is one. */
+  let fmtDrawn = false;
+  let fmtWatch = null;
+
+  function formatSupported() {
+    if (!ed || !ed.getModel()) return false;
+    const act = ed.getAction('editor.action.formatDocument');
+    return Boolean(act && act.isSupported());
+  }
+
+  function watchFormatter() {
+    if (fmtWatch !== null) clearInterval(fmtWatch);
+    const until = Date.now() + 6000;
+    fmtWatch = setInterval(() => {
+      if (formatSupported() !== fmtDrawn) paintBar();
+      if (Date.now() > until) {
+        clearInterval(fmtWatch);
+        fmtWatch = null;
+      }
+    }, 250);
+  }
+
+  function jumpToFirstMarker(marks) {
+    if (!ed || marks.length === 0) return;
+    const first = [...marks].sort((a, b) => a.startLineNumber - b.startLineNumber)[0];
+    ed.revealLineInCenter(first.startLineNumber);
+    ed.setPosition({ lineNumber: first.startLineNumber, column: first.startColumn });
+    ed.focus();
+  }
+
+  /* ---- what the host shows, decided in one place ------------------------- */
+
+  function showAux(node) {
+    edMon.hidden = true;
+    edAux.hidden = false;
+    edAux.replaceChildren(node);
+  }
+
+  function showEditor() {
+    edAux.hidden = true;
+    edAux.replaceChildren();
+    edMon.hidden = false;
+    if (ed) ed.layout();
+  }
+
+  function syncEditor() {
     placeViewport = null;
+    if (S.fileBusy) return showAux(paneMessage('Reading the file from the sandbox…'));
+    if (S.fileErr) return showAux(paneMessage(S.fileErr));
+    if (!S.file || !S.fileData) {
+      return showAux(paneMessage(
+        'No file is open. Pick one from the Explorer and its real contents are read from the sandbox and shown here.\n\n' +
+        'This pane never shows source that is not in the repository — with nothing selected it shows nothing, not a sample.',
+      ));
+    }
+    if (S.fileData.binary) {
+      return showAux(paneMessage(
+        `${S.file} is not a text file (${bytesLabel(S.fileData.bytes)}). There is nothing to render as source, so nothing is rendered.`,
+      ));
+    }
+    if (M === null) {
+      // The editor is not here — still loading, or genuinely absent. The file
+      // is still shown, in the pane this window shipped before monaco existed.
+      // A working fallback, not a placeholder: it reads the same bytes.
+      return showAux(plainPane());
+    }
+    mountEditor();
+    showEditor();
+    // The strip is built by paintB BEFORE the model exists, so on the first
+    // paint of a newly opened file it would report "plain text" and hide the
+    // Format action for a file monaco is perfectly happy to format. Everything
+    // on that strip is a fact about the MODEL, so it is drawn once the model is.
+    paintBar();
+  }
+
+  /* ---- monaco: created once, then given a model per file ----------------- */
+
+  function mountEditor() {
+    if (!M) return;
+    if (ed === null) {
+      ed = M.editor.create(edMon, {
+        theme: ZENO_THEME,
+        automaticLayout: true,
+        // The window's own mono face, so code in the editor and code in a
+        // capsule are visibly the same text in the same voice.
+        fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
+        fontSize: 12.5,
+        lineHeight: 20,
+        fontLigatures: false,
+        // The features this pane exists to have.
+        bracketPairColorization: { enabled: true, independentColorPoolPerBracketType: true },
+        guides: { bracketPairs: 'active', bracketPairsHorizontal: 'active', indentation: true, highlightActiveIndentation: true },
+        minimap: { enabled: true, renderCharacters: false, maxColumn: 90 },
+        folding: true,
+        foldingHighlight: true,
+        showFoldingControls: 'mouseover',
+        contextmenu: true,
+        multiCursorModifier: 'ctrlCmd',
+        multiCursorPaste: 'spread',
+        find: { seedSearchStringFromSelection: 'selection', addExtraSpaceOnTop: false },
+        stickyScroll: { enabled: true, maxLineCount: 4 },
+        occurrencesHighlight: 'singleFile',
+        linkedEditing: true,
+        renderWhitespace: 'selection',
+        renderLineHighlight: 'all',
+        smoothScrolling: true,
+        cursorBlinking: 'smooth',
+        cursorSmoothCaretAnimation: 'on',
+        scrollBeyondLastLine: false,
+        padding: { top: 10, bottom: 28 },
+        tabSize: 2,
+        // rgB is `overflow:hidden` (the grid depends on it), which would clip
+        // the context menu, the find widget and every hover. Fixed overflow
+        // widgets are appended to the body instead, so they are whole.
+        fixedOverflowWidgets: true,
+        scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
+      });
+      ed.onDidChangeCursorPosition((e) => {
+        S.caret = e.position.lineNumber;
+        if (S.caret !== lastCaretPainted) {
+          lastCaretPainted = S.caret;
+          paintE();
+        }
+      });
+      M.editor.onDidChangeMarkers((uris) => {
+        const model = S.file ? models.get(S.file) : null;
+        if (!model) return;
+        if (uris.some((u) => u.toString() === model.uri.toString())) paintBar();
+      });
+      registerEditorActions();
+    }
+
+    const model = modelFor(S.file, diskText());
+    if (ed.getModel() !== model) {
+      for (const d of modelSubs.splice(0)) d.dispose();
+      ed.setModel(model);
+      modelSubs.push(model.onDidChangeContent(() => {
+        const path = S.file;
+        if (path) {
+          if (bufferLF(model) === diskText()) dirtyPaths.delete(path);
+          else dirtyPaths.add(path);
+        }
+        paintBar();
+      }));
+      lastCaretPainted = -1;
+      watchFormatter();
+      // Land on the caret ONLY when the model has just been put on screen.
+      // Doing it on every repaint dragged the cursor to column 1 and re-centred
+      // the viewport under the owner's hands every time the status bar
+      // refreshed — a run finishing would have moved their cursor.
+      if (S.caret) {
+        ed.setPosition({ lineNumber: S.caret, column: 1 });
+        ed.revealLineInCenter(S.caret);
+      }
+    }
+    const ro = readOnlyReason();
+    ed.updateOptions({ readOnly: ro !== null, readOnlyMessage: { value: ro || '' } });
+  }
+
+  /**
+   * The model for a path. Monaco resolves the language from the URI's
+   * extension, using its OWN registry — so a `.ts` file is TypeScript because
+   * monaco says so, not because a table in this file says so.
+   *
+   * A model that already exists is REUSED and not overwritten: it may hold
+   * unsaved edits, and a repaint must never silently discard them. Its bytes
+   * are replaced only when the file was genuinely re-read from disk and the
+   * buffer was clean.
+   */
+  function modelFor(path, text) {
+    const uri = M.Uri.parse(`zeno-sandbox:/${String(path).replace(/^\/+/, '')}`);
+    let model = models.get(path);
+    if (!model || model.isDisposed()) {
+      model = M.editor.getModel(uri) || M.editor.createModel(text ?? '', undefined, uri);
+      models.set(path, model);
+    } else if (text !== null && bufferLF(model) !== text && !dirtyPaths.has(path)) {
+      model.setValue(text);
+    }
+    if (S.fileData && S.fileData.eol === 'CRLF') model.setEOL(M.editor.EndOfLineSequence.CRLF);
+    else model.setEOL(M.editor.EndOfLineSequence.LF);
+    return model;
+  }
+
+  /* ---- the right-click menu, and the keys ------------------------------- */
+
+  function registerEditorActions() {
+    if (!M || !ed || ed.__zenoActions) return;
+    ed.__zenoActions = true;
+    ed.addAction({
+      id: 'zeno.proposeSave',
+      label: 'Propose this save to the kernel',
+      keybindings: [M.KeyMod.CtrlCmd | M.KeyCode.KeyS],
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 1,
+      run: () => { void proposeSave(); },
+    });
+    ed.addAction({
+      id: 'zeno.revert',
+      label: 'Discard these edits and re-read the file from the sandbox',
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 2,
+      run: () => { dirtyPaths.delete(S.file); void rereadOpenFile(true); },
+    });
+    ed.addAction({
+      id: 'zeno.agentView',
+      label: 'Agent-only view',
+      keybindings: [M.KeyMod.CtrlCmd | M.KeyMod.Shift | M.KeyCode.KeyA],
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 3,
+      run: () => setView(S.view === 'agent' ? 'ide' : 'agent'),
+    });
+    ed.addAction({
+      id: 'zeno.copyPath',
+      label: 'Copy the sandbox path of this file',
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 4,
+      run: () => {
+        if (S.file && navigator.clipboard) void navigator.clipboard.writeText(S.file).catch(() => {});
+      },
+    });
+  }
+
+  /* ---- the save, which is a proposal ------------------------------------ */
+
+  /**
+   * POST /previews with the buffer. This is the SAME route the assistant and
+   * the voice surface propose through, and the same one /forge/run funnels an
+   * agent's writes into — one gate, not a second one built for the editor.
+   *
+   * `requestedBy` is 'forge-editor', naming the SURFACE. It must not be
+   * 'owner': L6 refuses an approval whose approver is the proposer, and
+   * labelling the owner's own editor "owner" would hold every save forever with
+   * no way to ever say yes.
+   */
+  async function proposeSave() {
+    if (S.saving || !OWNER_TOKEN || !S.file || !ed) return;
+    if (readOnlyReason() !== null) return;
+    const model = models.get(S.file);
+    if (!model) return;
+    const path = S.file;
+    // Compare on the wire form, propose in the file's own form: the model
+    // carries the file's real line endings, so a CRLF file is proposed as CRLF
+    // rather than silently reformatted by the act of opening it.
+    if (bufferLF(model) === diskText()) return;
+    const contents = model.getValue();
+
+    S.saving = true;
+    S.saveErr = null;
+    paintBar();
+
+    const r = await api('/previews', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        relPath: path,
+        contents,
+        summary: `Forge editor: edit ${path}`,
+        requestedBy: 'forge-editor',
+      }),
+    });
+    S.saving = false;
+
+    if (!r.ok) {
+      S.saveErr = `not proposed: ${errText(r)}`;
+      paintBar();
+      return;
+    }
+    const preview = r.data && r.data.preview;
+    if (!preview || typeof preview.actionHash !== 'string') {
+      S.saveErr = 'the daemon answered without a preview, so nothing can be shown for this save.';
+      paintBar();
+      return;
+    }
+    // TWO OUTCOMES, AND THEY ARE DIFFERENT FACTS.
+    //
+    // A routine (T0) edit comes back ALREADY COMMITTED, with a receipt: the
+    // kernel applied it and receipted it on the spot, and nothing is waiting.
+    // Saying "waiting for your approval" there would be the one sentence this
+    // surface must never say. It is recorded as a settled turn carrying the
+    // real receipt, and the file is re-read so the buffer and the disk agree.
+    //
+    // Anything larger, or anything touching a sensitive path, is now a capsule
+    // the daemon is HOLDING. It is not drawn from this response: /state is
+    // asked for it, because only /state carries the payload, and a capsule
+    // whose payload the owner cannot re-hash is a capsule they cannot approve.
+    const receipt = r.data.receipt || null;
+    S.chat.push({
+      who: 'save',
+      at: new Date(),
+      path,
+      tier: preview.tier,
+      auto: preview.auto === true,
+      actionHash: preview.actionHash,
+      receipt,
+      secretWarning: r.data.secretWarning || null,
+    });
+    S.insp = 'chat';
+    if (receipt) {
+      dirtyPaths.delete(path);
+      void loadStatus();
+      void rereadOpenFile(true);
+    }
+    paintC();
+    paintBar();
+    void syncGates();
+  }
+
+  /* ---- the pane monaco is not: the plain reader, kept as the fallback ---- */
+
+  /**
+   * The pane this window shipped before monaco existed, kept verbatim as the
+   * fallback for a build with no /vendor/monaco. It reads the same bytes from
+   * the same response, so a window without the editor is degraded, not wrong.
+   */
+  function plainPane() {
     const wrap = el('div', 'edwrap');
     const code = el('div', 'code');
     code.tabIndex = 0;
     const mini = el('div', 'mini');
     mini.setAttribute('aria-hidden', 'true');
 
-    if (S.fileBusy) {
-      add(code, paneMessage('Reading the file from the sandbox…'));
-    } else if (S.fileErr) {
-      add(code, paneMessage(S.fileErr));
-    } else if (!S.file || !S.fileData) {
-      add(code, paneMessage(
-        'No file is open. Pick one from the Explorer and its real contents are read from the sandbox and shown here.\n\n' +
-        'This pane never shows source that is not in the repository — with nothing selected it shows nothing, not a sample.',
-      ));
-    } else if (S.fileData.binary) {
-      add(code, paneMessage(
-        `${S.file} is not a text file (${bytesLabel(S.fileData.bytes)}). There is nothing to render as source, so nothing is rendered.`,
-      ));
-    } else {
-      const lines = String(S.fileData.contents).split('\n');
-      const colour = highlights(S.file);
-      const lexState = { block: false };
-      const frag = document.createDocumentFragment();
-      for (let i = 0; i < lines.length; i++) {
-        const n = i + 1;
-        const row = el('div', n === S.caret ? 'row hl' : 'row');
-        row.dataset.line = String(n);
-        add(row, el('span', 'ln', n), lineSpan(lines[i], colour, lexState));
-        frag.appendChild(row);
-      }
-      code.appendChild(frag);
-      code.addEventListener('click', (ev) => {
-        const r = ev.target instanceof Element ? ev.target.closest('.row') : null;
-        if (!r) return;
-        S.caret = Number(r.dataset.line) || 0;
-        paintB();
-        paintE();
-      });
-      if (S.fileData.truncated) {
-        const cut = el('div', 'row');
-        add(cut, el('span', 'ln', '…'), el('span', 'tx',
-          `file continues — ${S.fileData.lines} lines in total, the first ${lines.length} are shown`));
-        code.appendChild(cut);
-      }
-      // The minimap is a picture of THIS file: one bar per sampled line, its
-      // width the real length of that line. It is drawn from the bytes on
-      // screen, so it cannot disagree with them.
-      drawMini(mini, lines);
-      placeViewport = trackViewport(code, mini);
+    const lines = String(S.fileData.contents).split('\n');
+    const colour = highlights(S.file);
+    const lexState = { block: false };
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < lines.length; i++) {
+      const n = i + 1;
+      const row = el('div', n === S.caret ? 'row hl' : 'row');
+      row.dataset.line = String(n);
+      add(row, el('span', 'ln', n), lineSpan(lines[i], colour, lexState));
+      frag.appendChild(row);
     }
-
+    code.appendChild(frag);
+    code.addEventListener('click', (ev) => {
+      const r = ev.target instanceof Element ? ev.target.closest('.row') : null;
+      if (!r) return;
+      S.caret = Number(r.dataset.line) || 0;
+      paintB();
+      paintE();
+    });
+    if (S.fileData.truncated) {
+      const cut = el('div', 'row');
+      add(cut, el('span', 'ln', '…'), el('span', 'tx',
+        `file continues — ${S.fileData.lines} lines in total, the first ${lines.length} are shown`));
+      code.appendChild(cut);
+    }
+    drawMini(mini, lines);
+    placeViewport = trackViewport(code, mini);
     add(wrap, code, mini);
-    rgB.replaceChildren(crumbs, tabs, wrap);
-    // Placed HERE, and not a moment earlier: the rectangle is a measurement of
-    // the pane, and until replaceChildren has put the pane in the document there
-    // is no height to measure. Everything above builds detached.
-    if (placeViewport) placeViewport();
+    // The rectangle is a measurement, so it is placed after the pane is in the
+    // document — one frame later, since this node is returned detached.
+    requestAnimationFrame(() => { if (placeViewport) placeViewport(); });
+    return wrap;
   }
 
-  /** Set by paintB for the pane it just built; null when no file is on screen. */
+  /** Set by plainPane for the pane it built; null whenever monaco is on screen. */
   let placeViewport = null;
 
   function paneMessage(text) {
@@ -936,8 +1545,8 @@ export function initForge(section) {
    * the code pane's actual scroll offset and its actual visible fraction, so it
    * says where in the file the eye is rather than decorating the rail.
    *
-   * Both observers hang off the `code` element, which paintB rebuilds on every
-   * repaint — so they are dropped with it and nothing accumulates.
+   * Both observers hang off the `code` element, which plainPane rebuilds on
+   * every repaint — so they are dropped with it and nothing accumulates.
    */
   function trackViewport(code, mini) {
     const vp = el('i', 'vp');
@@ -955,8 +1564,7 @@ export function initForge(section) {
     code.addEventListener('scroll', place, { passive: true });
     // Forge is initialised while its surface is still hidden, and the window is
     // resizable, so a single placement is not enough: the observer catches the
-    // pane getting a height on first show and every resize after. paintB calls
-    // the returned `place` once the pane is actually in the document.
+    // pane getting a height on first show and every resize after.
     if (typeof ResizeObserver === 'function') new ResizeObserver(place).observe(code);
     return place;
   }
@@ -973,6 +1581,26 @@ export function initForge(section) {
     const label = el('span', 'sesname', last ? `session · ${short(last.task, 40)}` : 'session · nothing run yet');
     if (last) label.title = last.task;
     add(ses, label);
+    add(ses, el('span', 'sp'));
+    // What is owed, where it is owed, said in the header of the surface that
+    // owes it. Drawn from the capsules actually held, never from a click.
+    const owed = gatesWaiting();
+    if (owed > 0) {
+      const chip = el('span', 'chip');
+      chip.dataset.state = 'warn';
+      add(chip, glyph('◈', 'chip-glyph'));
+      add(chip, document.createTextNode(`${owed} awaiting your decision`));
+      chip.title = 'Every capsule the daemon is holding is in this thread, whatever proposed it. Nothing lands until you approve it.';
+      add(ses, chip);
+    }
+    if (S.streamDown) {
+      const chip = el('span', 'chip');
+      chip.dataset.state = 'warn';
+      add(chip, glyph('!', 'chip-glyph'));
+      add(chip, document.createTextNode('live connection down'));
+      chip.title = 'The /stream subscription dropped and is retrying. A capsule raised in the meantime will appear when it reconnects — it is not lost, only late here.';
+      add(ses, chip);
+    }
 
     const tabs = el('div', 'insp-tabs');
     tabs.setAttribute('role', 'tablist');
@@ -1093,21 +1721,34 @@ export function initForge(section) {
         ));
         return wrap;
       }
-      if (S.chat.length === 0) {
+      if (S.chat.length === 0 && S.gates.length === 0) {
         add(wrap, renderUnwired(
           'Nothing has been run yet',
-          'Type a task below and press Run. The agent works headless in an isolated throwaway worktree, and every file it changes arrives in Command as an approval capsule — nothing here touches the sandbox on its own.',
+          'Type a task below and press Run. The agent works headless in an isolated throwaway worktree, and every file it changes arrives here — and in Command — as an approval capsule. Editing a file in the code pane and pressing Ctrl+S proposes it through the same gate. Nothing on this surface touches the sandbox on its own.',
         ));
         return wrap;
       }
-      for (const turn of S.chat) add(wrap, turn.who === 'you' ? youTurn(turn) : agentTurn(turn));
-      if (S.running) {
-        const m = el('div', 'msg me');
-        add(m, el('div', 'who', 'Zeno Forge'));
-        const b = el('div', 'bub', 'Running. Progress is genuinely unknown until the agent returns, so nothing here pretends to measure it.');
-        add(m, b);
-        add(wrap, m);
+      // ONE TIMELINE. A capsule raised in the middle of a run belongs where it
+      // happened, not in a tray beside the conversation — the whole reason to
+      // put the gate in the thread is that the ask and the work are one story.
+      const items = [];
+      for (let i = 0; i < S.chat.length; i++) {
+        const t = S.chat[i];
+        const make = t.who === 'you' ? () => youTurn(t) : t.who === 'save' ? () => saveTurn(t) : () => agentTurn(t);
+        items.push({ at: t.at instanceof Date ? t.at : new Date(0), seq: i, make });
       }
+      for (const g of S.gates) {
+        items.push({ at: g.at, seq: Number.MAX_SAFE_INTEGER, make: () => gateBlock(g) });
+      }
+      items.sort((a, b) => (a.at - b.at) || (a.seq - b.seq));
+      for (const it of items) add(wrap, it.make());
+      if (S.gatesErr) {
+        add(wrap, renderNote(
+          `The list of capsules the daemon is holding could not be read: ${S.gatesErr} Nothing is claimed about what is or is not waiting.`,
+          'rd',
+        ));
+      }
+      if (S.running) add(wrap, runningBlock());
       return wrap;
     },
 
@@ -1206,6 +1847,118 @@ export function initForge(section) {
     return m;
   }
 
+  /**
+   * A save from the code pane, as a turn in the session.
+   *
+   * It draws ONE of two things and never both, because they are not the same
+   * event: a receipt, when the kernel judged the edit routine and therefore
+   * committed and receipted it without asking; or a line saying the capsule is
+   * held and pointing at it — the capsule itself renders further down the
+   * thread from /state, with the payload the owner can re-hash.
+   *
+   * The green seal comes from `renderReceipt`, which draws it only from an
+   * outcome of 'verified' and only with a receipt id in hand. There is no path
+   * from this click to a green anything.
+   */
+  function saveTurn(t) {
+    const m = el('div', 'msg me');
+    const who = el('div', 'who');
+    add(who, el('span', null, 'you · code pane'));
+    add(who, el('span', 'mchip', `${t.tier} · ${t.path}`));
+    add(m, who);
+
+    const bub = el('div', 'bub');
+    if (t.receipt) {
+      add(bub, el('div', null,
+        `The kernel judged this edit routine (${t.tier}) and committed it — so it did not stop to ask, and it is not waiting on you. Here is the receipt it wrote.`));
+      add(bub, renderReceipt(t.receipt));
+    } else {
+      add(bub, el('div', null,
+        `This edit is held at ${t.tier}. It has NOT been written to the sandbox: the capsule below carries the exact bytes, and nothing lands until you approve it there or in Command.`));
+    }
+    if (t.secretWarning && t.secretWarning.count > 0) {
+      add(bub, renderNote(
+        `The sanitizer found ${t.secretWarning.count} ${t.secretWarning.count === 1 ? 'thing that looks like a secret' : 'things that look like secrets'} in these bytes (${(t.secretWarning.kinds || []).join(', ')}). That is why this needs a decision.`,
+        'rd',
+      ));
+    }
+    add(m, bub);
+    return m;
+  }
+
+  /* ---- code in the conversation, coloured by monaco --------------------- *
+   * The agent's output arrives as one string, and most of it is log, not code.
+   * Exactly two shapes inside it are code AND carry their own language:
+   *
+   *   ===FILE: path ===  …  ===END===   the harness's emit blocks. The language
+   *                                     is whatever monaco says that PATH is.
+   *   ``` lang  …  ```                  a fenced block whose tag monaco knows.
+   *
+   * Those two are colourised. Everything else stays a plain <pre>, because
+   * guessing a language for arbitrary log output would mis-colour real text —
+   * the same rule the old hand-rolled lexer followed, applied to a better
+   * tokeniser. A fence whose tag monaco does not recognise is left plain and
+   * keeps its tag visible, so the absence of colour is explained rather than
+   * mysterious. */
+
+  /** The monaco language id for a fence tag, by id or alias. null if unknown. */
+  function monacoLang(tag) {
+    const m = monacoIfLoaded();
+    const want = String(tag || '').trim().toLowerCase();
+    if (!m || want === '') return null;
+    for (const lang of m.languages.getLanguages()) {
+      if (String(lang.id).toLowerCase() === want) return lang.id;
+      if (Array.isArray(lang.aliases) && lang.aliases.some((a) => String(a).toLowerCase() === want)) return lang.id;
+    }
+    return null;
+  }
+
+  function preBlock(text) {
+    const body = text.replace(/^\s*\n/, '').replace(/\s+$/, '');
+    if (body === '') return null;
+    const pre = el('pre');
+    pre.textContent = body;
+    return pre;
+  }
+
+  function codeBlock(text, lang, label) {
+    const box = el('div', 'fgcode');
+    if (label) {
+      const h = el('div', 'fgcode-h');
+      add(h, el('span', 'fgcode-p', label));
+      if (lang) add(h, el('span', 'fgcode-l', lang));
+      add(box, h);
+    }
+    const pre = el('pre');
+    pre.textContent = String(text).replace(/\s+$/, '');
+    add(box, pre);
+    const m = monacoIfLoaded();
+    // colorizeElement reads the node's own textContent, tokenises it and writes
+    // back ESCAPED markup. The bytes were put there with textContent and never
+    // leave this file as a string that becomes markup.
+    if (lang && m) {
+      void m.editor
+        .colorizeElement(pre, { theme: ZENO_THEME, mimeType: lang, tabSize: 2 })
+        .catch(() => { /* uncoloured is a fine outcome; wrong colours are not */ });
+    }
+    return box;
+  }
+
+  function logBlocks(log) {
+    const frag = document.createDocumentFragment();
+    const re = /===FILE:\s*(\S+)\s*===\r?\n([\s\S]*?)\r?\n===END===|```([A-Za-z0-9_+#.-]*)[ \t]*\r?\n([\s\S]*?)```/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(log)) !== null) {
+      if (m.index > last) add(frag, preBlock(log.slice(last, m.index)));
+      if (m[1] !== undefined) add(frag, codeBlock(m[2], languageForPath(m[1]), m[1]));
+      else add(frag, codeBlock(m[4], monacoLang(m[3]), m[3] || ''));
+      last = m.index + m[0].length;
+    }
+    if (last < log.length) add(frag, preBlock(log.slice(last)));
+    return frag;
+  }
+
   function agentTurn(t) {
     const m = el('div', 'msg me');
     const who = el('div', 'who');
@@ -1236,11 +1989,7 @@ export function initForge(section) {
 
     const bub = el('div', 'bub');
     if (t.note) add(bub, el('div', null, t.note));
-    if (t.log) {
-      const pre = el('pre');
-      pre.textContent = t.log;
-      add(bub, pre);
-    }
+    if (t.log) add(bub, logBlocks(t.log));
     if (!t.note && !t.log) add(bub, el('div', null, 'The agent returned without any output to show.'));
     add(m, bub);
 
@@ -1493,6 +2242,21 @@ export function initForge(section) {
     add(mode, document.createTextNode('mode: propose — Forge never approves'));
     bits.push(mode);
 
+    /* THE VIEW SWITCH. A real button in the status bar, because a shortcut
+       nobody can see is not a discoverable control — the shortcut is on it, in
+       its title and its label, rather than instead of it. It says what the OTHER
+       view is, which is the only useful thing for a control that toggles. */
+    const agentView = S.view === 'agent';
+    const vw = btn('chip fgview', null, () => setView(agentView ? 'ide' : 'agent'));
+    vw.dataset.state = agentView ? 'listening' : '';
+    vw.setAttribute('aria-pressed', agentView ? 'true' : 'false');
+    add(vw, glyph(agentView ? '▤' : '▣', 'chip-glyph'));
+    add(vw, document.createTextNode(agentView ? 'full IDE  ⌃⇧A' : 'agent only  ⌃⇧A'));
+    vw.title = agentView
+      ? 'Bring back the explorer, the code pane and the drawer. Ctrl+Shift+A.'
+      : 'Collapse the explorer, the code pane and the drawer, and give the whole window to the agent session — with every approval capsule in line. Ctrl+Shift+A.';
+    bits.push(vw);
+
     rgE.replaceChildren(...bits);
   }
 
@@ -1542,9 +2306,13 @@ export function initForge(section) {
    * stays put until the new contents land, so a reload does not blink the pane
    * empty the way opening a file does — this is a refresh, not an open.
    */
-  async function rereadOpenFile() {
+  async function rereadOpenFile(discardEdits) {
     const path = S.file;
     if (!path) return;
+    // A re-read never throws away unsaved edits on its own — modelFor guards
+    // them. `discardEdits` is the one case where that guard is deliberately
+    // lifted: the owner asked to revert, or their edit just landed on disk.
+    if (discardEdits === true) dirtyPaths.delete(path);
     const r = await api(`/forge/file?path=${encodeURIComponent(path)}`);
     if (S.file !== path) return;   // the owner opened something else mid-read
     if (!r.ok) {
@@ -1617,6 +2385,11 @@ export function initForge(section) {
    */
   function revealCaret() {
     if (!S.caret) return;
+    if (ed && ed.getModel()) {
+      ed.setPosition({ lineNumber: S.caret, column: 1 });
+      ed.revealLineInCenter(S.caret);
+      return;
+    }
     const code = rgB.querySelector('.code');
     if (!code) return;
     const row = code.querySelector(`.row[data-line="${S.caret}"]`);
@@ -1628,12 +2401,14 @@ export function initForge(section) {
   async function doRun() {
     if (!canRun()) return;
     const task = taskDraft.trim();
-    S.chat.push({ who: 'you', text: task });
+    S.chat.push({ who: 'you', text: task, at: new Date() });
     S.running = true;
+    S.runAt = new Date();
     taskDraft = '';
     S.insp = 'chat';
     paintC();
     paintE();
+    startRunClock();
 
     const body = { task, agentId: S.agentId };
     if (S.model) body.model = S.model;
@@ -1645,6 +2420,8 @@ export function initForge(section) {
     });
 
     S.running = false;
+    S.runAt = null;
+    stopRunClock();
 
     if (!r.ok) {
       // A failed request is not an agent turn. It is reported as what it is.
@@ -1703,6 +2480,10 @@ export function initForge(section) {
 
     paintC();
     void loadStatus();
+    // Whatever the run left waiting is now a real capsule on the daemon. Ask
+    // for it by its payload rather than drawing one from the run's summary —
+    // a capsule the owner cannot re-hash is a capsule they cannot approve.
+    void syncGates();
     // The file on screen may be one the run touched; re-read it rather than
     // leaving stale bytes under a fresh status bar.
     if (S.file) void openFile(S.file);
@@ -1804,8 +2585,286 @@ export function initForge(section) {
   }
 
   /* ================================================================ *
+   * 3b · the gate, made visible: inline capsules and the two views    *
+   * ================================================================ *
+   * THIS IS THE PAYOFF OF THE WHOLE PRODUCT, so it is worth saying what
+   * it is and what it is not.
+   *
+   * A capsule is not re-implemented here. `/capsule.js` is the component
+   * Command already uses — the one that re-hashes the binding in front of
+   * the owner, refuses to enable Approve when a field is unresolved,
+   * spends its Approve control after exactly one click, and draws a green
+   * seal only from a receipt whose outcome is 'verified'. Forge renders
+   * THAT component, with the same payload and the same /approvals
+   * endpoint. There is no second, friendlier approval path.
+   *
+   * WHERE THE CAPSULES COME FROM. Always GET /state, never a local guess:
+   * `pending` there carries each held preview WITH its exact payload,
+   * which is the only form a capsule can verify. A run's response and a
+   * save's response name an actionHash; /state is what turns that name
+   * into something the owner can check. So every capsule on this surface
+   * is one the daemon is really holding, and every capsule the daemon is
+   * really holding is on this surface — including ones raised by
+   * something other than Forge, which are labelled as what they are
+   * rather than filtered out.
+   *
+   * WHY A LIVE STREAM. A run that proposes at the END could be handled by
+   * polling once when it returns. A run that has to ASK MID-FLIGHT
+   * cannot: "may I run this command?" is a capsule that appears while the
+   * POST is still open, and an owner who has to wait for the run to
+   * finish before seeing it is not being asked, they are being told. So
+   * this subscribes to /stream and renders each `preview` the instant it
+   * is published. The kernel already has `shell.exec` and `net.fetch`
+   * action kinds; the moment the Forge agent proposes one, it arrives
+   * here through this same path and renders through the same capsule,
+   * with its own kind, tier and payload. NOTHING IS STUBBED FOR IT: there
+   * is no placeholder tool-call UI and no sample command in this file.
+   * The seam is that the capsule is kind-agnostic, which is a property of
+   * the component, not a promise made here.
+   */
+
+  const VIEW_KEY = 'zeno.forge.view';
+
+  /** The capsule node for an action hash, built once and reused across repaints. */
+  const gateNodes = new Map();
+  /** Hashes whose receipt has already been applied — applyReceipt is not idempotent. */
+  const receiptApplied = new Set();
+
+  /**
+   * Reconcile the session's capsules with what the daemon is actually holding.
+   *
+   * Adds a capsule for every held preview that has none yet, and settles every
+   * capsule that has left the held set: from its receipt when there is one, and
+   * as a plain "decided elsewhere" line when there is not. It never invents an
+   * outcome, and it never removes a capsule from the thread — a decision that
+   * was made is part of the session's history.
+   */
+  async function syncGates() {
+    if (!OWNER_TOKEN) return;
+    const r = await api('/state');
+    if (!r.ok) {
+      S.gatesErr = errText(r);
+      paintC();
+      return;
+    }
+    S.gatesErr = null;
+    const pending = Array.isArray(r.data && r.data.pending) ? r.data.pending : [];
+    const receipts = Array.isArray(r.data && r.data.receipts) ? r.data.receipts : [];
+    const live = new Set();
+
+    for (const p of pending) {
+      const hash = p && typeof p.actionHash === 'string' ? p.actionHash : null;
+      if (!hash) continue;
+      live.add(hash);
+      if (gateNodes.has(hash)) continue;
+      // The payload travels with the preview precisely so the capsule can
+      // re-hash it. Passing it is what makes Approve reachable at all.
+      const node = renderCapsule(p, {
+        payload: p.payload,
+        ownerToken: OWNER_TOKEN,
+        endpoint: '/approvals',
+      });
+      gateNodes.set(hash, node);
+      S.gates.push({
+        hash,
+        at: new Date(),
+        tier: p.tier,
+        kind: (p.binding && p.binding.kind) || 'unknown-kind',
+        summary: p.summary || '',
+        settled: false,
+        outcome: null,
+      });
+    }
+
+    for (const g of S.gates) {
+      if (g.settled || live.has(g.hash)) continue;
+      g.settled = true;
+      const rc = receipts.find((x) => x && x.actionHash === g.hash) || null;
+      g.outcome = rc ? String(rc.outcome || 'outcome unknown') : null;
+      const node = gateNodes.get(g.hash);
+      if (rc && node && typeof node.applyReceipt === 'function' && !receiptApplied.has(g.hash)) {
+        receiptApplied.add(g.hash);
+        node.applyReceipt(rc);
+      }
+    }
+    paintC();
+  }
+
+  /** How many capsules on this surface are still owed a decision. */
+  function gatesWaiting() {
+    return S.gates.filter((g) => !g.settled).length;
+  }
+
+  /**
+   * One capsule in the thread, with a line above it saying where it came from
+   * and when. The capsule itself is the component from /capsule.js, built once
+   * and re-appended on every repaint — rebuilding it would restart its
+   * countdown and, worse, resurrect an Approve control that had been spent.
+   */
+  function gateBlock(g) {
+    const box = el('div', 'fgate');
+    box.dataset.settled = g.settled ? '1' : '0';
+    const head = el('div', 'fghead');
+    add(head, glyph('◈', 'fgglyph'));
+    add(head, el('span', 'fgwho', g.settled ? 'decided' : 'the kernel is asking'));
+    add(head, el('span', 'fgkind', `${g.kind} · ${g.tier}`));
+    add(head, el('span', 'sp'));
+    add(head, el('span', 'fgat', clock(g.at)));
+    add(box, head);
+    const node = gateNodes.get(g.hash);
+    if (node) add(box, node);
+    if (g.settled && g.outcome === null) {
+      add(box, renderNote(
+        'This action is no longer held by the daemon and no receipt for it is in the ledger, so what became of it cannot be shown from here. Command’s timeline is the record.',
+      ));
+    }
+    return box;
+  }
+
+  /* ---- the live subscription -------------------------------------------- *
+   * A second reader on /stream, beside the one Command holds. It is a plain
+   * EventSource rather than app.js's authenticated fetch reader, and that is a
+   * deliberate, smaller contract: it cannot send a Last-Event-Id header, so it
+   * cannot do gap accounting — and it does not need to, because it never uses
+   * the event's CONTENTS as state. Every event means the same thing here: "ask
+   * /state again". The daemon is the record; this is only a doorbell.
+   *
+   * It authenticates on the owner cookie, which is same-origin and rides along
+   * automatically. A window with no owner token never opens it — an endlessly
+   * retrying 401 is worse than no stream. */
+  function openStream() {
+    if (!OWNER_TOKEN || typeof EventSource !== 'function') return;
+    let es;
+    try {
+      es = new EventSource('/stream');
+    } catch {
+      return;
+    }
+    const ring = () => { void syncGates(); };
+    es.addEventListener('preview', ring);
+    es.addEventListener('gap', ring);
+    es.addEventListener('chain', ring);
+    es.addEventListener('receipt', (ev) => {
+      let rc = null;
+      try {
+        rc = JSON.parse(ev.data);
+      } catch {
+        rc = null;
+      }
+      if (rc && typeof rc.actionHash === 'string' && !receiptApplied.has(rc.actionHash)) {
+        const node = gateNodes.get(rc.actionHash);
+        if (node && typeof node.applyReceipt === 'function') {
+          receiptApplied.add(rc.actionHash);
+          node.applyReceipt(rc);
+        }
+      }
+      void syncGates();
+      void loadStatus();
+    });
+    es.addEventListener('open', () => {
+      if (S.streamDown) { S.streamDown = false; paintC(); }
+      void syncGates();
+    });
+    es.addEventListener('error', () => {
+      // EventSource retries on its own. Say the connection is down rather than
+      // letting the thread imply nothing has happened since.
+      if (!S.streamDown) { S.streamDown = true; paintC(); }
+    });
+  }
+
+  /* ---- the two views ----------------------------------------------------- *
+   * IDE — the five regions, unchanged.
+   * AGENT — rgA, rgB and rgD collapse and rgC takes the whole window: one
+   *         column of conversation, at a readable measure, with the approval
+   *         capsules in line. The CSS owns the layout (one attribute on :root,
+   *         exactly as the drawer's collapsed state works); this owns the
+   *         attribute, the preference and the two things that must be told the
+   *         window changed shape — the editor, which measures itself, and the
+   *         composer, which should have the caret when the chat is the window. */
+
+  function setView(next) {
+    S.view = next === 'agent' ? 'agent' : 'ide';
+    R.setAttribute('data-forge-view', S.view);
+    try {
+      localStorage.setItem(VIEW_KEY, S.view);
+    } catch {
+      /* a browser that refuses storage simply does not remember the choice */
+    }
+    paintC();
+    paintE();
+    if (ed) requestAnimationFrame(() => ed.layout());
+    if (S.view === 'agent') {
+      const inp = rgC.querySelector('#zf-task');
+      if (inp && !inp.disabled) inp.focus();
+    }
+  }
+
+  function restoreView() {
+    let v = null;
+    try {
+      v = localStorage.getItem(VIEW_KEY);
+    } catch {
+      v = null;
+    }
+    S.view = v === 'agent' ? 'agent' : 'ide';
+    R.setAttribute('data-forge-view', S.view);
+  }
+
+  /* ---- the run clock ----------------------------------------------------- *
+   * The one honest number available while a run is in flight. /forge/run is a
+   * single POST that returns at the END — the daemon streams no token, no step
+   * and no percentage — so the only thing this window can truthfully report is
+   * how long it has been waiting. It updates the one text node it owns rather
+   * than repainting the thread, so a run in flight does not fight the scroll. */
+  let runClock = null;
+
+  function elapsedLabel() {
+    if (!S.runAt) return '0s';
+    const s = Math.max(0, Math.round((Date.now() - S.runAt.getTime()) / 1000));
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+  }
+
+  function startRunClock() {
+    stopRunClock();
+    runClock = setInterval(() => {
+      const n = rgC.querySelector('.fgrun-el');
+      if (n) n.textContent = elapsedLabel();
+    }, 1000);
+  }
+
+  function stopRunClock() {
+    if (runClock !== null) clearInterval(runClock);
+    runClock = null;
+  }
+
+  /** The in-flight turn. Honest about what it does and does not know. */
+  function runningBlock() {
+    const m = el('div', 'msg me fgrunning');
+    m.setAttribute('aria-live', 'polite');
+    const who = el('div', 'who');
+    add(who, el('span', null, 'Zeno Forge'));
+    add(who, el('span', 'mchip', `${S.agentId}${S.model ? ' · ' + S.model : ''}`));
+    add(m, who);
+    const bub = el('div', 'bub');
+    const row = el('div', 'fgrun');
+    const spin = el('span', 'fgspin');
+    spin.setAttribute('aria-hidden', 'true');
+    add(row, spin, el('span', 'fgrun-lb', 'running'), el('span', 'sp'), el('span', 'fgrun-el', elapsedLabel()));
+    add(bub, row);
+    add(bub, el('div', null,
+      'The agent runs headless in a throwaway worktree and answers once, at the end. ' +
+      'The daemon streams no progress from it, so nothing here measures any — the clock is ' +
+      'wall time since the task was sent, and it is the only number this window actually has. ' +
+      'Anything the run stops to ask permission for appears below as a capsule the moment it is proposed.'));
+    add(m, bub);
+    return m;
+  }
+
+  /* ================================================================ *
    * 4 · first paint, then the live reads                              *
    * ================================================================ */
+
+  restoreView();
 
   paintA();
   paintB();
@@ -1814,6 +2873,40 @@ export function initForge(section) {
   paintE();
   void loadStatus();
   void loadAgents();
+  void syncGates();
+  openStream();
+
+  /* THE SHORTCUT. Registered on the document as well as inside the editor,
+     because the editor is exactly the thing the agent-only view hides — a key
+     that only works while the code pane has focus could never be used to get
+     back. Guarded on `section.hidden`, which is how nav.js shows a surface, so
+     it is inert while Command or Counsel is on screen. */
+  document.addEventListener('keydown', (ev) => {
+    if (section.hidden) return;
+    if (!(ev.ctrlKey || ev.metaKey) || !ev.shiftKey || ev.altKey) return;
+    if (String(ev.key).toLowerCase() !== 'a') return;
+    ev.preventDefault();
+    setView(S.view === 'agent' ? 'ide' : 'agent');
+  });
+
+  /* A capsule that reaches a receipt changes two things this surface shows: the
+     working tree, and possibly the bytes of the file in the pane. Both are
+     re-read from the daemon rather than assumed. The event bubbles out of the
+     capsule component, so this catches an approval made in line here. */
+  rgC.addEventListener('zeno:receipt', (ev) => {
+    const rc = ev.detail && ev.detail.receipt;
+    if (rc && typeof rc.actionHash === 'string') receiptApplied.add(rc.actionHash);
+    void loadStatus();
+    void rereadOpenFile(true);
+    void syncGates();
+  });
+
+  /* Coming back to Forge from another surface: the window may have been
+     resized while it was hidden, and monaco measures itself against a box that
+     had none. */
+  section.addEventListener('zeno:surface-shown', () => {
+    if (ed) requestAnimationFrame(() => ed.layout());
+  });
 }
 
 /* nav.js looks up `mod.init || mod.default`; the brief names the export
