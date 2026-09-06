@@ -70,6 +70,14 @@ export {
   type PermissionRequest,
 } from './permission.js';
 export {
+  GATE_ENV_RUN,
+  GATE_ENV_TOKEN,
+  GATE_ENV_URL,
+  gateBridgePath,
+  gateEnv,
+  gateMcpConfig,
+} from './gate-config.js';
+export {
   AUTO_APPROVED_REFUSAL,
   TOOL_TARGET_PREFIX,
   kernelGate,

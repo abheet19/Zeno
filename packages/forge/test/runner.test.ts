@@ -197,7 +197,14 @@ test('ARGV — no argument the CLI treats as a list ever sits against the guard'
       if (at === -1) continue;
       assert.equal(args.length > at + 1, true, `${variadic} has a value`);
       assert.notEqual(args[at + 1], '--', `${variadic} never has the guard as its value`);
-      assert.equal(args[at + 1]!.includes(' '), false, `${variadic}'s value is ONE token — a space would let the CLI split it`);
+    }
+    // The three tool lists are documented as "comma OR space separated", so a
+    // space inside one would be read as a second member. They are comma-joined
+    // and must contain none.
+    for (const list of ['--tools', '--allowedTools', '--disallowedTools']) {
+      const at = args.indexOf(list);
+      if (at === -1) continue;
+      assert.equal(args[at + 1]!.includes(' '), false, `${list}'s value is ONE token — a space would let the CLI split it`);
     }
   }
 });
