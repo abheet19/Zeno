@@ -8,7 +8,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @abheet19/zeno-kernel && npm run build -w @abheet19/zeno-intake && npm run build -w @abheet19/zeno-vault && npm run build -w @abheet19/zeno-sanitizer && npm run build -w @abheet19/zeno-voice && npm run build -w @abheet19/zeno-mesh && npm run build -w @abheet19/zeno-counsel && npm run build -w @abheet19/zeno-forge && npm run build -w @abheet19/zeno-skills && npm run build -w @abheet19/zeno-mcp && npm run build -w @abheet19/zeno-assistant && npm run build -w @abheet19/zeno-daemon && npm run build -w @abheet19/zeno-cli",
+    "vendor:monaco": "node tools/vendor-monaco.mjs",
+    "build": "npm run vendor:monaco && npm run build -w @abheet19/zeno-kernel && npm run build -w @abheet19/zeno-intake && npm run build -w @abheet19/zeno-vault && npm run build -w @abheet19/zeno-sanitizer && npm run build -w @abheet19/zeno-voice && npm run build -w @abheet19/zeno-mesh && npm run build -w @abheet19/zeno-counsel && npm run build -w @abheet19/zeno-forge && npm run build -w @abheet19/zeno-skills && npm run build -w @abheet19/zeno-mcp && npm run build -w @abheet19/zeno-assistant && npm run build -w @abheet19/zeno-daemon && npm run build -w @abheet19/zeno-cli",
     "check": "npm run check -w @abheet19/zeno-kernel && npm run check -w @abheet19/zeno-intake && npm run check -w @abheet19/zeno-vault && npm run check -w @abheet19/zeno-sanitizer && npm run check -w @abheet19/zeno-voice && npm run check -w @abheet19/zeno-mesh && npm run check -w @abheet19/zeno-counsel && npm run check -w @abheet19/zeno-forge && npm run check -w @abheet19/zeno-skills && npm run check -w @abheet19/zeno-mcp && npm run check -w @abheet19/zeno-assistant && npm run check -w @abheet19/zeno-daemon && npm run check -w @abheet19/zeno-cli",
     "demo": "npm run build --silent && node packages/cli/dist/src/main.js demo",
     "ledger:verify": "npm run build --silent && node packages/cli/dist/src/main.js verify",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "electron": "^44.2.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "monaco-editor": "^0.56.0"
   }
 }
