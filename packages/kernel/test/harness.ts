@@ -10,6 +10,7 @@ import type {
   DataZone,
   World,
 } from '../src/types.js';
+import { ACTION_KINDS, DATA_ZONES } from '../src/types.js';
 import { hashOf } from '../src/hash.js';
 
 /** mulberry32 — tiny, fast, seedable PRNG. */
@@ -57,28 +58,16 @@ export class TestWorld implements World {
   }
 }
 
-export const ALL_KINDS: readonly ActionKind[] = [
-  'read',
-  'local.write',
-  'patch.task',
-  'vcs.commit',
-  'vcs.push',
-  'vcs.mr',
-  'jira.write',
-  'message.send',
-  'settings.change',
-  'payment',
-  'destructive',
-];
+/**
+ * Every kind and every zone, DERIVED from the source of truth rather than
+ * re-typed beside it. A hand-kept copy drifts the moment a kind is added, and it
+ * drifts silently: the property tests keep passing while quietly never
+ * exercising the new kind at all. `shell.exec` and `net.fetch` were added and
+ * this list did not notice — hence the derivation.
+ */
+export const ALL_KINDS: readonly ActionKind[] = ACTION_KINDS;
 
-export const ALL_ZONES: readonly DataZone[] = [
-  'personal',
-  'company',
-  'cloud',
-  'external',
-  'financial',
-  'ephemeral',
-];
+export const ALL_ZONES: readonly DataZone[] = DATA_ZONES;
 
 let reqSeq = 0;
 

@@ -18,6 +18,17 @@ export const ACTION_KINDS = [
   'read', // no external effect              -> T0
   'local.write', // isolated worktree/scratch write  -> T0
   'patch.task', // scoped-marker patch handoff      -> T1
+  // A command runs on the owner's REAL machine. Not a file write and not a
+  // network call: its blast radius is "everything this user account can do", and
+  // no jail bounds it once it starts. Named as its own kind because a receipt
+  // that recorded `npm test` as a `settings.change` would be evidence of the
+  // wrong thing, and because the tier for "run anything" is not the tier for
+  // any of the kinds that existed before it.
+  'shell.exec', //                             -> T3
+  // Bytes leave this machine, or arrive from off it. The one governed effect
+  // with no undo: an approval that turns out to be a mistake can be refused
+  // next time, but the bytes that already left cannot be recalled.
+  'net.fetch', //                              -> T2
   'vcs.commit',
   'vcs.push',
   'vcs.mr',

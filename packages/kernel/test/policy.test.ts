@@ -36,6 +36,37 @@ test('classify: company zone does not raise by default; financial forces T4', ()
   assert.ok(b.reasons.some((r) => /financial/.test(r)));
 });
 
+test('the two agent-tool kinds are approvable, and never routine', () => {
+  const world = new TestWorld();
+  // `shell.exec` — a command on the owner's real machine. T3: approvable, but at
+  // the top of the approvable range and above every kind whose damage is bounded.
+  const shell = classify(buildRequest(world, { kind: 'shell.exec', zones: ['personal'] }), DEFAULT_POLICY);
+  assert.equal(shell.tier, 'T3');
+  // `net.fetch` — bytes leaving the machine. T2 is the first tier that demands
+  // an authenticator, which is the line that matters: nothing about egress can
+  // ever be auto-applied.
+  const net = classify(buildRequest(world, { kind: 'net.fetch', zones: ['external'] }), DEFAULT_POLICY);
+  assert.equal(net.tier, 'T2');
+  for (const c of [shell, net]) {
+    assert.ok(tierRank(c.tier) >= tierRank('T1'), 'neither may ever fall into the auto-applied T0 band');
+  }
+});
+
+test('a policy that has never heard of the agent-tool kinds refuses to load', () => {
+  // The fail-closed half. An owner carrying forward a policy.json written before
+  // these kinds existed must be stopped, not quietly run with a gap — a kind the
+  // policy does not mention is a kind whose tier nobody chose.
+  for (const missing of ['shell.exec', 'net.fetch'] as const) {
+    const kindTier: Record<string, unknown> = { ...DEFAULT_POLICY.kindTier };
+    delete kindTier[missing];
+    assert.throws(
+      () => validatePolicy({ ...DEFAULT_POLICY, kindTier } as unknown as Policy),
+      (e) => e instanceof PolicyError && e.message.includes(missing),
+      `a policy with no tier for "${missing}" must refuse to load`,
+    );
+  }
+});
+
 test('committing an unknown (never previewed) action throws', async () => {
   const k = new Kernel(new TestWorld());
   await assert.rejects(() => k.commit('deadbeef', okExecutor()), (e) => e instanceof PolicyError && e.code === 'unknown-action');

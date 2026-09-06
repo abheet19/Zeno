@@ -27,7 +27,7 @@ export interface Policy {
 
 /** The default, reviewable policy. A signed override file replaces this later. */
 export const DEFAULT_POLICY: Policy = {
-  version: '2026-08-29.1',
+  version: '2026-09-07.1',
   kindTier: {
     read: 'T0',
     'local.write': 'T0',
@@ -36,8 +36,17 @@ export const DEFAULT_POLICY: Policy = {
     'jira.write': 'T2',
     'vcs.push': 'T2',
     'message.send': 'T2',
+    // Egress sits with the other "it left the machine" kinds, and for the same
+    // reason: T2 is the first tier that demands an authenticator, and the bytes
+    // are gone the instant the call is made.
+    'net.fetch': 'T2',
     'vcs.mr': 'T3',
     'settings.change': 'T3',
+    // Running a command is rated at the top of the approvable range, above
+    // every kind whose damage is bounded by a known target. `npm test` and
+    // `rm -rf ~` are the same action kind; only the owner reading the exact
+    // command tells them apart, so the tier assumes the worse of the two.
+    'shell.exec': 'T3',
     destructive: 'T3',
     payment: 'T4',
   },
