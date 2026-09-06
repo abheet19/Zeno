@@ -19,6 +19,14 @@
  */
 import { chooseAgent, type Agent, type AgentId, type Effort } from './agents.js';
 import { STATUS_ARGS, parsePorcelainZ } from './status.js';
+import {
+  GATE_TOOL,
+  NEVER_TOOLS,
+  WORKTREE_READ_TOOLS,
+  WORKTREE_WRITE_TOOLS,
+  preApprovedTools,
+  toolSurface,
+} from './tools.js';
 
 /** What the injected spawner reports for one process. It never throws. */
 export interface SpawnResult {
@@ -46,15 +54,33 @@ export interface SpawnOptions {
   readonly cwd: string;
   /** Hard ceiling for this one invocation, in milliseconds. Adapter default otherwise. */
   readonly timeoutMs?: number;
+  /**
+   * Extra environment for the child, layered over the parent's.
+   *
+   * It exists for exactly one thing: handing the agent process the run-scoped
+   * credential its permission host presents when it asks the owner a question.
+   * That credential travels in the ENVIRONMENT rather than on the command line
+   * or in a config file, because argv is world-readable in a process listing and
+   * a config file inside the worktree is a file the agent can read.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
- * The process boundary as one injectable function. Synchronous and total: a
+ * The process boundary as one injectable function. ASYNCHRONOUS and total: a
  * missing binary, a crash or a refused argument all come back as a `SpawnResult`
  * (with `failedToSpawn: true`), never as a thrown error.
+ *
+ * Async is not a style choice, it is the thing that makes a governed run
+ * possible at all. A run now asks the owner questions WHILE it runs — every
+ * command the agent wants to execute becomes a capsule the owner clicks — and
+ * the process that must serve that click is the same one that started the
+ * agent. A blocking spawn holds that process for the length of the run, so the
+ * agent would wait on an answer from a daemon that cannot answer until the agent
+ * finishes. The gate would deadlock on itself.
  */
 export interface Spawner {
-  run(command: string, args: readonly string[], opts: SpawnOptions): SpawnResult;
+  run(command: string, args: readonly string[], opts: SpawnOptions): Promise<SpawnResult>;
 }
 
 /**
@@ -71,6 +97,31 @@ export const CLAUDE_BINARY = 'claude';
 /** What the local rung reports until a model runtime is wired in. */
 export const LOCAL_NOT_CONFIGURED = 'local model runtime not configured';
 
+/**
+ * How a run reaches the kernel for the calls that can escape its worktree.
+ *
+ * Its PRESENCE is what widens the tool surface. Without it a run gets the
+ * file-only grant Forge has always had and anything that would prompt is denied
+ * outright; with it the run gets Bash — and every command stops at a capsule.
+ * There is deliberately no way to widen the surface without also naming the host
+ * that governs it, because "more tools" and "a gate on them" must not be two
+ * settings that can drift apart.
+ */
+export interface GateWiring {
+  /**
+   * The `--mcp-config` value publishing Forge's permission host: a path to a
+   * JSON file, or the JSON itself. Forge constructs it; it never comes from the
+   * task.
+   */
+  readonly mcpConfig: string;
+  /**
+   * Grant the network-egress tools for this run. Defaults to FALSE — see the
+   * README's "what can reach the internet". Even when true every call is still
+   * governed one at a time; this only decides whether the tools exist.
+   */
+  readonly network?: boolean;
+}
+
 /** What one run needs: which agent, an optional model/effort, the task, the worktree. */
 export interface RunSpec {
   readonly agentId: string;
@@ -81,6 +132,10 @@ export interface RunSpec {
   readonly task: string;
   /** Absolute path to the isolated worktree the agent runs inside. */
   readonly worktree: string;
+  /** The kernel-backed permission host. Omit it and the run stays file-only. */
+  readonly gate?: GateWiring;
+  /** Environment handed to the agent process — the run-scoped gate credential. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -135,19 +190,86 @@ export function agentArgv(agent: Agent, spec: RunSpec): string[] {
   const model = spec.model?.trim();
   if (model !== undefined && model !== '') argv.push('--model', model);
   if (agent.supportsEffort && spec.effort !== undefined) argv.push('--effort', spec.effort);
-  // Let it actually EDIT. Headless claude will not touch the filesystem without
-  // being told which tools it may use, so without this it answered in prose and
-  // changed nothing — a coding agent that cannot write is not one. The grant is
-  // deliberately NARROW: read, write and search inside the worktree it was given.
-  // Bash is NOT granted; this agent proposes file changes, it does not run
-  // commands. And the grant is safe because the worktree is a throwaway — every
-  // file it writes still returns as an approval capsule the owner must accept.
-  if (agent.id === 'claude-code') {
-    argv.push('--allowedTools', 'Read,Write,Edit,Glob,Grep');
-  }
+  if (agent.id === 'claude-code') argv.push(...claudeToolFlags(spec.gate));
   // End-of-options: the task is a positional PROMPT after this, never a flag.
   argv.push('--', spec.task);
   return argv;
+}
+
+/** A tool list as the CLI's variadic flags take it: ONE comma-joined element. */
+function joined(tools: readonly string[]): string {
+  return tools.join(',');
+}
+
+/**
+ * The tool-surface flags, in the order they are safe to emit.
+ *
+ * Every one of them is built HERE, out of constants in this package. Not one is
+ * derived from the task, the model name or anything else a caller supplies, so
+ * the `--` guard below is not the only thing standing between an untrusted
+ * string and a real option — there is nothing upstream of these flags to inject
+ * into.
+ *
+ * ORDER MATTERS, and for a reason worth stating: `--tools`, `--allowedTools`,
+ * `--disallowedTools` and `--mcp-config` are all VARIADIC in the CLI, so each
+ * one keeps swallowing argv elements until it meets something that looks like
+ * an option. Every value is therefore a single comma-joined token, and the LAST
+ * flag emitted is the boolean `--strict-mcp-config` — so the element sitting
+ * immediately before the end-of-options `--` can never be a variadic still
+ * looking for more. The `--` would stop them anyway; this means it does not have
+ * to be the only thing that does.
+ *
+ * WITHOUT A GATE, the surface is the file-only one Forge has always had, and
+ * `--permission-prompts none` now states in the argv what used to be true only
+ * by geometry: nothing may prompt, so nothing can be granted mid-run. That is
+ * strictly tighter than the old invocation, which left the CLI's default host
+ * behaviour in play and relied on the tool list alone.
+ *
+ * WITH A GATE, the surface widens to include Bash — and every call that could
+ * escape the worktree is routed to Forge's own permission host, which turns it
+ * into an approval capsule. The two things move together on purpose: there is
+ * no argument shape in which the tools widen and the gate does not appear.
+ *
+ * What is NEVER emitted, at any setting: `--allow-dangerously-skip-permissions`,
+ * `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` and
+ * `--add-dir`. The first three switch off the thing this product is; the last
+ * hands the file tools a second root outside the worktree.
+ */
+export function claudeToolFlags(gate: GateWiring | undefined): string[] {
+  if (gate === undefined) {
+    const fileOnly = [...WORKTREE_READ_TOOLS, ...WORKTREE_WRITE_TOOLS];
+    return [
+      // The surface a tool may be drawn from. A tool absent here does not exist
+      // for this run, which is a stronger statement than "it would be refused".
+      '--tools', joined(fileOnly),
+      // …and every one of them is pre-granted, because a write in a throwaway
+      // worktree is not a decision: it becomes an approval capsule afterwards.
+      '--allowedTools', joined(fileOnly),
+      // Nobody is listening, so nothing may ask. Anything that would prompt is
+      // denied automatically rather than left to a default.
+      '--permission-prompts', 'none',
+      // No ambient MCP server joins a run. With no --mcp-config, this is "none".
+      '--strict-mcp-config',
+    ];
+  }
+  const network = gate.network === true;
+  return [
+    // Permission decisions are delegated to a host — Zeno — instead of being
+    // auto-denied, and the host is named as a specific MCP tool.
+    '--permission-prompts', 'host',
+    '--permission-prompt-tool', GATE_TOOL,
+    '--mcp-config', gate.mcpConfig,
+    '--tools', joined(toolSurface(network)),
+    // The pre-granted subset. Bash is in the surface and deliberately NOT here,
+    // which is what makes every command stop at the host.
+    '--allowedTools', joined(preApprovedTools()),
+    // Off entirely, at any approval: the subagent tool, and the permission host
+    // itself — see NEVER_TOOLS for why each one.
+    '--disallowedTools', joined(NEVER_TOOLS),
+    // Only the host published above. No MCP server the machine happens to have
+    // configured joins a governed run.
+    '--strict-mcp-config',
+  ];
 }
 
 /** Combine the two streams into one readable log, dropping an empty one. */
@@ -170,7 +292,7 @@ function detail(r: SpawnResult): string {
  * could not be enumerated. In none of these does the function crash, and in none
  * does it invent a success.
  */
-export function runAgent(spec: RunSpec, spawner: Spawner): RunResult {
+export async function runAgent(spec: RunSpec, spawner: Spawner): Promise<RunResult> {
   const agent = chooseAgent(spec.agentId);
   const trimmedModel = spec.model?.trim();
   const model = trimmedModel !== undefined && trimmedModel !== '' ? trimmedModel : null;
@@ -187,7 +309,10 @@ export function runAgent(spec: RunSpec, spawner: Spawner): RunResult {
   // exit 127 is a FAILED RUN whose changeset we still enumerate below, not a
   // missing binary. Reading the sentinel off `code` would fabricate the latter
   // from the former and silently drop the files that run left behind.
-  const run = spawner.run(CLAUDE_BINARY, agentArgv(agent, spec), { cwd: spec.worktree });
+  const run = await spawner.run(CLAUDE_BINARY, agentArgv(agent, spec), {
+    cwd: spec.worktree,
+    ...(spec.env ? { env: spec.env } : {}),
+  });
   const log = mergeStreams(run);
   if (run.failedToSpawn) {
     return {
@@ -204,7 +329,7 @@ export function runAgent(spec: RunSpec, spawner: Spawner): RunResult {
 
   // The agent ran (cleanly or not). Enumerate what it changed for the gate,
   // through the SAME spawner and with a READ-ONLY git verb only.
-  const status = spawner.run('git', [...STATUS_ARGS], { cwd: spec.worktree });
+  const status = await spawner.run('git', [...STATUS_ARGS], { cwd: spec.worktree });
   if (status.failedToSpawn) {
     return {
       ...base,
