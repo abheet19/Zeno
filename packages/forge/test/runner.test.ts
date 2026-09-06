@@ -96,7 +96,7 @@ const GATED_FLAGS = [
   '--mcp-config', '/ws/zeno-gate.mcp.json',
   '--tools', 'Read,Glob,Grep,NotebookRead,Write,Edit,NotebookEdit,TodoWrite,ExitPlanMode,BashOutput,KillShell,Bash',
   '--allowedTools', 'Read,Glob,Grep,NotebookRead,Write,Edit,NotebookEdit,TodoWrite,ExitPlanMode,BashOutput,KillShell',
-  '--disallowedTools', `Task,${GATE_TOOL}`,
+  '--disallowedTools', `Task,Agent,${GATE_TOOL}`,
   '--strict-mcp-config',
 ];
 

@@ -117,8 +117,15 @@ export const GATE_TOOL = `${MCP_TOOL_PREFIX}${GATE_SERVER}__request_permission`;
  * capsule — but a model that can open capsules can also FABRICATE one, and an
  * owner reading "may I run npm test?" has no way to know no tool call is behind
  * it. Denying it keeps every capsule the owner sees attributable to a real call.
+ *
+ * `Task` and `Agent` are the SAME tool under two names: the CLI has carried both
+ * across versions, and an unrecognised name in `--tools` is silently ignored
+ * rather than refused — so a denial that named only one of them would quietly
+ * stop covering the subagent the day the other name won. Both are listed, and
+ * `classifyToolCall` refuses either. (The same silence is why naming a tool this
+ * CLI version does not have costs nothing: the surface simply does not gain it.)
  */
-export const NEVER_TOOLS: readonly string[] = ['Task', GATE_TOOL];
+export const NEVER_TOOLS: readonly string[] = ['Task', 'Agent', GATE_TOOL];
 
 /**
  * Shapes of command that are not merely "running something".
@@ -207,7 +214,7 @@ export function classifyToolCall(toolName: string, input: unknown): ToolVerdict 
     const why =
       name === GATE_TOOL
         ? 'the approval host is not a tool the agent may call — every capsule the owner sees must come from a real tool call'
-        : 'starting a second agent is not something this run can account for, so it is not available';
+        : 'starting a second agent is not something this run can account for, so it is not available under either of its names';
     return {
       gate: 'refused',
       kind: 'read',

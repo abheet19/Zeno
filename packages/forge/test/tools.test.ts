@@ -121,9 +121,15 @@ test('FAIL CLOSED — a request with no tool name is refused', () => {
 });
 
 test('the never-list is refused whatever anyone approves — subagents and the host itself', () => {
-  const task = classifyToolCall('Task', { prompt: 'do it for me' });
-  assert.equal(task.gate, 'refused');
-  assert.ok(task.reasons.some((r) => /second agent/i.test(r)));
+  // Both names, because they are the same tool and the CLI has carried each in
+  // turn. An unrecognised name in --tools is silently ignored rather than
+  // refused, so a denial naming only one would stop covering the subagent the
+  // day the other name won, and nothing would say so.
+  for (const name of ['Task', 'Agent']) {
+    const task = classifyToolCall(name, { prompt: 'do it for me' });
+    assert.equal(task.gate, 'refused', `${name} starts a second agent`);
+    assert.ok(task.reasons.some((r) => /second agent/i.test(r)));
+  }
 
   const self = classifyToolCall(GATE_TOOL, { tool_name: 'Bash', input: { command: 'rm -rf /' } });
   assert.equal(self.gate, 'refused', 'the agent may not call the thing that asks the owner questions');
