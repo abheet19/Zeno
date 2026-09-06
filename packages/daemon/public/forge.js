@@ -2717,11 +2717,28 @@ export function initForge(section) {
     at.title = 'When this window first saw this capsule. A held preview carries no timestamp of its own, so this is not necessarily when it was proposed.';
     add(head, at);
     add(box, head);
+    /* A TOOL CALL IS NOT A FILE WRITE, and the difference is worth one line.
+       `shell.exec` and `net.fetch` are the two kinds the kernel gates as an
+       effect on this machine rather than a change to a file, and the daemon
+       holds the agent's call open while the capsule is on screen: the run is
+       stopped, not queued. Saying so is the difference between the owner
+       reading at their own pace and the owner not knowing anyone is waiting.
+       The lapse rule is the daemon's own and is stated as it is written there:
+       an unanswered call is refused, never assumed. */
+    if (!g.settled && (g.kind === 'shell.exec' || g.kind === 'net.fetch')) {
+      add(box, renderNote(
+        'This is a tool call, not a file change: the run that asked is blocked on it right now. ' +
+        'Nothing happens until you approve — and if the call goes unanswered long enough it lapses, ' +
+        'which the daemon treats as a refusal. Silence is never taken for agreement.',
+      ));
+    }
     const node = gateNodes.get(g.hash);
     if (node) add(box, node);
     if (g.settled && g.outcome === null) {
       add(box, renderNote(
-        'This action is no longer held by the daemon and no receipt for it is in the ledger, so what became of it cannot be shown from here. Command’s timeline is the record.',
+        'This action is no longer held by the daemon and there is no receipt for it in the ledger. ' +
+        'It was decided somewhere else, or it lapsed unanswered — either way nothing was applied ' +
+        'on the strength of it, and nothing here can say which of the two it was.',
       ));
     }
     return box;
