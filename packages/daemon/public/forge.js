@@ -2709,7 +2709,13 @@ export function initForge(section) {
     add(head, el('span', 'fgwho', g.settled ? 'decided' : 'the kernel is asking'));
     add(head, el('span', 'fgkind', `${g.kind} · ${g.tier}`));
     add(head, el('span', 'sp'));
-    add(head, el('span', 'fgat', clock(g.at)));
+    // WHEN THIS WINDOW FIRST SAW IT, and it is labelled as that rather than as
+    // "when it was proposed". /state's held previews carry no timestamp, so for
+    // a capsule that was already waiting when this page loaded the only honest
+    // reading is the moment it arrived here.
+    const at = el('span', 'fgat', clock(g.at));
+    at.title = 'When this window first saw this capsule. A held preview carries no timestamp of its own, so this is not necessarily when it was proposed.';
+    add(head, at);
     add(box, head);
     const node = gateNodes.get(g.hash);
     if (node) add(box, node);
