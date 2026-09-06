@@ -50,6 +50,10 @@ $ zeno propose  package.json     "bump version"          # touches config
 $ zeno propose  package.json     "…"  --self-approve     # the agent tries to sign off
   403     proposed this action and so cannot also approve it
 
+# in Forge, the agent asks to run its tests
+  Bash    "npm test"                                      # tier T3 · one click
+  granted → ran once → receipted                          # the command is on the record too
+
 $ zeno verify
   SIGNATURES — all verified (Ed25519).
   VERIFIED — every link intact and every signature valid.
@@ -127,7 +131,7 @@ Three rules fall out of that, and they are the whole product:
 | **The gate** · `kernel` | classify → preview → approve → **one** attempt → signed receipt | Stable · heavily tested |
 | **Signed ledger** | Ed25519 signatures over a hash chain; `verify` checks **both** | Stable |
 | **⌘ Command** | live approval queue over resumable SSE with declared gaps | Working |
-| **⚒ Forge** | governed coding agent in a throwaway git worktree | Working |
+| **⚒ Forge** | governed coding agent in a throwaway git worktree — full tool surface, every escaping call gated | Working |
 | **◎ Counsel** | meeting notes where every item cites its source line | Working |
 | **Local models** | drives [Ollama](https://ollama.com) over loopback — offline, $0 | Working · best-effort |
 | **Mesh** · 2nd device | pairing, sealed envelopes, convergent replication | Protocol core · no phone app yet |
@@ -218,7 +222,8 @@ The governed coding agent.
 
 Point **Claude Code** or a **local open-source model** at a repo. It runs headless in a throwaway
 git worktree it cannot escape, and every file it touches returns as an ordinary approval capsule.
-Same gate, whichever model wrote it.
+It has the **real** tool surface — it can run your tests — and every command that could reach past
+the worktree stops at the same gate first. Same gate, whichever model wrote it.
 
 </td>
 <td width="33%" valign="top">
@@ -416,6 +421,7 @@ flowchart TB
     CMD & FRG & CNS --> API
     FRG -.-> OLL[ollama · loopback]
     FRG -.-> CC[claude code]
+    CC -.->|may I run this?| API
     GATE --> EX[jailed executors<br/>file · git]
 
     style GATE fill:#e8a33d,stroke:#e8a33d,color:#0a0c0e
@@ -431,7 +437,7 @@ flowchart TB
 |---|---|
 | `kernel` | The gate — tiers, policy, compare-and-swap, signed ledger, jailed executors |
 | `daemon` | Loopback server and the window; the process boundary that makes L6 structural |
-| `forge` | Headless agent runner, worktree isolation, the model/effort registry |
+| `forge` | Headless agent runner, worktree isolation, the model/effort registry, and the permission host that turns an escaping tool call into a capsule |
 | `counsel` | Meeting engine — cited decisions, action items, open questions |
 | `vault` | Governed local memory and the daily brief |
 | `sanitizer` | Secret detection and redaction before anything is stored or sent |
@@ -458,7 +464,7 @@ Zeno/
 ├─ packages/            twelve independently-testable packages
 │  ├─ kernel/           the gate — tiers, policy, compare-and-swap, signed ledger, jailed executors
 │  ├─ daemon/           loopback server + chromeless window — the boundary that makes L6 structural
-│  ├─ forge/            governed coding-agent runner + worktree isolation
+│  ├─ forge/            governed coding-agent runner + worktree isolation + the tool-call gate
 │  ├─ counsel/          meeting engine — cited decisions, action items, open questions
 │  ├─ vault/            governed local memory + daily brief
 │  ├─ sanitizer/        secret detection & redaction
@@ -486,7 +492,7 @@ npm run check     # typecheck · lint · tests · coverage gate
 ```
 
 The test suite is roughly the size of the source it guards — today `npm run check` runs
-**635 tests, 0 failing** across the checked packages — and the build fails on ambient non-determinism
+**more than a thousand tests** across the checked packages — and the build fails on ambient non-determinism
 in the kernel: a kernel that can read the clock is a kernel that cannot be replayed.
 
 Passing tests are not proof, so each component was attacked by reviewers whose job was to break it.
@@ -501,6 +507,12 @@ A sample of what that caught, and fixed:
   granted access outside the worktree.
 - **AES-GCM `open()` accepted a truncated auth tag**, dropping forgery resistance from 2¹²⁸ to 2³².
 - **Deleting the public key silently regenerated both keys**, orphaning every prior receipt.
+- **A policy could rate a shell command as routine**, and the agent's own permission host would
+  then have granted it with nobody asked. The host refuses instead: the tier model decides how
+  loud a capsule is, never whether there is one.
+- **Two runs of the same command were one action.** Content-addressing meant `npm test`, asked for
+  twice, collided with its own spent approval — so an ordinary command became permanently
+  un-runnable after its first approval.
 
 </details>
 
@@ -513,11 +525,13 @@ Zeno is local-first, not air-gapped. Being precise about this matters more than 
 **Nothing can reach *in*.** The daemon binds to `127.0.0.1` — not your network, not your router,
 not another machine. There is no inbound surface at all.
 
-**Outbound, exactly three things can leave, and only when you turn them on:**
+**Outbound, this is the whole list — and each line is something you switched on:**
 
 | What | When | Where it goes |
 |---|---|---|
 | **Claude Code** | Only if you pick it as the agent in Forge | Your task and code context go to Anthropic — inherent to choosing a hosted model |
+| **A command a Forge agent runs** | Only after you approve **that exact command**, once | Wherever the command itself goes. `npm test` goes nowhere; `npm install` reaches a registry; `curl` reaches whatever you read on the capsule and agreed to |
+| **`WebFetch` / `WebSearch`** | Only if you set `ZENO_FORGE_NETWORK=1`, **and then still approve every call** | The URL or query shown on the capsule. **Off by default** — see below |
 | **GitHub Issues** | Only if you set `ZENO_GITHUB_REPO` | `api.github.com`, read-only |
 | **Speech recognition** | Only while you hold-to-talk, or record in Counsel | Your *browser* sends the audio to its vendor. Not on-device |
 
@@ -532,6 +546,57 @@ $ grep -rn "https://" packages/*/src | grep -v api.github.com
 
 No telemetry, no crash reporting, no update check — **not configurable-off, simply absent.**
 
+<details>
+<summary><b>Forge's agent can run commands now. Exactly what that changed, and how to switch it off.</b></summary>
+
+<br>
+
+**What it used to be.** Forge gave the headless agent five file tools and nothing else, and the
+safety argument was geometric: the worktree is a throwaway, the tools cannot leave it, so nothing
+needed a decision. That argument was sound — and it was also why the agent could not run the test
+suite it had just written.
+
+**What it is now.** The tool surface is the real one, and the geometry is replaced by the gate
+rather than stretched. Every call is sorted by **what escapes**:
+
+| | Tools | What happens |
+|---|---|---|
+| **Routine** | `Read` `Glob` `Grep` `NotebookRead` `Write` `Edit` `NotebookEdit` `TodoWrite` `ExitPlanMode` `BashOutput` `KillShell` | Nothing. They cannot leave the throwaway worktree, and every file they write still becomes an approval capsule at the end of the run |
+| **Governed** | `Bash` — and `WebFetch` / `WebSearch` when you turn the network on | Each call stops. classify → preview → **you** approve → **one** attempt → a signed receipt naming the exact command. Per call, not per run |
+| **Refused** | `Task` (subagents), the permission host itself, and **anything unclassified** | Not available, at any approval |
+
+The last row is the one that matters most: a tool the CLI grows next month rounds **up** to a
+refusal, not down to routine. And a file tool that *asks* for permission is a file tool trying to
+leave the worktree, so reaching the host is itself the evidence — it is refused too.
+
+**Why network is off by default, and commands are not.** They fail differently. A command you
+approved and regret is a mistake you can see the consequences of and often undo; bytes that left
+the machine cannot be recalled by refusing the next call. `WebSearch` also fires constantly, and a
+gate that interrupts constantly is a gate that gets clicked through — which is the failure mode this
+whole product exists to prevent. `Bash` is the tool that makes a coding agent a coding agent, and
+one approval per command is a cost worth paying. Egress is not, unless you say so.
+
+**Switching it off.**
+
+| | |
+|---|---|
+| `ZENO_FORGE_NETWORK=1` | The only way `WebFetch` and `WebSearch` exist at all. Unset (the default) and they are not on the agent's command line |
+| `ZENO_FORGE_SHELL=0` | Puts Forge back to file-only: no `Bash`, no permission host, and `--permission-prompts none` so anything that would ask is denied outright |
+| *(nothing to set)* | MCP and browser tooling. A governed run is launched `--strict-mcp-config` with only Zeno's own permission host declared, so no MCP server the machine happens to have configured joins a run |
+
+**What a receipt for a command proves, exactly.** That you authorised *this* tool with *these*
+arguments, once. It does not prove what the command then did — the CLI runs it, and its output is
+in the run log like everything else. Claiming more would be claiming Zeno watched something it did
+not watch.
+
+**What never appears on the command line, at any setting:**
+`--allow-dangerously-skip-permissions`, `--dangerously-skip-permissions`,
+`--permission-mode bypassPermissions`, `--add-dir`. The first three switch off the thing this
+product is; the last hands the file tools a second root outside the worktree. A test asserts their
+absence over every argv shape Forge can build.
+
+</details>
+
 ---
 
 ## 🚧 What it doesn't do yet
@@ -544,6 +609,17 @@ I would rather you read this here than discover it in a demo.
   every time. Claude Code for capability; local for privacy and $0.
 - **Routine edits apply without asking.** The deliberate trade that prevents approval fatigue. An
   agent can never *approve* — but an ordinary edit inside its sandbox does go through. Always receipted.
+- **A tool call is approved, or ignored.** The capsule has an Approve control and no Decline
+  control yet, so today a command you do not want is refused by *not clicking* — it lapses, and a
+  lapse is a refusal, never a grant. The route to decline one outright exists (`POST
+  /forge/permissions/decline`, owner only); the button in the window does not.
+- **Subagents are off in Forge.** `Task` would start a second agent, and Forge cannot demonstrate
+  from outside the CLI that a subagent's calls arrive at the same permission host. It stays off
+  until that can be proved rather than assumed.
+- **A command's tier is pattern-matched, and patterns are not a sandbox.** `rm -rf` and anything
+  naming the ledger, keys, token or policy are rated louder. A command spelled to avoid every
+  pattern is still `shell.exec`, still T3, and still stops — the protection is that you read the
+  literal string, not that Zeno understood it.
 - **No connectors, model gateway or credential broker.** Out of scope for a $0, single-machine build.
 - **macOS is cut**, not deferred.
 

@@ -39,7 +39,10 @@ interface Harness {
   close(): Promise<void>;
 }
 
-async function start(permissionTimeoutMs = 30_000): Promise<Harness> {
+async function start(
+  permissionTimeoutMs = 30_000,
+  over: { readonly forgeShell?: boolean; readonly forgeNetwork?: boolean } = {},
+): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'zeno-gate-'));
   const sandbox = join(dir, 'sandbox');
   mkdirSync(sandbox, { recursive: true });
@@ -65,6 +68,7 @@ async function start(permissionTimeoutMs = 30_000): Promise<Harness> {
     publicDir: join(dir, 'public'),
     work: nodeWorkDesk(dir),
     permissionTimeoutMs,
+    ...over,
   });
   await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
   const addr = server.address() as AddressInfo;
@@ -240,6 +244,30 @@ void asked;
       // Let the run finish the only way it can: the owner says no.
       await api(h, '/forge/permissions/decline', h.owner, { actionHash: capsule.actionHash, reason: 'no' });
       await running;
+    });
+  } finally {
+    await h.close();
+  }
+});
+
+test('the off switch really is off — no gate, and nothing to ask with', async () => {
+  const h = await start(600, { forgeShell: false });
+  try {
+    // The stub agent looks for the run credential and finds nothing, because
+    // there is no gate to hand it one. There is nothing to turn off separately:
+    // the tools and the host arrive together or not at all.
+    const script = `
+import { writeFileSync } from 'node:fs';
+writeFileSync('answer.json', JSON.stringify({
+  url: process.env.ZENO_GATE_URL ?? null,
+  token: process.env.ZENO_GATE_TOKEN ?? null,
+}));
+`;
+    await withStub(script, async () => {
+      const res = await api(h, '/forge/run', h.owner, { task: 'look for a gate', agentId: 'claude-code' });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { changed: string[] };
+      assert.deepEqual(body.changed, ['answer.json']);
     });
   } finally {
     await h.close();

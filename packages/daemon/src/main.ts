@@ -211,7 +211,13 @@ function main(): void {
   // command line. See the README's "what can reach the internet".
   const forgeNetwork = /^(1|true|on|yes)$/i.test((process.env['ZENO_FORGE_NETWORK'] ?? '').trim());
 
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork });
+  // The off switch for the whole widened surface. ON by default — an agent that
+  // cannot run the tests it just wrote is half an agent, and every command it
+  // runs is a capsule. `ZENO_FORGE_SHELL=0` puts Forge back to the file-only
+  // grant: no Bash, no permission host, and anything that would ask is denied.
+  const forgeShell = !/^(0|false|off|no)$/i.test((process.env['ZENO_FORGE_SHELL'] ?? '').trim());
+
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell });
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in

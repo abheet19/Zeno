@@ -151,6 +151,17 @@ export interface DaemonOptions {
    */
   readonly forgeNetwork?: boolean;
   /**
+   * Whether a Forge run gets the widened, governed tool surface at all.
+   *
+   * Defaults to TRUE — a coding agent that cannot run the tests it just wrote is
+   * half an agent, and every command it runs is a capsule. Set it false and
+   * Forge falls back to the file-only grant it had before any of this: five file
+   * tools, no Bash, no permission host, and `--permission-prompts none` so that
+   * anything which would ask is denied outright. That is the off switch, and it
+   * is one setting rather than a list of tools to remember to also turn off.
+   */
+  readonly forgeShell?: boolean;
+  /**
    * How long a governed tool call waits for the owner before it is denied.
    *
    * A run holds the agent open while this ticks, so it is a real cost. Lapsing
@@ -1412,7 +1423,7 @@ export function createServer(opts: DaemonOptions): Server {
     // surface past the file-only grant — the two move together by construction,
     // so there is no state in which the tools are wide and the gate is absent.
     // A daemon whose own address cannot be read hands over neither.
-    const url = gateUrl();
+    const url = opts.forgeShell === false ? null : gateUrl();
     const wiring = url === null ? null : openGateRun(runId);
     try {
       const result = agentId === 'local'

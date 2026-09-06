@@ -11,6 +11,14 @@
    ./fonts/*.woff2, fetched once at build time. There is no @import, no CDN
    link and no Google Fonts stylesheet anywhere in the shipped window.
 
+   That claim is about THIS FILE and the window's own assets, and it is still
+   exactly true — but it is worth saying what it never covered, now that there
+   is something to confuse it with. A Forge agent can be approved, one command
+   at a time, to run something that reaches the network, and with
+   ZENO_FORGE_NETWORK=1 it can be approved to fetch and search directly. None of
+   that is the window loading anything: it is a governed effect with a receipt.
+   See the README's "what can reach the internet" for the whole outbound list.
+
    NO NEW COLOURS. Every hex below appears in the approved prototype :root —
    the dark ramp and the light ramp both — with one addition named by the
    Gate-2 brief: --focus (#86DEEC), the dark focus-ring tint. Every other value

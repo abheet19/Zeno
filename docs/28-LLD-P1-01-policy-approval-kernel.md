@@ -70,6 +70,8 @@ export type ActionKind =
   | 'read'            // no external effect  -> always T0
   | 'local.write'     // writes inside an isolated worktree/scratch root
   | 'patch.task'      // the TASK-section-only patch handoff
+  | 'shell.exec'      // a command on the owner's real machine  -> T3
+  | 'net.fetch'       // bytes leave this machine, or arrive     -> T2
   | 'vcs.commit' | 'vcs.push' | 'vcs.mr'
   | 'jira.write'
   | 'message.send'
