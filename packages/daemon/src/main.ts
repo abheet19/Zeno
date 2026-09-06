@@ -202,7 +202,16 @@ function main(): void {
   const launchNonce = randomBytes(18).toString('hex');
   // `workspace` is passed so a 401 can name the exact proposer.token file the
   // caller should have read, instead of telling them the daemon printed it.
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce });
+  // Whether a governed Forge run may be handed the network-egress tools at all.
+  //
+  // OFF unless the owner names it, in the same shape as every other outbound
+  // path here: `ZENO_GITHUB_REPO` is how GitHub gets asked, and this is how
+  // WebFetch and WebSearch get to exist. Turning it on does not GRANT anything —
+  // every call is still a capsule — it decides whether the tools are on the
+  // command line. See the README's "what can reach the internet".
+  const forgeNetwork = /^(1|true|on|yes)$/i.test((process.env['ZENO_FORGE_NETWORK'] ?? '').trim());
+
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork });
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in

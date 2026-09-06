@@ -81,7 +81,14 @@ export type OwnerVerdict =
  * nothing in this file can reach an approval by accident.
  */
 export interface OwnerChannel {
-  decide(preview: Preview, call: GovernedCall): Promise<OwnerVerdict>;
+  /**
+   * `payload` is the exact value the binding hashed. It is handed over rather
+   * than left to be reconstructed because the capsule the owner reads recomputes
+   * `sha256(canonicalJSON(payload))` and compares it to `payloadHash` in front
+   * of them — a channel that rebuilt the bytes from the call would be checking
+   * its own arithmetic instead of the kernel's.
+   */
+  decide(preview: Preview, call: GovernedCall, payload: unknown): Promise<OwnerVerdict>;
 }
 
 export interface KernelGateOptions {
@@ -117,13 +124,14 @@ export function kernelGate(opts: KernelGateOptions): PermissionGate {
       const callId = call.callId ?? `${opts.runId}#${asked}`;
 
       let preview: Preview;
+      let payload: unknown;
       try {
         // Hashing is inside the guard, not merely previewing. `hashOf` is where
         // an argument shape the canonical form cannot express (a value JSON
         // refuses, a cycle) actually throws, and an exception on the way to a
         // decision must land as a refusal rather than as an unhandled crash in
         // whatever is holding the agent's tool call open.
-        const payload = toolPayload(call, callId);
+        payload = toolPayload(call, callId);
         const baseHash = hashOf(payload);
         const request: ActionRequest = {
           kind: call.verdict.kind,
@@ -157,7 +165,7 @@ export function kernelGate(opts: KernelGateOptions): PermissionGate {
         return { allowed: false, reason: AUTO_APPROVED_REFUSAL, receiptId: null };
       }
 
-      const verdict = await opts.owner.decide(preview, call);
+      const verdict = await opts.owner.decide(preview, call, payload);
       if (!verdict.approved) {
         return { allowed: false, reason: verdict.reason, receiptId: null };
       }

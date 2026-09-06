@@ -12,7 +12,8 @@
  */
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import {
@@ -51,7 +52,23 @@ import {
   type Meetings,
   type Utterance,
 } from '@abheet19/zeno-counsel';
-import { AGENTS, CLAUDE_BINARY, EFFORTS, createWorktree, diffFiles, nodeSpawner, runAgent } from '@abheet19/zeno-forge';
+import {
+  AGENTS,
+  CLAUDE_BINARY,
+  EFFORTS,
+  createWorktree,
+  decidePermission,
+  diffFiles,
+  gateEnv,
+  gateMcpConfig,
+  kernelGate,
+  nodeSpawner,
+  runAgent,
+  type GovernedCall,
+  type OwnerChannel,
+  type OwnerVerdict,
+  type PermissionGate,
+} from '@abheet19/zeno-forge';
 import {
   buildSnapshot,
   buildAssistantPrompt,
@@ -122,6 +139,26 @@ export interface DaemonOptions {
    * loopback, and one `claude --version`.
    */
   readonly delegateProbe?: DelegateProbe;
+  /**
+   * Whether a Forge run may be given the network-egress tools at all.
+   *
+   * Defaults to FALSE, and the default is the point. See the README's "what can
+   * reach the internet": every other outbound path in Zeno is something the
+   * owner switched on by name, and an agent's WebFetch should not be the one
+   * exception that arrives by default. Even when this is true, every call is
+   * still an approval capsule — this decides whether the tools exist, not
+   * whether they are granted.
+   */
+  readonly forgeNetwork?: boolean;
+  /**
+   * How long a governed tool call waits for the owner before it is denied.
+   *
+   * A run holds the agent open while this ticks, so it is a real cost. Lapsing
+   * is a DENIAL and never a grant: an owner who walked away has not agreed to
+   * anything, and the window has no decline control yet, so ignoring a capsule
+   * is the way to say no.
+   */
+  readonly permissionTimeoutMs?: number;
 }
 
 /**
@@ -262,6 +299,204 @@ export function createServer(opts: DaemonOptions): Server {
   const gitRunner = nodeGitRunner();
   const gitSpec = () => ({ repoRoot: opts.sandbox, git: gitRunner, fs: opts.fs });
 
+  // The in-flight `ollama serve` start, so three simultaneous requests share one.
+  //
+  // It lives UP HERE for the reason stated two lines above about `gitRunner`: a
+  // declaration after the `return` never runs. Written below `ensureOllama` it
+  // sat past the return, so its `let` never executed and every call to it died
+  // in the temporal dead zone — "Cannot access 'ollamaStarting' before
+  // initialization", surfacing as a 500 from every route that consults a local
+  // model. Same trap, second victim; moved rather than re-explained.
+  let ollamaStarting: Promise<boolean> | null = null;
+
+  // ---- Forge: the permission host a governed run asks through --------------
+  //
+  // A Forge run now gets the real tool surface, Bash included, and the thing
+  // that makes that defensible lives here. The agent's CLI cannot decide a
+  // command for itself, so it asks a host; the host is a bridge process that
+  // reaches THIS route; and this route turns the call into an ordinary approval
+  // capsule against the same kernel that governs a file write. Same queue, same
+  // click, same signed receipt.
+  //
+  // The credential is minted per RUN and opens exactly one route. Deliberately
+  // NOT the proposer token: the bridge is inherited by a process the agent can
+  // read the environment of, and a token that could do more would be a token the
+  // agent could do more with. What it can do is ask a question whose answer
+  // comes from a click it cannot produce.
+  const gateRuns = new Map<string, { readonly token: string; readonly gate: PermissionGate }>();
+
+  /** A capsule that is a TOOL CALL waiting on the owner, rather than a file write. */
+  interface PendingPermission {
+    readonly preview: Preview;
+    readonly payload: unknown;
+    readonly runId: string;
+    /** Resolve the agent's blocked tool call. Called exactly once. */
+    settle(verdict: OwnerVerdict): void;
+  }
+  const gateHeld = new Map<string, PendingPermission>();
+
+  /** What the model is told when nobody ever looked at the capsule. */
+  const PERMISSION_LAPSED =
+    'Nobody approved this call and it has lapsed. Nothing was run. An unanswered request is a refusal ' +
+    'here — silence is never taken for agreement.';
+
+  /** Constant-time compare, so a run token cannot be recovered a byte at a time. */
+  function sameSecret(a: string, b: string): boolean {
+    const ab = Buffer.from(a, 'utf8');
+    const bb = Buffer.from(b, 'utf8');
+    if (ab.length !== bb.length) return false;
+    return timingSafeEqual(ab, bb);
+  }
+
+  /**
+   * The owner's channel for one run: hold the capsule, stream it to the window,
+   * and wait.
+   *
+   * Waiting is the honest cost of this design — the agent's tool call is open
+   * while the owner reads it. The ceiling exists so a run cannot hang forever on
+   * a window nobody is in front of, and lapsing DENIES: an owner who walked away
+   * has agreed to nothing. The window has an Approve control and no decline
+   * control yet, so ignoring a capsule is how a command is refused today.
+   */
+  function gateOwnerChannel(runId: string): OwnerChannel {
+    return {
+      decide(preview: Preview, _call: GovernedCall, payload: unknown): Promise<OwnerVerdict> {
+        return new Promise<OwnerVerdict>((resolve) => {
+          let done = false;
+          const settle = (verdict: OwnerVerdict): void => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            gateHeld.delete(preview.actionHash);
+            resolve(verdict);
+          };
+          const timer = setTimeout(
+            () => settle({ approved: false, reason: PERMISSION_LAPSED }),
+            opts.permissionTimeoutMs ?? 5 * 60_000,
+          );
+          timer.unref?.();
+          gateHeld.set(preview.actionHash, { preview, payload, runId, settle });
+          // The same event a file proposal publishes, so the window renders it
+          // with the component it already has: the capsule recomputes the
+          // payload hash in front of the owner either way.
+          opts.stream.publish('preview', { ...preview, payload, secretWarning: null });
+        });
+      },
+    };
+  }
+
+  /**
+   * Open a governed run: mint its credential and its gate. Returns what the
+   * agent process needs in its environment.
+   */
+  function openGateRun(runId: string): { readonly token: string; readonly mcpConfig: string } {
+    const token = randomBytes(24).toString('hex');
+    gateRuns.set(runId, {
+      token,
+      gate: kernelGate({
+        kernel: opts.kernel,
+        owner: gateOwnerChannel(runId),
+        // The identity a run proposes under. L6 reads it: the kernel refuses an
+        // approval whose approver is the same string, and the /approvals route
+        // only ever approves as 'owner'.
+        requestedBy: `forge:${runId}`,
+        runId,
+      }),
+    });
+    return { token, mcpConfig: gateMcpConfig() };
+  }
+
+  /**
+   * Where the bridge reaches this daemon: the loopback address it is already
+   * bound to, read off the live socket rather than guessed from configuration.
+   * A guessed port would send the bridge somewhere else, and "somewhere else"
+   * answering a permission question is the one thing that must not happen — so
+   * a socket that cannot be read yields no URL and the run stays ungated.
+   */
+  function gateUrl(): string | null {
+    const addr = server.address();
+    if (addr === null || typeof addr === 'string') return null;
+    return `http://127.0.0.1:${addr.port}`;
+  }
+
+  /**
+   * Close a run: forget its credential, and refuse anything still waiting.
+   *
+   * A capsule outliving its run would be an approval for a command with nothing
+   * left to run it — worse, one the owner could still click. So the run's own
+   * end is a denial for everything it left open.
+   */
+  function closeGateRun(runId: string): void {
+    gateRuns.delete(runId);
+    for (const [hash, pending] of [...gateHeld]) {
+      if (pending.runId !== runId) continue;
+      gateHeld.delete(hash);
+      pending.settle({
+        approved: false,
+        reason: 'The run this call belonged to has ended, so there is nothing left to grant.',
+      });
+    }
+  }
+
+  /**
+   * The bridge's one route. Authenticated by the RUN credential, not by a Zeno
+   * token — it is handled before the general authentication below because the
+   * bridge holds neither the owner's token nor the proposer's, and should not.
+   */
+  async function postForgePermission(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const presented = header(req, 'x-zeno-gate') ?? '';
+    const body = await readJson(req);
+    const runId = str(body, 'runId') ?? '';
+    const run = gateRuns.get(runId);
+    if (presented === '' || run === undefined || !sameSecret(presented, run.token)) {
+      return json(res, 403, {
+        error: {
+          code: 'gate-credential-invalid',
+          message: 'That is not a live Zeno run credential.',
+          resolve: 'A run credential is minted per run and dies with it. Nothing was asked of the owner.',
+        },
+      });
+    }
+    // Everything about the decision — classifying the call, previewing it,
+    // holding it, reading the receipt — happens here, in the one process that
+    // holds the kernel. The bridge relays; it does not decide.
+    const decision = await decidePermission(body['request'], run.gate);
+    json(res, 200, { decision });
+  }
+
+  /**
+   * The owner refusing a tool call outright, rather than letting it lapse.
+   *
+   * Owner-only for the same reason /approvals is: it decides what an agent may
+   * do. A proposer that could deny would be an agent choosing its own outcome —
+   * a smaller version of the thing L6 forbids, and still the wrong shape.
+   */
+  async function postForgePermissionDecline(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') {
+      return json(res, 403, {
+        error: {
+          code: 'owner-only',
+          message: 'Only the owner decides a tool call.',
+          resolve: 'Decline it from the Zeno window.',
+        },
+      });
+    }
+    const body = await readJson(req);
+    const actionHash = str(body, 'actionHash');
+    const pending = actionHash === null ? undefined : gateHeld.get(actionHash);
+    if (pending === undefined) {
+      return json(res, 404, {
+        error: {
+          code: 'unknown-action',
+          message: 'No tool call with that hash is waiting.',
+          resolve: 'It may already have been answered, or its run may have ended.',
+        },
+      });
+    }
+    pending.settle({ approved: false, reason: str(body, 'reason') ?? 'The owner declined this call.' });
+    json(res, 200, { declined: actionHash });
+  }
+
   // ---- Mesh: this machine's device identity, and who it trusts -------------
   //
   // The identity is minted LAZILY, on the first mesh request, and lives only in
@@ -286,9 +521,13 @@ export function createServer(opts: DaemonOptions): Server {
     return meshSelf;
   }
 
-  return createHttpServer((req, res) => {
+  // Held in a const rather than returned straight, because a governed run has to
+  // tell its permission bridge where to reach this daemon — and the only honest
+  // source for that is the socket the daemon actually bound to.
+  const server = createHttpServer((req, res) => {
     void handle(req, res).catch((err: unknown) => fail(res, err));
   });
+  return server;
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -315,6 +554,16 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && !path.startsWith('/api') && isStaticish(path)) {
       return serveStatic(res, path);
     }
+
+    // ---- the permission bridge, which holds neither Zeno token -------------
+    //
+    // Handled ABOVE the authentication below, and that is the point rather than
+    // an exemption. The bridge is a process the Claude Code CLI spawns during a
+    // run; giving it the proposer token to get past the check would hand a token
+    // to something the agent can read the environment of. Instead it carries a
+    // credential minted for one run that opens this one route, and the route
+    // checks it itself. Everything it can do is ask a question.
+    if (req.method === 'POST' && path === '/forge/permissions') return await postForgePermission(req, res);
 
     // ---- everything below is authenticated ---------------------------------
     //
@@ -378,6 +627,9 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/skills') return serveSkills(res);
     if (req.method === 'GET' && path === '/forge/agents') return await serveForgeAgents(res);
     if (req.method === 'POST' && path === '/forge/run') return await postForgeRun(req, res, role);
+    if (req.method === 'POST' && path === '/forge/permissions/decline') {
+      return await postForgePermissionDecline(req, res, role);
+    }
     // Delegation. Not owner-gated at the route, because the ANSWER is legible to
     // either role — a proposer is told what would run and that only the owner can
     // start it. `resolveDelegation` is where the role decides whether anything
@@ -490,7 +742,13 @@ export function createServer(opts: DaemonOptions): Server {
 
   function serveState(res: ServerResponse): void {
     json(res, 200, {
-      pending: [...held.values()].map(withPayload),
+      // Both queues, because a window that reloaded mid-run must not lose sight
+      // of a tool call an agent is still blocked on. They render identically:
+      // one carries the bytes of a file write, the other the bytes of a call.
+      pending: [
+        ...[...held.values()].map(withPayload),
+        ...[...gateHeld.values()].map((p) => ({ ...p.preview, payload: p.payload })),
+      ],
       receipts: opts.kernel.receipts(),
       chain: opts.kernel.verifyChain(),
       lastEventId: opts.stream.lastId(),
@@ -913,6 +1171,9 @@ export function createServer(opts: DaemonOptions): Server {
     let text: string;
     let tokensIn: number | null = null;
     let tokensOut: number | null = null;
+    // Picking a local model IS the instruction to use one, so start the server
+    // rather than sending the owner to a terminal to do it by hand.
+    await ensureOllama();
     try {
       const r = await fetch('http://127.0.0.1:11434/api/generate', {
         method: 'POST',
@@ -962,6 +1223,69 @@ export function createServer(opts: DaemonOptions): Server {
   }
 
   /**
+   * Start Ollama if it is not already up, and answer whether it is now.
+   *
+   * Every local-model path used to dead-end at "Ollama is not running. Start
+   * it." — correct, and useless: the owner picked a local model, which IS the
+   * instruction to use it. Zeno already owns a child process (the window owns
+   * the daemon), so owning the inference server it depends on is the same
+   * bargain, not a new one.
+   *
+   * Nothing here is a governed effect: it starts a local server on loopback
+   * that the owner installed, reads nothing and writes nothing. An action that
+   * changes the world still goes through the gate exactly as before.
+   *
+   * Serialised through `ollamaStarting` so that three simultaneous requests
+   * (Forge, Ask Zeno, Counsel) start one server between them rather than three.
+   */
+  async function ollamaUp(): Promise<boolean> {
+    try {
+      const r = await fetch('http://127.0.0.1:11434/api/tags');
+      if (r.ok) return true;
+    } catch {
+      /* not up yet — fall through and start it */
+    }
+    return false;
+  }
+
+  async function ensureOllama(): Promise<boolean> {
+    if (await ollamaUp()) return true;
+    if (ollamaStarting) return ollamaStarting;
+
+    ollamaStarting = (async () => {
+      try {
+        // `ollama serve` detached and fully unhooked: it must outlive the request
+        // that started it, and inheriting our stdio would keep the pipe open.
+        const child = spawn('ollama', ['serve'], {
+          detached: true,
+          stdio: 'ignore',
+          shell: process.platform === 'win32', // ollama ships as ollama.exe/.cmd on Windows
+        });
+        child.on('error', () => {
+          /* not installed — the poll below simply times out and we report honestly */
+        });
+        child.unref();
+      } catch {
+        return false;
+      }
+
+      // Ollama takes a moment to bind. Poll rather than sleep a fixed guess, so a
+      // fast machine is not punished and a slow one is not cut off early.
+      for (let i = 0; i < 20; i += 1) {
+        await new Promise((r) => setTimeout(r, 250));
+        if (await ollamaUp()) return true;
+      }
+      return false;
+    })();
+
+    try {
+      return await ollamaStarting;
+    } finally {
+      ollamaStarting = null;
+    }
+  }
+
+  /**
    * The installed Ollama models, discovered live so the open-source models the
    * owner pulled show up in the picker. Queried over the HTTP API
    * (127.0.0.1:11434), not the `ollama` CLI — the daemon's PATH may not include
@@ -994,7 +1318,7 @@ export function createServer(opts: DaemonOptions): Server {
     const localModels = await installedLocalModels();
     let claudeOnPath = false;
     try {
-      const r = nodeSpawner({ timeoutMs: 10_000 }).run(CLAUDE_BINARY, ['--version'], { cwd: opts.sandbox });
+      const r = await nodeSpawner({ timeoutMs: 10_000 }).run(CLAUDE_BINARY, ['--version'], { cwd: opts.sandbox });
       claudeOnPath = !r.failedToSpawn;
     } catch {
       claudeOnPath = false; // the adapter does not throw, but a probe never crashes a request
@@ -1077,16 +1401,38 @@ export function createServer(opts: DaemonOptions): Server {
     model: string | undefined,
     effort: 'low' | 'medium' | 'high' | undefined,
   ): Promise<RunOutcome> {
+    const runId = `run-${opts.kernel.receipts().length}-${Date.now().toString(36)}`;
     let tree;
     try {
-      tree = createWorktree(opts.sandbox, `run-${opts.kernel.receipts().length}-${Date.now().toString(36)}`, gitRunner);
+      tree = createWorktree(opts.sandbox, runId, gitRunner);
     } catch (err) {
       throw new WorktreeUnavailable((err as Error).message);
     }
+    // The gate for THIS run. Its presence is what widens the agent's tool
+    // surface past the file-only grant — the two move together by construction,
+    // so there is no state in which the tools are wide and the gate is absent.
+    // A daemon whose own address cannot be read hands over neither.
+    const url = gateUrl();
+    const wiring = url === null ? null : openGateRun(runId);
     try {
       const result = agentId === 'local'
         ? await runLocalModel(tree.path, task, model, effort)
-        : runAgent({ agentId, task, worktree: tree.path, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }, nodeSpawner());
+        : await runAgent(
+            {
+              agentId,
+              task,
+              worktree: tree.path,
+              ...(model ? { model } : {}),
+              ...(effort ? { effort } : {}),
+              ...(wiring && url
+                ? {
+                    gate: { mcpConfig: wiring.mcpConfig, network: opts.forgeNetwork === true },
+                    env: gateEnv(url, wiring.token, runId),
+                  }
+                : {}),
+            },
+            nodeSpawner(),
+          );
       // ALWAYS ask git what is in the worktree — never `result.ok ? … : []`.
       //
       // That conditional destroyed real work and then said nothing had happened.
@@ -1123,6 +1469,10 @@ export function createServer(opts: DaemonOptions): Server {
         proposed,
       };
     } finally {
+      // The credential dies with the run, and so does anything still waiting on
+      // it: an approval for a command with nothing left to run it is not an
+      // approval anybody should still be able to click.
+      closeGateRun(runId);
       try { tree.cleanup(); } catch { /* best effort */ }
     }
   }
@@ -1411,6 +1761,7 @@ export function createServer(opts: DaemonOptions): Server {
     const note = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
 
     let answer: string;
+    await ensureOllama(); // asking a question is the instruction to start the answerer
     try {
       const r = await fetch('http://127.0.0.1:11434/api/generate', {
         method: 'POST',
@@ -1819,6 +2170,7 @@ export function createServer(opts: DaemonOptions): Server {
     // owner's machine that was simply false, and one that sends them to restart
     // a service that never stopped.
     let r: Response;
+    await ensureOllama(); // summarising is the instruction to start the summariser
     try {
       r = await fetch('http://127.0.0.1:11434/api/generate', {
         method: 'POST',
@@ -2097,6 +2449,24 @@ export function createServer(opts: DaemonOptions): Server {
         error: { code: 'bad-request', message: 'An approval needs an actionHash.', resolve: 'POST {"actionHash":"..."}.' },
       });
     }
+    // A TOOL CALL waiting on this same queue. Same route, same owner-only check
+    // above, same kernel — the only difference is what the effect IS. For a file
+    // write the executor writes the file; here the effect Zeno performs is the
+    // AUTHORISATION itself, and the agent's blocked call is released on the
+    // strength of the receipt that records it. Nothing about the command's own
+    // result is claimed: the CLI runs it, and the run log says what happened.
+    const waiting = gateHeld.get(actionHash);
+    if (waiting !== undefined) {
+      const approval = opts.kernel.approve(actionHash, { method: 'owner-token', ref: 'loopback' }, { approver: 'owner' });
+      const receipt = await opts.kernel.commit(approval, async () => ({
+        effect: `tool-grant:${actionHash.slice(0, 12)}`,
+      }));
+      waiting.settle({ approved: true, receipt });
+      opts.stream.publish('receipt', receipt);
+      opts.stream.publish('chain', opts.kernel.verifyChain());
+      return json(res, 200, { approval, receipt });
+    }
+
     const item = held.get(actionHash);
     if (item === undefined) {
       return json(res, 404, {
