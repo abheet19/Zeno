@@ -80,6 +80,29 @@ def main():
     # readable.
     quantised = [f.quantize(palette=palette, dither=Image.NONE) for f in frames]
 
+    # Continuous capture means long runs of genuinely-static frames (nothing
+    # moved between two 110ms samples). Collapse consecutive identical frames
+    # into one, folding their durations together — same picture, less file.
+    # But never fold past MAX_HOLD_MS: a run of identical frames (e.g. the gap
+    # while a request is in flight and nothing has visibly changed yet) must
+    # not read as one multi-second freeze. Once the fold hits the cap the rest
+    # of the run is simply dropped rather than kept as a second identical
+    # frame — Pillow's GIF `optimize` pass re-merges byte-identical adjacent
+    # frames on save (undoing a deliberate split back into one long hold), so
+    # the only way to actually enforce the cap is to never emit the surplus.
+    MAX_HOLD_MS = 1500
+    dedup_frames, dedup_durations = [], []
+    prev_bytes = None
+    for f, ms in zip(quantised, durations):
+        b = f.tobytes()
+        if prev_bytes is not None and b == prev_bytes:
+            dedup_durations[-1] = min(MAX_HOLD_MS, dedup_durations[-1] + ms)
+            continue
+        dedup_frames.append(f)
+        dedup_durations.append(min(MAX_HOLD_MS, ms))
+        prev_bytes = b
+    quantised, durations = dedup_frames, dedup_durations
+
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     quantised[0].save(
         out,
@@ -93,7 +116,7 @@ def main():
     size = os.path.getsize(out)
     print(
         f"{out}  {quantised[0].width}x{quantised[0].height}  "
-        f"{len(frames)} frames  {size / 1024 / 1024:.2f} MB  "
+        f"{len(quantised)} frames (captured {len(frames)})  {size / 1024 / 1024:.2f} MB  "
         f"{sum(durations) / 1000:.1f}s"
     )
 

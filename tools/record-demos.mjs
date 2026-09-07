@@ -117,18 +117,34 @@ class Recorder {
     this.frames = [];
   }
 
-  /** One frame, held for `ms`. */
+  /**
+   * Hold the current state for (up to) `ms` — but never as one frozen frame.
+   * Real continuous capture: a screenshot every ~110ms for the duration, so
+   * anything moving on screen (an SSE update, a focus ring, a scroll) still
+   * reads as motion instead of a jump-cut. No single beat is allowed to
+   * freeze for more than ~1.4s — a moment that matters still gets a beat to
+   * be readable, but nothing waits.
+   */
   async hold(ms) {
-    const file = join(this.dir, String(this.frames.length).padStart(4, '0') + '.png');
-    await this.page.screenshot({ path: file });
-    this.frames.push({ file, ms });
+    const CAP = 1400;
+    const SAMPLE = 110;
+    const total = Math.min(ms, CAP);
+    const n = Math.max(1, Math.round(total / SAMPLE));
+    const step = total / n;
+    for (let i = 0; i < n; i++) {
+      const file = join(this.dir, String(this.frames.length).padStart(4, '0') + '.png');
+      await this.page.screenshot({ path: file });
+      this.frames.push({ file, ms: Math.round(step) });
+      if (i < n - 1) await sleep(step);
+    }
   }
 
   /** `count` frames `ms` apart — for the moments where the movement is the point. */
-  async burst(count, ms = 120) {
+  async burst(count, ms = 100) {
+    const step = Math.max(80, Math.min(140, ms));
     for (let i = 0; i < count; i++) {
-      await this.hold(ms);
-      await sleep(ms);
+      await this.hold(step);
+      await sleep(step);
     }
   }
 
