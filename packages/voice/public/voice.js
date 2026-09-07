@@ -540,6 +540,14 @@ const FACES = {
 /** Draw the microphone's real state in both places. Called by everything that
  * can change it; it decides nothing itself. */
 function paint() {
+  // Deliberately NOT softened by a grace window. Browsers do end a continuous
+  // session and we reopen it within ~250ms, so naming the gap does flicker —
+  // but the auto-restart is always shorter than any grace worth the name, so a
+  // grace long enough to hide the churn hides every real outage too, and the
+  // bar would then read "MICROPHONE OPEN · your browser is sending what it
+  // hears away to be transcribed" over a closed microphone that is sending
+  // nothing. This bar exists so that what it says is true at the instant it
+  // says it; a moment of honest churn is the cheaper cost.
   const open = MIC.ptt || MIC.wakeEngineUp;
 
   // -- the disclosure. Armed means "a microphone is open, or the owner has left
@@ -652,6 +660,13 @@ function wireRecognition() {
   let listening = false;
   let finalText = '';
   let heardInterim = '';
+  // Whether the owner's finger is still down. The engine's lifecycle and the
+  // button's state are NOT the same thing, and conflating them is what made the
+  // button appear to let go on its own — see `onend`.
+  let held = false;
+  // A restart that fails immediately would spin. Two is enough to ride out a
+  // silence timeout; beyond that something is actually wrong, so give up and say so.
+  let restarts = 0;
 
   recognition.onresult = (event) => {
     let interim = '';
@@ -676,15 +691,39 @@ function wireRecognition() {
 
   recognition.onerror = (event) => {
     setStatus(`Recognition error: ${event.error}. Hold the button and try again.`);
+    // A refused microphone fails instantly and would fail again just as fast,
+    // so stop treating the held finger as a reason to reopen. Without this the
+    // restart in `onend` retries a permission the owner has already denied.
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') held = false;
   };
 
   recognition.onend = () => {
+    const text = finalText.trim();
+
+    // `continuous = false`, so the browser ends the session after a short
+    // silence — NOT when the button is released. Holding the button and
+    // pausing to think therefore ended the session, and this handler reset the
+    // label to "Hold to talk" under a finger that never lifted.
+    //
+    // The finger is the authority, not the engine. If it is still down and
+    // nothing has been transcribed yet, reopen the engine and leave the UI
+    // exactly as it is.
+    if (held && text === '' && restarts < 2) {
+      restarts += 1;
+      try {
+        recognition.start();
+        return;
+      } catch {
+        // Could not reopen — fall through and reset honestly rather than
+        // leaving the button reading "Listening…" over a closed microphone.
+      }
+    }
+
     listening = false;
     MIC.ptt = false;
     paint();
     ui.button.textContent = 'Hold to talk';
     setStatus('Idle.');
-    const text = finalText.trim();
     if (text) {
       handleTranscript(text);
     } else if (heardInterim) {
@@ -754,6 +793,8 @@ function wireRecognition() {
   // it at all.
   ui.button.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    held = true;
+    restarts = 0;
     try {
       ui.button.setPointerCapture(e.pointerId);
     } catch {
@@ -764,6 +805,10 @@ function wireRecognition() {
   });
 
   const release = (e) => {
+    // Clear this FIRST: `stop()` ends the engine, which fires `onend`, and
+    // `onend` reopens the microphone while the finger is still down. Releasing
+    // is precisely the moment it no longer is.
+    held = false;
     try {
       if (e && e.pointerId !== undefined && ui.button.hasPointerCapture(e.pointerId)) {
         ui.button.releasePointerCapture(e.pointerId);
