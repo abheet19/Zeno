@@ -17,7 +17,7 @@ import {
 } from '../src/index.js';
 
 test('the config declares exactly one server, under the name the tool flag expects', () => {
-  const parsed = JSON.parse(gateMcpConfig('/bridge/permission-main.js')) as {
+  const parsed = JSON.parse(gateMcpConfig({ bridgePath: '/bridge/permission-main.js' })) as {
     mcpServers: Record<string, { command: string; args: string[] }>;
   };
   assert.deepEqual(Object.keys(parsed.mcpServers), [GATE_SERVER], 'one server, and no other joins a governed run');
@@ -30,7 +30,7 @@ test('the config declares exactly one server, under the name the tool flag expec
 });
 
 test('the config carries no credential — a config is a file, and files can be read', () => {
-  const text = gateMcpConfig('/bridge/permission-main.js');
+  const text = gateMcpConfig({ bridgePath: '/bridge/permission-main.js' });
   for (const name of [GATE_ENV_TOKEN, GATE_ENV_URL, GATE_ENV_RUN, 'token', 'env']) {
     assert.equal(text.includes(name), false, `"${name}" must not appear in the published config`);
   }
@@ -42,7 +42,7 @@ test('the config is one argv element — compact, and never spread over lines', 
   // something on the way. (Spaces are tolerated here and only here: an
   // interpreter path contains one on every Windows machine with a default
   // install. The tool lists, which the CLI splits on spaces itself, may not.)
-  const text = gateMcpConfig('/bridge/permission-main.js');
+  const text = gateMcpConfig({ bridgePath: '/bridge/permission-main.js' });
   assert.equal(/[\n\r\t]/.test(text), false, 'no newline or tab may appear in a single argv element');
   assert.equal(text, JSON.stringify(JSON.parse(text)), 'compact — exactly what JSON.stringify produces with no indent');
 });

@@ -12,6 +12,12 @@
  *   tools.ts      — what a tool call can reach: routine inside the worktree,
  *                   governed when it can escape it, refused when nobody has
  *                   decided. Pure, in the manner of the kernel's risk rules.
+ *                   It also tiers Zeno's OWN browser — read, navigate and act are
+ *                   three different blast radii, not one.
+ *   browse-main.ts / browse-config.ts
+ *                 — the browser published to the agent as MCP tools on the same
+ *                   --mcp-config as the permission host. The window itself lives
+ *                   in @abheet19/zeno-browse; nothing here decides what it does.
  *   permission.ts — the permission host's brain. A tool call the CLI cannot
  *                   decide becomes a question for the owner. It has an `ask`
  *                   verb and no approve verb, which is L6 at the tool doorstep.
@@ -41,6 +47,11 @@ export {
 export { STATUS_ARGS, parsePorcelainZ } from './status.js';
 export {
   BOOKKEEPING_TOOLS,
+  BROWSE_ACT_METHODS,
+  BROWSE_METHODS,
+  BROWSE_NAV_METHODS,
+  BROWSE_READ_METHODS,
+  BROWSE_SERVER,
   DESTRUCTIVE_SHELL,
   GATE_METHOD,
   GATE_SERVER,
@@ -53,7 +64,11 @@ export {
   WORKTREE_READ_TOOLS,
   WORKTREE_WRITE_TOOLS,
   alwaysAskTools,
+  browseToolName,
+  browseTools,
+  classifyBrowseCall,
   classifyToolCall,
+  isBrowseTool,
   isMcpTool,
   preApprovedTools,
   toolSurface,
@@ -87,7 +102,9 @@ export {
   gateBridgePath,
   gateEnv,
   gateMcpConfig,
+  type GateMcpConfigOptions,
 } from './gate-config.js';
+export { browseBridgePath, browseMcpServer } from './browse-config.js';
 export {
   AUTO_APPROVED_REFUSAL,
   TOOL_TARGET_PREFIX,

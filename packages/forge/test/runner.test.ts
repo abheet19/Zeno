@@ -22,6 +22,7 @@ import {
   NETWORK_TOOLS,
   SPAWN_FAILED,
   agentArgv,
+  alwaysAskTools,
   runAgent,
   type Agent,
   type RunSpec,
@@ -90,8 +91,15 @@ const UNGATED_FLAGS = [
   '--strict-mcp-config',
 ];
 
-/** The settings a governed run carries: the tools that ALWAYS reach the host. */
-const ASK_SETTINGS = JSON.stringify({ permissions: { ask: ['Bash', 'WebFetch', 'WebSearch'] } });
+/**
+ * The settings a governed run carries: the tools that ALWAYS reach the host.
+ *
+ * Built from `alwaysAskTools()` rather than written out, so that a tool added to
+ * the surface without being added to the ask-list fails the ask-list's OWN test
+ * (below) rather than merely failing this string comparison — which someone
+ * would then "fix" by pasting the new value in.
+ */
+const ASK_SETTINGS = JSON.stringify({ permissions: { ask: [...alwaysAskTools()] } });
 
 /** The flag block a governed run receives, with the network tools left out. */
 const GATED_FLAGS = [

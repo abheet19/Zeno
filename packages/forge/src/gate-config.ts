@@ -20,6 +20,7 @@
  */
 import { fileURLToPath } from 'node:url';
 import { GATE_SERVER } from './tools.js';
+import { browseMcpServer } from './browse-config.js';
 
 /** Environment variable names the bridge reads. Named here so both ends agree. */
 export const GATE_ENV_URL = 'ZENO_GATE_URL';
@@ -46,12 +47,31 @@ export function gateBridgePath(): string {
  * CLI documents as comma-or-space separated and which therefore may contain no
  * space at all; an interpreter path legitimately can, and does on Windows.)
  */
-export function gateMcpConfig(bridgePath: string = gateBridgePath()): string {
+export function gateMcpConfig(opts: GateMcpConfigOptions = {}): string {
+  const bridgePath = opts.bridgePath ?? gateBridgePath();
   return JSON.stringify({
     mcpServers: {
       [GATE_SERVER]: { command: process.execPath, args: [bridgePath] },
+      // The browser, when this run proved it has one. Declared on the SAME
+      // document as the permission host so a single `--strict-mcp-config` run
+      // has exactly two servers, both of them Zeno's own processes, and no
+      // server the machine happens to have configured joins either way.
+      ...(opts.browser === true ? browseMcpServer() : {}),
     },
   });
+}
+
+/** What may vary between one run's MCP config and another's. */
+export interface GateMcpConfigOptions {
+  /** Override the gate bridge entrypoint. Tests only. */
+  readonly bridgePath?: string;
+  /**
+   * Publish Zeno's browser alongside the permission host. Only ever true for a
+   * run whose browser subsystem PROVED itself live — see the daemon's
+   * `performRun`. A config that declared a server the run cannot reach would
+   * hand the agent tools that fail at the moment of use.
+   */
+  readonly browser?: boolean;
 }
 
 /**

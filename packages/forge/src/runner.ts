@@ -121,6 +121,16 @@ export interface GateWiring {
    * governed one at a time; this only decides whether the tools exist.
    */
   readonly network?: boolean;
+  /**
+   * Publish Zeno's own browser to this run. Defaults to FALSE, and there are
+   * two gates in front of it rather than one: the network must be on (a
+   * navigation IS egress, and is rated exactly as `WebFetch` is), and the
+   * browser subsystem must have PROVED itself live before the agent started —
+   * see `@abheet19/zeno-browse`'s probe. When it is false the browser tools are
+   * absent from `--tools` entirely, which is a stronger statement than "they
+   * would be denied": there is no call to deny.
+   */
+  readonly browser?: boolean;
 }
 
 /** What one run needs: which agent, an optional model/effort, the task, the worktree. */
@@ -231,6 +241,14 @@ function joined(tools: readonly string[]): string {
  * into an approval capsule. The two things move together on purpose: there is
  * no argument shape in which the tools widen and the gate does not appear.
  *
+ * THE BROWSER, when it is granted, arrives as MCP tools on the SAME
+ * `--mcp-config` that publishes the permission host — one flag, one document,
+ * two servers — so it is governed by the ordinary MCP path rather than by a
+ * second mechanism. Its tools are in `--tools` and deliberately not in
+ * `--allowedTools`, and they are additionally named in `permissions.ask`, for
+ * the reason `alwaysAskTools` sets out at length: leaving a tool out of the
+ * pre-approved list is necessary and NOT sufficient.
+ *
  * What is NEVER emitted, at any setting: `--allow-dangerously-skip-permissions`,
  * `--dangerously-skip-permissions`, `--permission-mode bypassPermissions` and
  * `--add-dir`. The first three switch off the thing this product is; the last
@@ -260,6 +278,11 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
     ];
   }
   const network = gate.network === true;
+  // The browser rides on the network grant and never past it. A caller that
+  // asked for a browser without the network gets no browser, decided here in one
+  // place rather than trusted to every caller — the whole point of the tool is a
+  // page fetch, and a page fetch is egress.
+  const browser = network && gate.browser === true;
   return [
     // NO AMBIENT SETTINGS. The CLI loads user, project and local settings files
     // by default, and those files can carry `permissions.allow` (which
@@ -278,7 +301,7 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
     '--permission-prompts', 'host',
     '--permission-prompt-tool', GATE_TOOL,
     '--mcp-config', gate.mcpConfig,
-    '--tools', joined(toolSurface(network)),
+    '--tools', joined(toolSurface(network, browser)),
     // The pre-granted subset. Bash is in the surface and deliberately NOT here,
     // which is what makes every command stop at the host.
     '--allowedTools', joined(preApprovedTools()),
