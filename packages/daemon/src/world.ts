@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { fileHash, gitHead, nodeGitRunner, type SandboxFs, type World } from '@abheet19/zeno-kernel';
 import { TOOL_TARGET_PREFIX } from '@abheet19/zeno-forge';
+import { MEMORY_TARGET_PREFIX } from '@abheet19/zeno-vault';
 
 /**
  * `readBase` re-reads the CURRENT state of a target for compare-and-swap. Two
@@ -29,6 +30,14 @@ import { TOOL_TARGET_PREFIX } from '@abheet19/zeno-forge';
  *     binding the approval to this exact call and nothing more. The protection
  *     for a command is L2 (one attempt) and L4 (single use), not L3. Inventing a
  *     changing base to make L3 look busy would be theatre.
+ *   `memory:<vault>` — an agent's proposed memory entry. Same admission as the tool
+ *     case, for the same reason: a new memory replaces nothing, and the Vault is a
+ *     directory rather than a document, so there is no prior state to hash. The ref
+ *     carries the vault's identity and is handed straight back. L3 does no work here;
+ *     L2 (one attempt), L4 (single use) and the payload hash are what bind the
+ *     approval to the exact words the owner read. Without this branch the fallback
+ *     below would try to read `memory:...` as a FILE PATH, which is not a base, it is
+ *     a coincidence that happens to hash consistently.
  *   anything else    — a file path. Read through the SAME `SandboxFs` the
  *     executor writes with, so the hash CAS tests is byte-identical to the one
  *     the executor's own base-check computes.
@@ -40,6 +49,7 @@ export function nodeWorld(fs: SandboxFs, approvalTtlMs = 5 * 60_000): World {
     id: () => randomUUID(),
     readBase: (targetRef: string) => {
       if (targetRef.startsWith(TOOL_TARGET_PREFIX)) return targetRef.slice(TOOL_TARGET_PREFIX.length);
+      if (targetRef.startsWith(MEMORY_TARGET_PREFIX)) return targetRef.slice(MEMORY_TARGET_PREFIX.length);
       if (targetRef.startsWith('git:')) {
         try {
           return gitHead({ repoRoot: targetRef.slice(4), git, fs });
