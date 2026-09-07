@@ -61,6 +61,11 @@ dist-app/
 .agents/skills/
 .claude/skills/
 
+# ---- demo recording scratch -------------------------------------------------
+# tools/record-demos.mjs writes its PNG captures and frame manifests here. The
+# GIFs it assembles from them are committed under docs/demos; the frames are not.
+.demo-scratch/
+
 # a stray build backup
 **/dist.bak/
 
