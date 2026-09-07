@@ -491,6 +491,69 @@ test('a memory carrying a secret is redacted before it is stored', async () => {
   }
 });
 
+test('the live server governs an agent memory write — no direct bypass, and the propose/approve path actually works', async () => {
+  const { nodeHeldStore } = await import('../src/held-store.js');
+  const { nodeWorkDesk } = await import('../src/work.js');
+  const { Vault } = await import('@abheet19/zeno-vault');
+  const dir = mkdtempSync(join(tmpdir(), 'zeno-mem3-'));
+  const fs = nodeSandboxFs();
+  const tokens = mintTokens();
+  const files = new Map<string, string>();
+  let n = 0, t = 0;
+  const vault = new Vault(
+    { readAll: () => new Map(files), write: (id, x) => void files.set(id, x), remove: (id) => void files.delete(id) },
+    { now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, t++)).toISOString(), id: () => `m${n++}` },
+  );
+  const server = createServer({
+    kernel: new Kernel(nodeWorld(fs), { store: nodeLedgerStore(join(dir, 'l.jsonl')) }),
+    sandbox: join(dir, 'sandbox'), fs, tokens, stream: new Stream(),
+    publicDir: join(dir, 'public'), work: nodeWorkDesk(dir), heldStore: nodeHeldStore(join(dir, 'h.jsonl')), vault,
+  });
+  await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    // THE BUG: an agent's own proposer token used to write memory directly,
+    // no kernel, no approval, no receipt. It must now be refused.
+    const direct = await fetch(base + '/memory', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.proposer },
+      body: JSON.stringify({ title: 'planted by an agent', body: 'unsupervised' }),
+    });
+    assert.equal(direct.status, 403);
+    assert.equal((await direct.json() as { error: { code: string } }).error.code, 'owner-only');
+    assert.equal([...files.values()].length, 0, 'nothing was written by the refused call');
+
+    // THE FIX: the real governed path — propose as the agent, approve as the
+    // owner — is actually mounted and actually works end to end over HTTP.
+    const propose = await fetch(base + '/memory/propose', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.proposer },
+      body: JSON.stringify({ kind: 'fact', description: 'a fact an agent learned', body: 'established during a run', requestedBy: 'agent:1' }),
+    });
+    assert.equal(propose.status, 200);
+    const { preview } = await propose.json() as { preview: { actionHash: string } };
+
+    // An agent cannot also approve its own proposal (L6), same as every other action.
+    const selfApprove = await fetch(base + '/memory/approvals', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.proposer },
+      body: JSON.stringify({ actionHash: preview.actionHash }),
+    });
+    assert.equal(selfApprove.status, 403);
+    assert.equal([...files.values()].length, 0, 'still nothing written — only the owner can approve');
+
+    const approve = await fetch(base + '/memory/approvals', {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ actionHash: preview.actionHash }),
+    });
+    assert.equal(approve.status, 200);
+    assert.equal([...files.values()].length, 1, 'the owner-approved write actually lands');
+
+    const rec = await (await fetch(base + '/memory?q=' + encodeURIComponent('a fact an agent learned'), { headers: { 'x-zeno-token': tokens.owner } })).json() as { hits: { note: { title: string } }[] };
+    assert.equal(rec.hits[0]?.note.title, 'a fact an agent learned');
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('L1 — a proposer CANNOT downgrade a risky write by claiming a lower kind', async () => {
   const h = await start();
   try {

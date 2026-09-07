@@ -38,7 +38,8 @@ import {
 import { buildSkillPrompt, loadLibrary, nodeSkillReader } from '@abheet19/zeno-skills';
 import { Stream } from './stream.js';
 import { sanitize } from '@abheet19/zeno-sanitizer';
-import { buildBrief, renderBrief, type Vault } from '@abheet19/zeno-vault';
+import { buildBrief, renderBrief, Memory, type Vault } from '@abheet19/zeno-vault';
+import { createMemoryRoutes } from './memory-routes.js';
 import {
   summarize,
   renderSummary,
@@ -381,6 +382,26 @@ export function createServer(opts: DaemonOptions): Server {
   function persistHeld(): void {
     opts.heldStore?.writeAll(serializeHeld(held.values()));
   }
+
+  // An agent's memory write is a kernel action (see memory-gate.ts): preview,
+  // owner approval, one commit, a receipt — the same governance every other
+  // effect in this file gets. Built here, over the same Vault `/memory` already
+  // reads from, and mounted below for everything under `/memory/` except the
+  // owner's own direct read/write, which stay ungated for the L6 reason that
+  // module documents.
+  const memory = opts.vault ? new Memory(opts.vault) : undefined;
+  const memoryRoutes = memory
+    ? createMemoryRoutes({
+        memory,
+        kernel: opts.kernel,
+        vaultRef: opts.workspace ?? opts.sandbox,
+        projectRoot: opts.sandbox,
+        onReceipt: (receipt) => {
+          opts.stream.publish('receipt', receipt);
+          opts.stream.publish('chain', opts.kernel.verifyChain());
+        },
+      })
+    : undefined;
 
   // Forge drives git through the same jailed executor the kernel uses. Declared
   // here, before the server is returned — a const after the return never runs.
@@ -987,7 +1008,15 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/work') return await serveWork(res);
     if (req.method === 'POST' && path === '/work') return await postWork(req, res);
     if (req.method === 'GET' && path === '/memory') return serveMemory(res, url);
-    if (req.method === 'POST' && path === '/memory') return await postMemory(req, res);
+    // Everything under /memory/ (propose, approvals, pending, recall, context,
+    // delete) is the gated module. /memory itself stays above: GET is the plain
+    // read the UI already polls, and POST is the owner's own ungated write —
+    // see the L6 reasoning in memory-routes.ts for why that one is not gated.
+    if (memoryRoutes && path !== '/memory' && path.startsWith('/memory/')) {
+      const result = await memoryRoutes.handle(req.method ?? '', path, url.searchParams, role, () => readJson(req));
+      if (result) return json(res, result.status, result.body);
+    }
+    if (req.method === 'POST' && path === '/memory') return await postMemory(req, res, role);
     if (req.method === 'GET' && path === '/brief') return serveBrief(res);
     if (req.method === 'POST' && path === '/previews') return await postPreview(req, res, role);
     if (req.method === 'POST' && path === '/approvals') return await postApproval(req, res, role);
@@ -1205,8 +1234,25 @@ export function createServer(opts: DaemonOptions): Server {
     json(res, 200, { notes: opts.vault.all().slice(0, 50) });
   }
 
-  async function postMemory(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async function postMemory(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
     if (!opts.vault) return json(res, 404, { error: { code: 'no-vault', message: 'Memory is not enabled.', resolve: 'Start the daemon with a vault directory.' } });
+    // THE FIX: this route used to write straight to the Vault for whichever
+    // token called it — owner or an agent's own proposer token, no kernel, no
+    // approval, no receipt. Only the owner may write memory directly now,
+    // matching the L6 reasoning memory-routes.ts documents for its own owner
+    // route: the owner IS the approval authority, so this is not a gate that
+    // was skipped, it is the one write that was never supposed to need one. An
+    // agent goes through POST /memory/propose instead, which this file now
+    // mounts for real.
+    if (role !== 'owner') {
+      return json(res, 403, {
+        error: {
+          code: 'owner-only',
+          message: 'Only the owner can write memory directly — an agent must propose it.',
+          resolve: 'POST /memory/propose instead; the owner approves it at POST /memory/approvals.',
+        },
+      });
+    }
     const b = await readJson(req);
     const title = str(b, 'title');
     const bodyText = str(b, 'body');
