@@ -31,7 +31,7 @@
  * `permission-gate.ts`, and is exercised there.
  */
 import { createInterface } from 'node:readline';
-import { GATE_SERVER } from './tools.js';
+import { GATE_METHOD, GATE_SERVER } from './tools.js';
 import { permissionToolResult, type PermissionDecision } from './permission.js';
 
 /** stderr only — stdout is the JSON-RPC pipe and must stay clean. */
@@ -43,7 +43,7 @@ const PROTOCOL_VERSION = '2025-06-18';
 
 /** The one tool this server publishes. Its full name is `mcp__zeno_gate__request_permission`. */
 const TOOL = {
-  name: 'request_permission',
+  name: GATE_METHOD,
   description:
     'Zeno decides whether one tool call may proceed. It is called by the CLI’s permission machinery, ' +
     'never by the model: a call that can reach outside the run’s worktree becomes an approval capsule ' +

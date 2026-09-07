@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { DEFAULT_POLICY, Kernel, nodeGitRunner, nodeLedgerStore, nodeSandboxFs } from '@abheet19/zeno-kernel';
+import { GATE_UNPROVEN_NOTE, type GateProber } from '@abheet19/zeno-forge';
 import { createServer } from '../src/server.js';
 import { Stream } from '../src/stream.js';
 import { mintTokens } from '../src/tokens.js';
@@ -41,7 +42,11 @@ interface Harness {
 
 async function start(
   permissionTimeoutMs = 30_000,
-  over: { readonly forgeShell?: boolean; readonly forgeNetwork?: boolean } = {},
+  over: {
+    readonly forgeShell?: boolean;
+    readonly forgeNetwork?: boolean;
+    readonly gateProber?: GateProber;
+  } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'zeno-gate-'));
   const sandbox = join(dir, 'sandbox');
@@ -110,9 +115,12 @@ function stubAgentDir(script: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'zeno-stub-gate-'));
   const js = join(dir, 'agent.mjs');
   writeFileSync(js, script, 'utf8');
-  writeFileSync(join(dir, 'claude.cmd'), ['@echo off', `node "${js}"`, ''].join('\r\n'), 'utf8');
+  // The real argv is forwarded, because one test's whole subject is the argv
+  // Forge emitted. A stub that swallowed it could not tell a governed run from
+  // an ungoverned one.
+  writeFileSync(join(dir, 'claude.cmd'), ['@echo off', `node "${js}" %*`, ''].join('\r\n'), 'utf8');
   const posix = join(dir, 'claude');
-  writeFileSync(posix, ['#!/bin/sh', `exec node "${js}"`, ''].join('\n'), 'utf8');
+  writeFileSync(posix, ['#!/bin/sh', `exec node "${js}" "$@"`, ''].join('\n'), 'utf8');
   try {
     chmodSync(posix, 0o755);
   } catch {
@@ -269,6 +277,70 @@ writeFileSync('answer.json', JSON.stringify({
       const body = (await res.json()) as { changed: string[] };
       assert.deepEqual(body.changed, ['answer.json']);
     });
+  } finally {
+    await h.close();
+  }
+});
+
+/** A stub agent that writes down the argv it was launched with, and nothing else. */
+const ARGV_SCRIPT = `
+import { writeFileSync } from 'node:fs';
+writeFileSync('argv.json', 'the run happened');
+console.log('ZENO_ARGV ' + JSON.stringify(process.argv.slice(2)));
+`;
+
+test('FAIL CLOSED — a gate that cannot be proved costs the run its shell, not the guarantee', async () => {
+  // This is the invariant the whole design turns on. Everything between this
+  // process and the CLI's permission machinery lives outside this repository and
+  // can break silently — and the silent break is the dangerous direction,
+  // because a CLI that stops asking simply runs the command. So the gate is
+  // demonstrated before every run, and a demonstration that fails must narrow
+  // the run rather than widen the trust.
+  const h = await start(30_000, {
+    gateProber: { prove: () => Promise.resolve({ live: false, note: 'the bridge was not there' }) },
+  });
+  try {
+    await withStub(ARGV_SCRIPT, async () => {
+      const res = await api(h, '/forge/run', h.owner, { task: 'do something', agentId: 'claude-code' });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as {
+        run: { note: string | null; log: string };
+        changed: string[];
+        proposed: { path: string }[];
+      };
+
+      assert.ok(body.changed.includes('argv.json'), 'the stub agent really ran');
+
+      // What the run was actually launched with, straight out of the process's
+      // own report of its argv. The argv IS the security boundary here: what the
+      // CLI is not given, it cannot be talked into using.
+      const marker = body.run.log.split(/\r?\n/).find((l: string) => l.startsWith('ZENO_ARGV '));
+      assert.ok(marker, 'the stub agent reported the argv it was launched with');
+      const argv = JSON.parse(marker.slice('ZENO_ARGV '.length)) as string[];
+
+      assert.ok(!argv.includes('Bash'), 'THE ASSERTION: an unproven gate means Bash is not in the argv at all');
+      const surface = argv[argv.indexOf('--tools') + 1] ?? '';
+      assert.ok(!surface.split(',').includes('Bash'), 'not in the tool surface either — the tool does not exist for this run');
+      assert.equal(
+        argv[argv.indexOf('--permission-prompts') + 1],
+        'none',
+        'and nothing may prompt, because nothing is listening',
+      );
+      assert.ok(!argv.includes('--permission-prompt-tool'), 'no host is named, because none was proved');
+      assert.ok(!argv.includes('--mcp-config'), 'and no MCP server joins a run whose gate could not answer');
+
+      // Said out loud, in the run's own note. A capability lost quietly is a
+      // capability the owner goes on believing they have.
+      assert.ok(body.run.note !== null, 'a narrowed run says so');
+      assert.match(body.run.note, /narrowed to files only/);
+      assert.match(body.run.note, /the bridge was not there/, 'and says WHY, in the prober’s own words');
+      assert.equal(body.run.note.startsWith(GATE_UNPROVEN_NOTE), true);
+    });
+    assert.equal(
+      h.kernel.receipts().filter((r) => r.kind === 'shell.exec').length,
+      0,
+      'and nothing was granted a shell along the way',
+    );
   } finally {
     await h.close();
   }

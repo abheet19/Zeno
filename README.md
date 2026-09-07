@@ -507,6 +507,13 @@ A sample of what that caught, and fixed:
   granted access outside the worktree.
 - **AES-GCM `open()` accepted a truncated auth tag**, dropping forgery resistance from 2¹²⁸ to 2³².
 - **Deleting the public key silently regenerated both keys**, orphaning every prior receipt.
+- **The permission gate was fail-open for a whole class of commands.** `Bash` was in the agent's
+  tool surface and deliberately absent from its pre-approved list, the bridge was running and the
+  permission tool was registered — and `git log --oneline -1` still executed with no capsule, no
+  click and no receipt. The CLI carries its own judgement about which commands are harmless and
+  auto-approves those *inside itself*, so Zeno was never asked. Found by running the thing, not by
+  reading it. Fixed by taking that judgement away (`permissions.ask`), and by making every run
+  **prove** its gate is live before it is handed the tools that gate governs.
 - **A policy could rate a shell command as routine**, and the agent's own permission host would
   then have granted it with nobody asked. The host refuses instead: the tier model decides how
   loud a capsule is, never whether there is one.
@@ -568,6 +575,13 @@ rather than stretched. Every call is sorted by **what escapes**:
 The last row is the one that matters most: a tool the CLI grows next month rounds **up** to a
 refusal, not down to routine. And a file tool that *asks* for permission is a file tool trying to
 leave the worktree, so reaching the host is itself the evidence — it is refused too.
+
+**The gate is proved, not assumed.** Everything between Zeno and the CLI's permission machinery
+lives outside this repository, and it can break silently — and the silent break grants `Bash`. So
+before every governed run the permission bridge is started exactly as the CLI will start it and
+asked a question only the running kernel can answer. If it cannot answer, the run does not proceed
+ungoverned: it drops to the file-only surface below and **says so in the run's note**. A gate that
+cannot be shown to work costs the agent a capability, never you the guarantee.
 
 **Why network is off by default, and commands are not.** They fail differently. A command you
 approved and regret is a mistake you can see the consequences of and often undo; bytes that left

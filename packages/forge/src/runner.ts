@@ -24,6 +24,7 @@ import {
   NEVER_TOOLS,
   WORKTREE_READ_TOOLS,
   WORKTREE_WRITE_TOOLS,
+  alwaysAskTools,
   preApprovedTools,
   toolSurface,
 } from './tools.js';
@@ -239,6 +240,12 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
   if (gate === undefined) {
     const fileOnly = [...WORKTREE_READ_TOOLS, ...WORKTREE_WRITE_TOOLS];
     return [
+      // No ambient settings file joins a run — see the gated branch below, where
+      // the same flag is load-bearing. Here it costs nothing and closes the same
+      // door: a `hooks` block in a settings file the CLI happened to find runs
+      // commands of its own, and a run that is meant to be file-only must not
+      // acquire a shell by way of somebody's configuration.
+      '--setting-sources', '',
       // The surface a tool may be drawn from. A tool absent here does not exist
       // for this run, which is a stronger statement than "it would be refused".
       '--tools', joined(fileOnly),
@@ -254,6 +261,18 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
   }
   const network = gate.network === true;
   return [
+    // NO AMBIENT SETTINGS. The CLI loads user, project and local settings files
+    // by default, and those files can carry `permissions.allow` (which
+    // pre-grants a tool without asking anyone) and `hooks` (which run commands
+    // outright). Either would let a run's real permissions be decided by a file
+    // on the machine rather than by this argv. An empty source list means the
+    // only settings in force are the ones on the next line.
+    '--setting-sources', '',
+    // …and those settings exist to say ONE thing: these tools always prompt.
+    // Leaving Bash out of --allowedTools is not enough on its own, because the
+    // CLI auto-approves commands its own classifier rates read-only and never
+    // asks the host about them. See `alwaysAskTools` for the full account.
+    '--settings', JSON.stringify({ permissions: { ask: [...alwaysAskTools()] } }),
     // Permission decisions are delegated to a host — Zeno — instead of being
     // auto-denied, and the host is named as a specific MCP tool.
     '--permission-prompts', 'host',

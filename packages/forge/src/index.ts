@@ -42,6 +42,7 @@ export { STATUS_ARGS, parsePorcelainZ } from './status.js';
 export {
   BOOKKEEPING_TOOLS,
   DESTRUCTIVE_SHELL,
+  GATE_METHOD,
   GATE_SERVER,
   GATE_TOOL,
   GOVERNANCE_SURFACE,
@@ -51,6 +52,7 @@ export {
   SHELL_TOOLS,
   WORKTREE_READ_TOOLS,
   WORKTREE_WRITE_TOOLS,
+  alwaysAskTools,
   classifyToolCall,
   isMcpTool,
   preApprovedTools,
@@ -58,6 +60,15 @@ export {
   type ToolGate,
   type ToolVerdict,
 } from './tools.js';
+export {
+  GATE_PROBE_TOOL,
+  GATE_UNPROVEN_NOTE,
+  expectedProbeDenial,
+  gateProbeRequests,
+  readGateProbe,
+  type GateProof,
+} from './gate-probe.js';
+export { nodeGateProber, type GateProber, type NodeGateProberOptions } from './gate-probe-node.js';
 export {
   OUTSIDE_WORKTREE_DENIAL,
   decidePermission,

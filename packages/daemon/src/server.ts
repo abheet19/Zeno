@@ -62,8 +62,11 @@ import {
   gateEnv,
   gateMcpConfig,
   kernelGate,
+  nodeGateProber,
   nodeSpawner,
   runAgent,
+  GATE_UNPROVEN_NOTE,
+  type GateProber,
   type GovernedCall,
   type OwnerChannel,
   type OwnerVerdict,
@@ -161,6 +164,16 @@ export interface DaemonOptions {
    * is one setting rather than a list of tools to remember to also turn off.
    */
   readonly forgeShell?: boolean;
+  /**
+   * How a run PROVES its permission gate is live before it is handed the tools
+   * that gate governs. Omit for the real one, which spawns the bridge exactly as
+   * the CLI will and asks it a question only the running kernel can answer.
+   *
+   * Injectable because the interesting case is the failing one: a test needs a
+   * gate that cannot be proved in order to assert that the run then narrows to
+   * files only, and it must be able to have that without breaking anything.
+   */
+  readonly gateProber?: GateProber;
   /**
    * How long a governed tool call waits for the owner before it is denied.
    *
@@ -1424,7 +1437,31 @@ export function createServer(opts: DaemonOptions): Server {
     // so there is no state in which the tools are wide and the gate is absent.
     // A daemon whose own address cannot be read hands over neither.
     const url = opts.forgeShell === false ? null : gateUrl();
-    const wiring = url === null ? null : openGateRun(runId);
+    let wiring = url === null ? null : openGateRun(runId);
+    // …and its presence is not taken on trust. Everything between this process
+    // and the CLI's permission machinery — the bridge starting, the handshake,
+    // the tool being registered under the name the CLI resolves — is outside
+    // this repository and can break silently, and the silent break grants Bash.
+    // So the gate answers a question before the agent is started, and a gate
+    // that cannot answer costs the run its shell rather than costing the owner
+    // the guarantee. `gateNote` is what the run then says out loud.
+    let gateNote: string | null = null;
+    if (url !== null && wiring !== null) {
+      const prober = opts.gateProber ?? nodeGateProber();
+      let proof;
+      try {
+        proof = await prober.prove(gateEnv(url, wiring.token, runId));
+      } catch (err) {
+        // A prober is not supposed to throw. If one does, that is exactly the
+        // unproven case — never a reason to fall through into a wide surface.
+        proof = { live: false, note: `the gate proof itself failed — ${(err as Error).message}` };
+      }
+      if (!proof.live) {
+        closeGateRun(runId);
+        wiring = null;
+        gateNote = `${GATE_UNPROVEN_NOTE} (${proof.note})`;
+      }
+    }
     try {
       const result = agentId === 'local'
         ? await runLocalModel(tree.path, task, model, effort)
@@ -1474,8 +1511,13 @@ export function createServer(opts: DaemonOptions): Server {
         const pv = out['preview'] as { actionHash: string; tier: string; auto: boolean };
         proposed.push({ path: rel, actionHash: pv.actionHash, tier: pv.tier, auto: pv.auto });
       }
+      // A narrowed run says so FIRST, ahead of whatever else it has to report.
+      // The owner asked for a governed agent and got a file-only one; that is
+      // the most important true thing about the run, and burying it under "the
+      // CLI exited 1" is how a missing gate goes unnoticed.
+      const note = [gateNote, result.note].filter((n): n is string => typeof n === 'string' && n !== '').join(' ');
       return {
-        run: { ok: result.ok, agentId: result.agentId, model: result.model, effort: result.effort ?? null, log: result.log, note: result.note ?? null },
+        run: { ok: result.ok, agentId: result.agentId, model: result.model, effort: result.effort ?? null, log: result.log, note: note === '' ? null : note },
         changed,
         proposed,
       };

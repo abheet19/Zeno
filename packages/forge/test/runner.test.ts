@@ -83,14 +83,20 @@ function gated(over: Partial<RunSpec> = {}): RunSpec {
 
 /** The file-only flag block a run with no permission host receives. */
 const UNGATED_FLAGS = [
+  '--setting-sources', '',
   '--tools', 'Read,Glob,Grep,NotebookRead,Write,Edit,NotebookEdit',
   '--allowedTools', 'Read,Glob,Grep,NotebookRead,Write,Edit,NotebookEdit',
   '--permission-prompts', 'none',
   '--strict-mcp-config',
 ];
 
+/** The settings a governed run carries: the tools that ALWAYS reach the host. */
+const ASK_SETTINGS = JSON.stringify({ permissions: { ask: ['Bash', 'WebFetch', 'WebSearch'] } });
+
 /** The flag block a governed run receives, with the network tools left out. */
 const GATED_FLAGS = [
+  '--setting-sources', '',
+  '--settings', ASK_SETTINGS,
   '--permission-prompts', 'host',
   '--permission-prompt-tool', GATE_TOOL,
   '--mcp-config', '/ws/zeno-gate.mcp.json',
@@ -161,6 +167,33 @@ test('ARGV — a gated run gets the real tool surface, and every flag that gover
   );
   assert.equal(args[args.indexOf('--permission-prompts') + 1], 'host', 'a host answers, rather than nothing answering');
   assert.equal(args[args.indexOf('--permission-prompt-tool') + 1], GATE_TOOL, 'and the host is named');
+});
+
+test('ARGV — the shell tool is made to ALWAYS ask, because omitting it from the grant is not enough', async () => {
+  // The fail-open this test exists for was real and was found by running it.
+  // Bash was in `--tools`, deliberately absent from `--allowedTools`, the bridge
+  // was up and the permission tool was registered — and `git log --oneline -1`
+  // still executed with no capsule, no click and no receipt, because the CLI
+  // auto-approves commands its own classifier rates read-only and never asks the
+  // host about them at all. `permissions.ask` is what takes that judgement away
+  // from the CLI, and the settings sources are emptied so no file on the machine
+  // can hand it back.
+  const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
+  await runAgent(gated(), spawner);
+  const args = calls[0]!.args;
+
+  const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as {
+    permissions: { ask: string[] };
+  };
+  assert.ok(settings.permissions.ask.includes('Bash'), 'every command reaches the host, whatever the CLI thinks of it');
+  for (const tool of NETWORK_TOOLS) {
+    assert.ok(settings.permissions.ask.includes(tool), `${tool} is asked about too — the same auto-approval reasoning applies to egress`);
+  }
+  assert.equal(
+    args[args.indexOf('--setting-sources') + 1],
+    '',
+    'and no user, project or local settings file gets to pre-grant a tool or add a hook',
+  );
 });
 
 test('ARGV — network tools are absent by default and appear only when asked for', async () => {

@@ -99,7 +99,9 @@ export const MCP_TOOL_PREFIX = 'mcp__';
  * the CLI calls on it. `--permission-prompt-tool` takes the full dotted name.
  */
 export const GATE_SERVER = 'zeno_gate';
-export const GATE_TOOL = `${MCP_TOOL_PREFIX}${GATE_SERVER}__request_permission`;
+/** The bare tool name the bridge publishes, before the CLI's server prefix. */
+export const GATE_METHOD = 'request_permission';
+export const GATE_TOOL = `${MCP_TOOL_PREFIX}${GATE_SERVER}__${GATE_METHOD}`;
 
 /**
  * Tools that are never available, whatever anyone approves.
@@ -359,7 +361,38 @@ export function toolSurface(network: boolean): readonly string[] {
  *
  * Everything else in the surface falls through to the permission host, which is
  * the point: `Bash` is present and NOT here, so every command stops.
+ *
+ * Leaving a tool off this list is NECESSARY for it to reach the host, and — this
+ * cost a live fail-open — it is not SUFFICIENT. See `alwaysAskTools`.
  */
 export function preApprovedTools(): readonly string[] {
   return [...WORKTREE_READ_TOOLS, ...WORKTREE_WRITE_TOOLS, ...BOOKKEEPING_TOOLS];
+}
+
+/**
+ * The tools that must reach the permission host on EVERY call, whatever anyone
+ * else thinks of them — the CLI's `permissions.ask` setting.
+ *
+ * This exists because of a fail-open found by running the thing rather than by
+ * reading it. Omitting `Bash` from `--allowedTools` looks like it makes every
+ * command stop, and it does not: the CLI carries its own judgement about which
+ * commands are harmless, and a command it rates read-only (`git log`, `ls`, a
+ * plain `cat`) is auto-approved INSIDE the CLI and never offered to the
+ * permission host at all. The bridge was up, the tool was registered, the host
+ * was correct — and it was simply not asked. Zeno then reported a run in which a
+ * command had really executed with no capsule, no click and no receipt.
+ *
+ * A defensible product cannot have a class of commands it silently does not see.
+ * `permissions.ask` is the CLI's own way of saying "this tool always prompts",
+ * and a prompt is exactly what routes to Forge's host. It is set for the shell
+ * and the egress tools together: the same auto-approval reasoning would apply to
+ * a fetch the CLI thought innocuous.
+ *
+ * Both network tools are named even when the run was not granted the network.
+ * A tool that is not in `--tools` does not exist for the run, so asking for it
+ * to always prompt costs nothing — and it means the ask-list cannot fall out of
+ * step with the surface the day the network flag flips.
+ */
+export function alwaysAskTools(): readonly string[] {
+  return [...SHELL_TOOLS, ...NETWORK_TOOLS];
 }
