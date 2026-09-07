@@ -29,6 +29,13 @@ export const ACTION_KINDS = [
   // with no undo: an approval that turns out to be a mistake can be refused
   // next time, but the bytes that already left cannot be recalled.
   'net.fetch', //                              -> T2
+  // An agent writing something into the owner's durable memory. Its own kind
+  // because its blast radius is unlike every other local write: it is NOT in the
+  // jailed worktree, it survives the run, and it is retrieved into later runs by
+  // design — so a write is an edit to what the next agent is told is true. Recorded
+  // as `local.write` it would auto-apply, and an agent could quietly accumulate a
+  // corpus the owner never read, or leave instructions for its own successor.
+  'memory.write', //                           -> T1
   'vcs.commit',
   'vcs.push',
   'vcs.mr',

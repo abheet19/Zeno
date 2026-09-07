@@ -27,12 +27,18 @@ export interface Policy {
 
 /** The default, reviewable policy. A signed override file replaces this later. */
 export const DEFAULT_POLICY: Policy = {
-  version: '2026-09-07.1',
+  version: '2026-09-07.2',
   kindTier: {
     read: 'T0',
     'local.write': 'T0',
     'patch.task': 'T1',
     'vcs.commit': 'T1',
+    // A durable local artefact the owner reads before it exists — the same shape as
+    // the two above, and rated with them. Not T0: it outlives the run and steers
+    // every later one. Not T2: nothing leaves the machine and the owner can read and
+    // delete the file afterwards, so demanding an authenticator to write a sentence
+    // into a notebook would train the owner to click through a gate that matters.
+    'memory.write': 'T1',
     'jira.write': 'T2',
     'vcs.push': 'T2',
     'message.send': 'T2',
