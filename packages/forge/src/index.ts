@@ -14,6 +14,12 @@
  *                   decided. Pure, in the manner of the kernel's risk rules.
  *                   It also tiers Zeno's OWN browser — read, navigate and act are
  *                   three different blast radii, not one.
+ *   chrome-main.ts / chrome-config.ts
+ *                 — the OWNER'S OWN, signed-in Chrome, published as a SEPARATE
+ *                   tool namespace (mcp__zeno_chrome__*) and rated strictly
+ *                   above every sandboxed equivalent. Off by default; per-origin
+ *                   consent; a never-list the allowlist cannot override. The
+ *                   extension and native host live in @abheet19/zeno-chrome.
  *   browse-main.ts / browse-config.ts
  *                 — the browser published to the agent as MCP tools on the same
  *                   --mcp-config as the permission host. The window itself lives
@@ -52,6 +58,11 @@ export {
   BROWSE_NAV_METHODS,
   BROWSE_READ_METHODS,
   BROWSE_SERVER,
+  CHROME_ACT_METHODS,
+  CHROME_METHODS,
+  CHROME_NAV_METHODS,
+  CHROME_READ_METHODS,
+  CHROME_SERVER,
   DESTRUCTIVE_SHELL,
   GATE_METHOD,
   GATE_SERVER,
@@ -60,15 +71,20 @@ export {
   MCP_TOOL_PREFIX,
   NETWORK_TOOLS,
   NEVER_TOOLS,
+  NO_CHROME_ORIGINS,
   SHELL_TOOLS,
   WORKTREE_READ_TOOLS,
   WORKTREE_WRITE_TOOLS,
   alwaysAskTools,
   browseToolName,
   browseTools,
+  chromeToolName,
+  chromeTools,
   classifyBrowseCall,
+  classifyChromeCall,
   classifyToolCall,
   isBrowseTool,
+  isChromeTool,
   isMcpTool,
   preApprovedTools,
   toolSurface,
@@ -105,6 +121,7 @@ export {
   type GateMcpConfigOptions,
 } from './gate-config.js';
 export { browseBridgePath, browseMcpServer } from './browse-config.js';
+export { chromeBridgePath, chromeMcpServer } from './chrome-config.js';
 export {
   AUTO_APPROVED_REFUSAL,
   TOOL_TARGET_PREFIX,

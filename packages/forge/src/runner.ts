@@ -131,6 +131,25 @@ export interface GateWiring {
    * would be denied": there is no call to deny.
    */
   readonly browser?: boolean;
+  /**
+   * Publish the OWNER'S OWN, SIGNED-IN CHROME to this run. Defaults to FALSE and
+   * has MORE conditions in front of it than any other capability in this file,
+   * because it is the only one that can act AS THE OWNER:
+   *
+   *   · the owner switched it on deliberately (`ZENO_FORGE_CHROME=1`);
+   *   · the extension they installed in their own browser PROVED itself live
+   *     before the agent started;
+   *   · and every operation is still refused unless its origin is on the
+   *     allowlist they set themselves, and off Zeno's never-list.
+   *
+   * Deliberately NOT gated behind `network`, unlike `browser`. That gate exists
+   * because a sandboxed navigation is exactly the egress `ZENO_FORGE_NETWORK`
+   * governs; these operations are not rated as egress at all but as acting as
+   * the owner, and folding them into the network switch would mean a run that
+   * wanted to fetch a URL had quietly asked for a signed-in browser too. Two
+   * different questions, two different switches.
+   */
+  readonly chrome?: boolean;
 }
 
 /** What one run needs: which agent, an optional model/effort, the task, the worktree. */
@@ -283,6 +302,8 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
   // place rather than trusted to every caller — the whole point of the tool is a
   // page fetch, and a page fetch is egress.
   const browser = network && gate.browser === true;
+  // The owner's own Chrome stands on its own switch — see `GateWiring.chrome`.
+  const chrome = gate.chrome === true;
   return [
     // NO AMBIENT SETTINGS. The CLI loads user, project and local settings files
     // by default, and those files can carry `permissions.allow` (which
@@ -301,7 +322,7 @@ export function claudeToolFlags(gate: GateWiring | undefined): string[] {
     '--permission-prompts', 'host',
     '--permission-prompt-tool', GATE_TOOL,
     '--mcp-config', gate.mcpConfig,
-    '--tools', joined(toolSurface(network, browser)),
+    '--tools', joined(toolSurface(network, browser, chrome)),
     // The pre-granted subset. Bash is in the surface and deliberately NOT here,
     // which is what makes every command stop at the host.
     '--allowedTools', joined(preApprovedTools()),

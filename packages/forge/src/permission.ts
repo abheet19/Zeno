@@ -31,6 +31,7 @@
  *     string.
  */
 import { classifyToolCall, type ToolVerdict } from './tools.js';
+import type { OriginPolicy } from '@abheet19/zeno-chrome';
 
 /** One permission question, as the CLI poses it. */
 export interface PermissionRequest {
@@ -143,6 +144,17 @@ export const OUTSIDE_WORKTREE_DENIAL =
 export async function decidePermission(
   params: unknown,
   gate: PermissionGate,
+  /**
+   * The owner's Chrome allowlist, when the caller has one to give.
+   *
+   * OMITTING IT REFUSES EVERY ORIGIN rather than allowing any — the default in
+   * `classifyToolCall` is an empty allowlist, so a caller that forgets to thread
+   * this through loses the Chrome capability and never gains one. The policy is
+   * read fresh per request, not captured at run start, because the owner may add
+   * or remove an origin while a run is in flight and the decision must be made
+   * against what they have decided NOW.
+   */
+  chromeOrigins?: OriginPolicy,
 ): Promise<PermissionDecision> {
   const req = parsePermissionRequest(params);
   if (req === null) {
@@ -152,7 +164,7 @@ export async function decidePermission(
     );
   }
 
-  const verdict = classifyToolCall(req.toolName, req.input);
+  const verdict = classifyToolCall(req.toolName, req.input, chromeOrigins);
 
   if (verdict.gate === 'refused') {
     return deny(`${verdict.summary} ${verdict.reasons.join('; ')}.`);

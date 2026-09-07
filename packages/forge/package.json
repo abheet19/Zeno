@@ -14,18 +14,20 @@
   },
   "bin": {
     "zeno-forge-gate": "./dist/src/permission-main.js",
-    "zeno-forge-browse": "./dist/src/browse-main.js"
+    "zeno-forge-browse": "./dist/src/browse-main.js",
+    "zeno-forge-chrome": "./dist/src/chrome-main.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
-    "coverage": "tsc && node --test --experimental-test-coverage --test-coverage-include=\"dist/src/**\" --test-coverage-exclude=\"dist/src/index.js\" --test-coverage-exclude=\"dist/src/permission-main.js\" --test-coverage-exclude=\"dist/src/browse-main.js\" --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=85 \"dist/test/*.test.js\"",
+    "coverage": "tsc && node --test --experimental-test-coverage --test-coverage-include=\"dist/src/**\" --test-coverage-exclude=\"dist/src/index.js\" --test-coverage-exclude=\"dist/src/permission-main.js\" --test-coverage-exclude=\"dist/src/browse-main.js\" --test-coverage-exclude=\"dist/src/chrome-main.js\" --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=85 \"dist/test/*.test.js\"",
     "test": "tsc && node --test \"dist/test/*.test.js\"",
     "check": "npm run typecheck && npm run coverage"
   },
   "dependencies": {
     "@abheet19/zeno-kernel": "*",
-    "@abheet19/zeno-browse": "*"
+    "@abheet19/zeno-browse": "*",
+    "@abheet19/zeno-chrome": "*"
   },
   "devDependencies": {
     "@types/node": "^20.16.11",

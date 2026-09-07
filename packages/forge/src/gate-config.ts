@@ -21,6 +21,7 @@
 import { fileURLToPath } from 'node:url';
 import { GATE_SERVER } from './tools.js';
 import { browseMcpServer } from './browse-config.js';
+import { chromeMcpServer } from './chrome-config.js';
 
 /** Environment variable names the bridge reads. Named here so both ends agree. */
 export const GATE_ENV_URL = 'ZENO_GATE_URL';
@@ -57,6 +58,11 @@ export function gateMcpConfig(opts: GateMcpConfigOptions = {}): string {
       // has exactly two servers, both of them Zeno's own processes, and no
       // server the machine happens to have configured joins either way.
       ...(opts.browser === true ? browseMcpServer() : {}),
+      // …and the owner's OWN Chrome, only for a run that proved the extension in
+      // it answered. Declared as its own server under its own name so that the
+      // two browsers are two servers and two tool namespaces — an owner reading
+      // a receipt must be able to tell which browser acted.
+      ...(opts.chrome === true ? chromeMcpServer() : {}),
     },
   });
 }
@@ -72,6 +78,12 @@ export interface GateMcpConfigOptions {
    * hand the agent tools that fail at the moment of use.
    */
   readonly browser?: boolean;
+  /**
+   * Publish the owner's OWN Chrome alongside the permission host. Only ever true
+   * for a run whose Chrome extension PROVED itself live AND whose owner switched
+   * the capability on — see the daemon's `performRun`.
+   */
+  readonly chrome?: boolean;
 }
 
 /**
