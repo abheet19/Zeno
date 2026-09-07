@@ -1,0 +1,17 @@
+{
+  "name": "@abheet19/zeno-chrome",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Zeno Chrome — acting in the owner's OWN signed-in browser through a Manifest V3 extension and a native-messaging host. Off by default, per-origin consent, a never-list the allowlist cannot override, and every operation an approval capsule that names the origin and says it is the authenticated profile.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": { ".": { "types": "./dist/src/index.d.ts", "default": "./dist/src/index.js" } },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "tsc && node --test --experimental-test-coverage --test-coverage-include=\"dist/src/**\" --test-coverage-exclude=\"dist/src/index.js\" --test-coverage-lines=95 --test-coverage-functions=95 --test-coverage-branches=90 \"dist/test/*.test.js\"",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": { "@types/node": "^20.16.11", "typescript": "^5.6.3" }
+}

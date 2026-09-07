@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Zeno — allowed sites</title>
+<style>
+  body { font: 13px/1.5 system-ui, sans-serif; margin: 0; padding: 14px; width: 320px; }
+  h1 { font-size: 13px; margin: 0 0 6px; }
+  p { color: #555; margin: 0 0 10px; }
+  button { font: inherit; padding: 6px 10px; cursor: pointer; }
+  ul { padding-left: 18px; margin: 8px 0 0; }
+  code { font-size: 12px; }
+  .note { color: #777; font-size: 12px; margin-top: 12px; }
+</style>
+<h1>Zeno may act on these sites</h1>
+<p>
+  Granting a site here is <b>Chrome's</b> permission, and it is only half of it. Zeno also refuses any origin that is
+  not on your own allowlist in the Zeno window — and refuses banking, mail, cloud consoles and identity providers
+  whatever either list says.
+</p>
+<button id="grant">Allow the site in the current tab</button>
+<ul id="list"></ul>
+<p class="note">Every action still stops and waits for you to approve that exact action in Zeno.</p>
+<script src="popup.js"></script>

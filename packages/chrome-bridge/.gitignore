@@ -1,0 +1,9 @@
+# ---- written by the OWNER when they register the native host ----------------
+# `install/register-host.mjs` generates these on the machine it is run on: they
+# name that machine's node binary, that machine's Zeno workspace and that
+# browser's extension id. Machine-specific configuration, never source — and
+# `host-config.json` in particular points at a workspace holding a signing key.
+host-config.json
+com.zeno.chrome_bridge.json
+zeno-chrome-host.bat
+zeno-chrome-host.sh

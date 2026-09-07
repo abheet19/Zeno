@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Zeno — governed actions in your own Chrome",
+  "version": "0.1.0",
+  "description": "Lets Zeno perform ONE approved action at a time in this signed-in browser. Every action is a capsule you read and approve first, at an origin you named in advance.",
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "Zeno — allowed sites" },
+  "permissions": ["nativeMessaging", "scripting", "tabs"],
+  "host_permissions": [],
+  "optional_host_permissions": ["https://*/*"]
+}
