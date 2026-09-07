@@ -24,7 +24,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { DEFAULT_POLICY, Kernel, nodeGitRunner, nodeLedgerStore, nodeSandboxFs } from '@abheet19/zeno-kernel';
-import { GATE_UNPROVEN_NOTE, type GateProber } from '@abheet19/zeno-forge';
+import { GATE_UNPROVEN_NOTE, browseTools, type GateProber } from '@abheet19/zeno-forge';
+import { BROWSER_UNPROVEN_NOTE, type BrowseSession, type BrowserHost } from '@abheet19/zeno-browse';
 import { createServer } from '../src/server.js';
 import { Stream } from '../src/stream.js';
 import { mintTokens } from '../src/tokens.js';
@@ -46,6 +47,8 @@ async function start(
     readonly forgeShell?: boolean;
     readonly forgeNetwork?: boolean;
     readonly gateProber?: GateProber;
+    readonly forgeBrowser?: boolean;
+    readonly browserHost?: BrowserHost;
   } = {},
 ): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'zeno-gate-'));
@@ -380,6 +383,97 @@ test('a capsule nobody answers LAPSES into a refusal — silence is never a yes'
       h.kernel.receipts().filter((r) => r.kind === 'shell.exec').length,
       0,
       'no command was ever granted, so no grant is on the record',
+    );
+  } finally {
+    await h.close();
+  }
+});
+
+/**
+ * A browser host whose window never answers — the failure this repository has to
+ * survive. Electron may simply not be on the machine (a checkout installed with
+ * `--omit=dev`, a box with no display), and the wrong response to that is to
+ * publish five tools that fail at the moment of use while the owner reads
+ * capsules for navigations that can never happen.
+ */
+function brokenBrowser(note: string): BrowserHost {
+  return {
+    open(): BrowseSession {
+      return {
+        ask: () => Promise.resolve({ id: 0, ok: false, detail: note }),
+        prove: () => Promise.resolve({ live: false, note }),
+        close: () => undefined,
+      };
+    },
+  };
+}
+
+test('FAIL CLOSED — a browser that cannot be proved is ABSENT from the run, not merely refused', async () => {
+  // The same invariant as the gate above, drawn at the second subsystem. The
+  // browser is granted only when it has answered a test call from a window this
+  // run started; anything less and the tools are not on the command line at all,
+  // there is no MCP server declared for them, and the run says why.
+  const h = await start(30_000, {
+    forgeNetwork: true,
+    browserHost: brokenBrowser('no Electron binary was found'),
+  });
+  try {
+    await withStub(ARGV_SCRIPT, async () => {
+      const res = await api(h, '/forge/run', h.owner, { task: 'read a page', agentId: 'claude-code' });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { run: { note: string | null; log: string } };
+
+      const marker = body.run.log.split(/\r?\n/).find((l: string) => l.startsWith('ZENO_ARGV '));
+      assert.ok(marker, 'the stub agent reported the argv it was launched with');
+      const argv = JSON.parse(marker.slice('ZENO_ARGV '.length)) as string[];
+
+      const surface = (argv[argv.indexOf('--tools') + 1] ?? '').split(',');
+      for (const tool of browseTools()) {
+        assert.ok(!surface.includes(tool), `THE ASSERTION: ${tool} does not exist for a run with no proved browser`);
+      }
+      // The gate itself is untouched — an unproven browser costs the browser, not
+      // the shell. Losing more than the thing that failed would be its own bug.
+      assert.ok(surface.includes('Bash'), 'the permission gate proved fine, so the shell is still there');
+      const mcp = argv[argv.indexOf('--mcp-config') + 1] ?? '';
+      assert.ok(mcp.includes('zeno_gate'), 'the permission host is declared');
+      assert.ok(!mcp.includes('zeno_browse'), 'and no browser server is declared for a browser that never answered');
+
+      assert.ok(body.run.note !== null, 'a narrowed run says so');
+      assert.equal(body.run.note.startsWith(BROWSER_UNPROVEN_NOTE), true);
+      assert.match(body.run.note, /no Electron binary was found/, 'and says WHY, in the host’s own words');
+    });
+  } finally {
+    await h.close();
+  }
+});
+
+test('a run with no browser answers the bridge honestly rather than half-performing', async () => {
+  // The browse route exists whether or not this run has a window. It must say
+  // so plainly: a run that was never granted a browser has nothing to drive, and
+  // "there is no browser" is a better answer than a silent no-op.
+  const h = await start(30_000, { forgeNetwork: true, browserHost: brokenBrowser('no window') });
+  try {
+    await withStub(
+      `
+import { writeFileSync } from 'node:fs';
+const res = await fetch(process.env.ZENO_GATE_URL + '/forge/browse', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-zeno-gate': process.env.ZENO_GATE_TOKEN },
+  body: JSON.stringify({ runId: process.env.ZENO_GATE_RUN, op: 'navigate', input: { url: 'https://example.test/' } }),
+});
+writeFileSync('answer.json', JSON.stringify({ status: res.status, body: await res.json() }));
+`,
+      async () => {
+        const res = await api(h, '/forge/run', h.owner, { task: 'browse', agentId: 'claude-code' });
+        assert.equal(res.status, 200);
+        const body = (await res.json()) as { changed: string[] };
+        assert.ok(body.changed.includes('answer.json'), 'the stub really asked');
+      },
+    );
+    assert.equal(
+      h.kernel.receipts().filter((r) => r.kind === 'net.fetch').length,
+      0,
+      'and no page was fetched — asking the route is not approval, and there was no window regardless',
     );
   } finally {
     await h.close();

@@ -25,6 +25,7 @@
     "@abheet19/zeno-sanitizer": "*",
     "@abheet19/zeno-counsel": "*",
     "@abheet19/zeno-forge": "*",
+    "@abheet19/zeno-browse": "*",
     "@abheet19/zeno-mesh": "*",
     "@abheet19/zeno-assistant": "*",
     "@abheet19/zeno-skills": "*"

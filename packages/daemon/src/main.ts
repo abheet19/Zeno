@@ -217,7 +217,15 @@ function main(): void {
   // grant: no Bash, no permission host, and anything that would ask is denied.
   const forgeShell = !/^(0|false|off|no)$/i.test((process.env['ZENO_FORGE_SHELL'] ?? '').trim());
 
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell });
+  // The off switch for Zeno's own browser. ON by default and yet, in practice,
+  // off by default: a navigation is a page fetch, so the browser exists only
+  // when the NETWORK is on too — `ZENO_FORGE_NETWORK=1`. This flag is the way to
+  // have the network for `WebFetch` and still have no browser at all, and it is
+  // named separately because "may the agent fetch a URL" and "may the agent
+  // drive a window that then clicks things" are different questions.
+  const forgeBrowser = !/^(0|false|off|no)$/i.test((process.env['ZENO_FORGE_BROWSER'] ?? '').trim());
+
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser });
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in

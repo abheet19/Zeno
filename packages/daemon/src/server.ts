@@ -73,6 +73,12 @@ import {
   type PermissionGate,
 } from '@abheet19/zeno-forge';
 import {
+  BROWSER_UNPROVEN_NOTE,
+  nodeBrowserHost,
+  type BrowseSession,
+  type BrowserHost,
+} from '@abheet19/zeno-browse';
+import {
   buildSnapshot,
   buildAssistantPrompt,
   describeTruncation,
@@ -174,6 +180,26 @@ export interface DaemonOptions {
    * files only, and it must be able to have that without breaking anything.
    */
   readonly gateProber?: GateProber;
+  /**
+   * Whether a governed Forge run may be given Zeno's OWN browser at all.
+   *
+   * Defaults to TRUE, but it is the third of three conditions rather than a
+   * grant: the run must also have a live permission gate, and `forgeNetwork`
+   * must be on — a navigation is a page fetch, and Zeno does not have one class
+   * of egress that arrives by default while `WebFetch` does not. Set
+   * `ZENO_FORGE_BROWSER=0` and the browser tools are absent from the agent's
+   * command line whatever else is true.
+   */
+  readonly forgeBrowser?: boolean;
+  /**
+   * How a run gets its browser window. Omit for the real one, which starts the
+   * Chromium Zeno already ships with a session of this run's own.
+   *
+   * Injectable for the same reason `gateProber` is: the interesting case is the
+   * failing one. A test needs a browser that cannot be proved in order to assert
+   * that the run then carries NO browser tools at all.
+   */
+  readonly browserHost?: BrowserHost;
   /**
    * How long a governed tool call waits for the owner before it is denied.
    *
@@ -413,7 +439,7 @@ export function createServer(opts: DaemonOptions): Server {
    * Open a governed run: mint its credential and its gate. Returns what the
    * agent process needs in its environment.
    */
-  function openGateRun(runId: string): { readonly token: string; readonly mcpConfig: string } {
+  function openGateRun(runId: string): { readonly token: string } {
     const token = randomBytes(24).toString('hex');
     gateRuns.set(runId, {
       token,
@@ -427,7 +453,7 @@ export function createServer(opts: DaemonOptions): Server {
         runId,
       }),
     });
-    return { token, mcpConfig: gateMcpConfig() };
+    return { token };
   }
 
   /**
@@ -460,6 +486,101 @@ export function createServer(opts: DaemonOptions): Server {
         reason: 'The run this call belonged to has ended, so there is nothing left to grant.',
       });
     }
+  }
+
+  // ---- Forge: the browser a run is given, and the route it is driven through --
+  //
+  // WHY EMBEDDED, AND NOT AN EXTERNAL MCP SERVER. `forge/src/tools.ts` rates a
+  // generic MCP call as egress on the ground that "an MCP server is a process
+  // outside the worktree that Zeno neither started nor bounds". A browser
+  // reached through an external driver would be exactly that process, and the
+  // sentence would stay true. This one Zeno starts HERE: the daemon spawns the
+  // window, from this repository, with a session of the run's own, and kills it
+  // when the run ends. Nothing is installed, no driver is downloaded, no CDN is
+  // contacted, and Chromium is already on the machine because Zeno ships
+  // Electron — so the zero-runtime-dependency claim is untouched.
+  //
+  // The route below is the twin of /forge/permissions and holds the same line:
+  // it performs an operation the OWNER ALREADY APPROVED. Nothing reaches it that
+  // has not been through the permission host first — the browse tools are in
+  // `--tools`, out of `--allowedTools`, and named in `permissions.ask`.
+  const browseRuns = new Map<string, BrowseSession>();
+
+  /**
+   * Give a run a browser, or don't — and prove it either way.
+   *
+   * Three conditions, all of which must hold, and the order is the argument:
+   * the run must be governed at all (no gate, no browser), the network must be
+   * switched on (a navigation IS egress and is rated exactly as WebFetch is),
+   * and the window must ANSWER. A subsystem that cannot be proved live costs the
+   * run its browser tools — they are absent from the command line rather than
+   * merely refused — and the run says so out loud.
+   */
+  async function openBrowseRun(runId: string): Promise<{ readonly granted: boolean; readonly note: string | null }> {
+    if (opts.forgeBrowser === false || opts.forgeNetwork !== true) return { granted: false, note: null };
+    const host = opts.browserHost ?? nodeBrowserHost();
+    let session: BrowseSession;
+    try {
+      session = host.open(runId);
+    } catch (err) {
+      // A host is not supposed to throw. One that does is exactly the unproven
+      // case, never a reason to fall through into a granted capability.
+      return { granted: false, note: `${BROWSER_UNPROVEN_NOTE} (the browser host failed — ${(err as Error).message})` };
+    }
+    let proof;
+    try {
+      proof = await session.prove();
+    } catch (err) {
+      proof = { live: false, note: `the browser proof itself failed — ${(err as Error).message}` };
+    }
+    if (!proof.live) {
+      try { session.close(); } catch { /* best effort */ }
+      return { granted: false, note: `${BROWSER_UNPROVEN_NOTE} (${proof.note})` };
+    }
+    browseRuns.set(runId, session);
+    return { granted: true, note: null };
+  }
+
+  /** End a run's browser. The window does not outlive the run that opened it. */
+  function closeBrowseRun(runId: string): void {
+    const session = browseRuns.get(runId);
+    if (session === undefined) return;
+    browseRuns.delete(runId);
+    try { session.close(); } catch { /* best effort */ }
+  }
+
+  /**
+   * Perform one approved browser operation. Authenticated by the RUN credential,
+   * exactly as /forge/permissions is, and handled before the general
+   * authentication below for the same reason: the bridge holds neither the
+   * owner's token nor the proposer's, and should not.
+   *
+   * This route does not decide. By the time a call arrives the owner has already
+   * read a capsule naming the literal URL or the literal element and approved it
+   * once, and a receipt exists. What is left is to do the thing.
+   */
+  async function postForgeBrowse(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const presented = header(req, 'x-zeno-gate') ?? '';
+    const body = await readJson(req);
+    const runId = str(body, 'runId') ?? '';
+    const run = gateRuns.get(runId);
+    if (presented === '' || run === undefined || !sameSecret(presented, run.token)) {
+      return json(res, 403, {
+        error: {
+          code: 'gate-credential-invalid',
+          message: 'That is not a live Zeno run credential.',
+          resolve: 'A run credential is minted per run and dies with it. Nothing was opened.',
+        },
+      });
+    }
+    const session = browseRuns.get(runId);
+    if (session === undefined) {
+      return json(res, 200, {
+        result: { ok: false, detail: 'This run has no browser. Zeno grants one only when it has proved a window of its own is live.' },
+      });
+    }
+    const result = await session.ask(str(body, 'op') ?? '', body['input']);
+    json(res, 200, { result });
   }
 
   /**
@@ -588,6 +709,7 @@ export function createServer(opts: DaemonOptions): Server {
     // credential minted for one run that opens this one route, and the route
     // checks it itself. Everything it can do is ask a question.
     if (req.method === 'POST' && path === '/forge/permissions') return await postForgePermission(req, res);
+    if (req.method === 'POST' && path === '/forge/browse') return await postForgeBrowse(req, res);
 
     // ---- everything below is authenticated ---------------------------------
     //
@@ -1462,6 +1584,17 @@ export function createServer(opts: DaemonOptions): Server {
         gateNote = `${GATE_UNPROVEN_NOTE} (${proof.note})`;
       }
     }
+    // And the browser, on exactly the same terms and in the same order: prove it
+    // BEFORE the agent is started, and publish nothing that was not proved. A
+    // run with no gate never reaches this — a browser without the permission
+    // host would be a navigation nobody was asked about.
+    let browserGranted = false;
+    let browserNote: string | null = null;
+    if (wiring !== null) {
+      const browser = await openBrowseRun(runId);
+      browserGranted = browser.granted;
+      browserNote = browser.note;
+    }
     try {
       const result = agentId === 'local'
         ? await runLocalModel(tree.path, task, model, effort)
@@ -1474,7 +1607,15 @@ export function createServer(opts: DaemonOptions): Server {
               ...(effort ? { effort } : {}),
               ...(wiring && url
                 ? {
-                    gate: { mcpConfig: wiring.mcpConfig, network: opts.forgeNetwork === true },
+                    gate: {
+                      // Built HERE, after both proofs, so the MCP config the CLI
+                      // is handed can never declare a server this run did not
+                      // demonstrate. The tool list and the server list come from
+                      // the same two booleans by construction.
+                      mcpConfig: gateMcpConfig({ browser: browserGranted }),
+                      network: opts.forgeNetwork === true,
+                      browser: browserGranted,
+                    },
                     env: gateEnv(url, wiring.token, runId),
                   }
                 : {}),
@@ -1515,7 +1656,7 @@ export function createServer(opts: DaemonOptions): Server {
       // The owner asked for a governed agent and got a file-only one; that is
       // the most important true thing about the run, and burying it under "the
       // CLI exited 1" is how a missing gate goes unnoticed.
-      const note = [gateNote, result.note].filter((n): n is string => typeof n === 'string' && n !== '').join(' ');
+      const note = [gateNote, browserNote, result.note].filter((n): n is string => typeof n === 'string' && n !== '').join(' ');
       return {
         run: { ok: result.ok, agentId: result.agentId, model: result.model, effort: result.effort ?? null, log: result.log, note: note === '' ? null : note },
         changed,
@@ -1526,6 +1667,9 @@ export function createServer(opts: DaemonOptions): Server {
       // it: an approval for a command with nothing left to run it is not an
       // approval anybody should still be able to click.
       closeGateRun(runId);
+      // The window dies with the run too. A browser outliving its run would be a
+      // page left open, logged in, with nothing left to account for what it did.
+      closeBrowseRun(runId);
       try { tree.cleanup(); } catch { /* best effort */ }
     }
   }
