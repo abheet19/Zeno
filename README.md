@@ -461,10 +461,12 @@ and the same inputs produce a byte-identical ledger.
 
 ```text
 Zeno/
-├─ packages/            twelve independently-testable packages
+├─ packages/            fourteen independently-testable packages
 │  ├─ kernel/           the gate — tiers, policy, compare-and-swap, signed ledger, jailed executors
 │  ├─ daemon/           loopback server + chromeless window — the boundary that makes L6 structural
 │  ├─ forge/            governed coding-agent runner + worktree isolation + the tool-call gate
+│  ├─ browse/           a browser Zeno starts and bounds — one isolated window per run, http(s) only
+│  ├─ desktop/          the native application window, and the daemon's lifetime
 │  ├─ counsel/          meeting engine — cited decisions, action items, open questions
 │  ├─ vault/            governed local memory + daily brief
 │  ├─ sanitizer/        secret detection & redaction
@@ -539,6 +541,7 @@ not another machine. There is no inbound surface at all.
 | **Claude Code** | Only if you pick it as the agent in Forge | Your task and code context go to Anthropic — inherent to choosing a hosted model |
 | **A command a Forge agent runs** | Only after you approve **that exact command**, once | Wherever the command itself goes. `npm test` goes nowhere; `npm install` reaches a registry; `curl` reaches whatever you read on the capsule and agreed to |
 | **`WebFetch` / `WebSearch`** | Only if you set `ZENO_FORGE_NETWORK=1`, **and then still approve every call** | The URL or query shown on the capsule. **Off by default** — see below |
+| **Zeno's own browser** | Only if you set `ZENO_FORGE_NETWORK=1`, **and** Zeno proves a window of its own is live, **and then still approve every navigation** | The exact URL shown on the capsule, fetched by a Chromium window Zeno started — fresh session, no profile, no cookies, no extensions, `http(s)` only. **Off by default**; `ZENO_FORGE_BROWSER=0` switches it off even with the network on |
 | **GitHub Issues** | Only if you set `ZENO_GITHUB_REPO` | `api.github.com`, read-only |
 | **Speech recognition** | Only while you hold-to-talk, or record in Counsel | Your *browser* sends the audio to its vendor. Not on-device |
 
@@ -569,7 +572,7 @@ rather than stretched. Every call is sorted by **what escapes**:
 | | Tools | What happens |
 |---|---|---|
 | **Routine** | `Read` `Glob` `Grep` `NotebookRead` `Write` `Edit` `NotebookEdit` `TodoWrite` `ExitPlanMode` `BashOutput` `KillShell` | Nothing. They cannot leave the throwaway worktree, and every file they write still becomes an approval capsule at the end of the run |
-| **Governed** | `Bash` — and `WebFetch` / `WebSearch` when you turn the network on | Each call stops. classify → preview → **you** approve → **one** attempt → a signed receipt naming the exact command. Per call, not per run |
+| **Governed** | `Bash` — and `WebFetch` / `WebSearch` / Zeno's browser when you turn the network on | Each call stops. classify → preview → **you** approve → **one** attempt → a signed receipt naming the exact command. Per call, not per run |
 | **Refused** | `Task` (subagents), the permission host itself, and **anything unclassified** | Not available, at any approval |
 
 The last row is the one that matters most: a tool the CLI grows next month rounds **up** to a
@@ -582,6 +585,32 @@ before every governed run the permission bridge is started exactly as the CLI wi
 asked a question only the running kernel can answer. If it cannot answer, the run does not proceed
 ungoverned: it drops to the file-only surface below and **says so in the run's note**. A gate that
 cannot be shown to work costs the agent a capability, never you the guarantee.
+
+**The agent has a browser, and it is one Zeno starts.** Reading a page is something a coding agent
+genuinely needs, and there were two ways to give it one. An external MCP browser server would have
+been the easy one — and `tools.ts` already says why it is the wrong one: an MCP server is *a process
+outside the worktree that Zeno neither started nor bounds.* So the browser is **embedded**. Zeno
+already ships Chromium (the desktop app *is* Electron), so this adds **no new runtime dependency** —
+no driver download, no CDN, nothing installed. The daemon starts one window per run, in a fresh
+in-memory session with **no profile, no cookies, no logins and no extensions**, jailed to `http(s)`
+so `file:///` is unreachable even by redirect, with downloads cancelled, device permissions denied,
+`nodeIntegration: false`, `contextIsolation: true` and no `remote`. It is killed when the run ends.
+
+It reaches the agent as five ordinary MCP tools on Zeno's own bridge, so the existing rules apply
+unchanged — and they are **tiered by what each one actually does**, because "it's all just a
+browser" is exactly the flattening that produces an unread capsule:
+
+| | What the capsule says | Rated as |
+|---|---|---|
+| `navigate` | **the literal URL**, in full | `net.fetch` (T2) — this *is* the page fetch, so it is gated exactly as `WebFetch` is, `ZENO_FORGE_NETWORK` included. A `file:`, `data:` or credential-bearing URL is refused before any capsule exists |
+| `read` `screenshot` | that it reads the page **already open** | `net.fetch` (T2) — no new request, but untrusted text arrives from off the machine and goes into the agent's context |
+| `click` `type` | **the literal selector**, and for `type` **the literal text** | `shell.exec` (T3) — a click submits the form, sends the message, accepts the terms. Like a command, only you reading the exact target tells the harmless from the costly |
+
+**And the browser is proved, not assumed** — the same discipline as the gate, at the second
+subsystem. Before the agent starts, the window must answer a test call and name the run it belongs
+to. If it cannot, the run gets **no browser tools at all**: absent from `--tools`, no browser server
+in `--mcp-config`, and the run says so in its note. All five are also named in `permissions.ask`,
+because *not* being pre-approved was already proved insufficient once — see above.
 
 **Why network is off by default, and commands are not.** They fail differently. A command you
 approved and regret is a mistake you can see the consequences of and often undo; bytes that left
@@ -596,7 +625,8 @@ one approval per command is a cost worth paying. Egress is not, unless you say s
 |---|---|
 | `ZENO_FORGE_NETWORK=1` | The only way `WebFetch` and `WebSearch` exist at all. Unset (the default) and they are not on the agent's command line |
 | `ZENO_FORGE_SHELL=0` | Puts Forge back to file-only: no `Bash`, no permission host, and `--permission-prompts none` so anything that would ask is denied outright |
-| *(nothing to set)* | MCP and browser tooling. A governed run is launched `--strict-mcp-config` with only Zeno's own permission host declared, so no MCP server the machine happens to have configured joins a run |
+| `ZENO_FORGE_BROWSER=0` | No browser, even with the network on. Its five tools are absent from the agent's command line — not refused, **absent** |
+| *(nothing to set)* | Third-party MCP servers. A governed run is launched `--strict-mcp-config` with only Zeno's OWN servers declared — the permission host, and the browser when this run proved it has one — so no MCP server the machine happens to have configured joins a run |
 
 **What a receipt for a command proves, exactly.** That you authorised *this* tool with *these*
 arguments, once. It does not prove what the command then did — the CLI runs it, and its output is
