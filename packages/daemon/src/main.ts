@@ -5,7 +5,7 @@
  * Everything it needs lives in one directory (default `./.zeno`): the receipt
  * ledger, an optional `policy.json`, and the sandbox the executor is jailed to.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -225,7 +225,26 @@ function main(): void {
   // drive a window that then clicks things" are different questions.
   const forgeBrowser = !/^(0|false|off|no)$/i.test((process.env['ZENO_FORGE_BROWSER'] ?? '').trim());
 
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser });
+  // The owner's OWN, SIGNED-IN CHROME. OFF unless they say so, and the only
+  // capability on this page that defaults off rather than merely being
+  // conditional.
+  //
+  // Every other switch here decides whether a bounded thing appears on the
+  // agent's command line. This one decides whether an agent may act AS THE OWNER
+  // on every site they are logged into, and that is not a capability anybody
+  // should acquire by upgrading Zeno. Even set, it is the first of four
+  // conditions: the run needs a live permission gate, the extension in their
+  // browser must PROVE itself before the agent starts, and every operation is
+  // still refused unless its origin is on the allowlist they set themselves and
+  // off Zeno's never-list (banking, mail, cloud consoles, identity providers).
+  const forgeChrome = /^(1|true|on|yes)$/i.test((process.env['ZENO_FORGE_CHROME'] ?? '').trim());
+
+  // The credential the native-messaging host presents on its two routes. Minted
+  // per process, like every other Zeno token, and good for nothing else: it can
+  // carry an answer back from the browser and it can approve nothing.
+  const chromeToken = randomBytes(24).toString('hex');
+
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser, forgeChrome, chromeToken });
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in
@@ -234,6 +253,26 @@ function main(): void {
   const tokenPath = join(dir, 'proposer.token');
   mkdirSync(dir, { recursive: true });
   writeFileSync(tokenPath, tokens.proposer + '\n', { encoding: 'utf8', mode: 0o600 });
+
+  // Where the Chrome native-messaging host finds this daemon. Written ONLY when
+  // the owner switched the capability on, and REMOVED otherwise — so a host left
+  // registered from a previous experiment cannot quietly attach to a daemon that
+  // was never asked to offer this. It holds an address and a per-process
+  // credential, at 0600, beside the proposer token the owner already relies on
+  // the same protection for.
+  const chromeHostPath = join(dir, 'chrome-host.json');
+  if (forgeChrome) {
+    writeFileSync(chromeHostPath, JSON.stringify({ url: `http://${HOST}:${PORT}`, token: chromeToken }, null, 2) + '\n', {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } else {
+    try {
+      rmSync(chromeHostPath, { force: true });
+    } catch {
+      /* nothing to remove */
+    }
+  }
 
   // A second copy of Zeno is a normal thing to do by accident — double-clicking
   // the launcher twice. Say so in one plain sentence and point at the window that

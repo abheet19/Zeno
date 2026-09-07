@@ -79,6 +79,15 @@ import {
   type BrowserHost,
 } from '@abheet19/zeno-browse';
 import {
+  ALLOWLIST_FILE,
+  CHROME_UNPROVEN_NOTE,
+  addOrigin,
+  chromeDesk,
+  readOriginPolicy,
+  removeOrigin,
+  type ChromeDesk,
+} from '@abheet19/zeno-chrome';
+import {
   buildSnapshot,
   buildAssistantPrompt,
   describeTruncation,
@@ -200,6 +209,35 @@ export interface DaemonOptions {
    * that the run then carries NO browser tools at all.
    */
   readonly browserHost?: BrowserHost;
+  /**
+   * Whether a governed Forge run may be given the OWNER'S OWN, SIGNED-IN CHROME.
+   *
+   * Defaults to FALSE — the only capability in this file that does. Every other
+   * switch here decides whether a bounded thing is on the command line; this one
+   * decides whether an agent may act AS THE OWNER on every site they are logged
+   * into, and a capability like that is not one anybody should acquire by
+   * upgrading. `ZENO_FORGE_CHROME=1` is the owner saying it out loud, and even
+   * then it is only the first of four conditions: the run needs a live
+   * permission gate, the extension in their browser must PROVE itself, and every
+   * single operation is refused unless its origin is on the allowlist they set
+   * themselves and off Zeno's never-list.
+   */
+  readonly forgeChrome?: boolean;
+  /**
+   * The desk between Zeno and the Chrome extension. Omit for the real one.
+   *
+   * Injectable for the same reason `browserHost` is: the interesting cases are
+   * the failing ones — an extension that cannot be proved, an origin off the
+   * allowlist — and a test needs to be able to produce them.
+   */
+  readonly chromeDeskFor?: ChromeDesk;
+  /**
+   * The credential the native-messaging host presents on `/chrome/attach` and
+   * `/chrome/result`. Minted per process, written to the workspace for the host
+   * to read, and good for exactly those two routes: it can carry an answer and
+   * it can never approve anything.
+   */
+  readonly chromeToken?: string;
   /**
    * How long a governed tool call waits for the owner before it is denied.
    *
@@ -583,6 +621,185 @@ export function createServer(opts: DaemonOptions): Server {
     json(res, 200, { result });
   }
 
+  // ---- Forge: the OWNER'S OWN, SIGNED-IN CHROME ------------------------------
+  //
+  // WHY AN EXTENSION AND NOT CDP, recorded here because it is the question every
+  // reader asks first. Since CHROME 136 `--remote-debugging-port` is IGNORED
+  // against the default user-data-dir and takes effect only when paired with a
+  // non-default `--user-data-dir` — which uses a different encryption key and so
+  // holds none of the owner's real cookies or logins. Google hardened it exactly
+  // because malware abused CDP to attach to real profiles and pull state out of
+  // them. So CDP-against-the-real-profile is closed by design, and a fresh-
+  // profile CDP browser would only duplicate `packages/browse` badly. A Manifest
+  // V3 extension plus a native-messaging host is the supported path, and it has
+  // the property that matters more than convenience: the owner installs it
+  // themselves, in their own browser, and can see and remove it there.
+  //
+  // WHY NATIVE MESSAGING AND NOT A SOCKET. The README says Zeno has "no inbound
+  // surface at all". A helper listening on a port — loopback or not — would make
+  // that false. The native host is spawned BY CHROME, speaks framed stdio to it,
+  // and reaches OUT to the two routes below. Nothing new listens.
+  //
+  // ONE DESK PER DAEMON, not per run. The owner has one browser and one
+  // extension; what is per-run is the CREDENTIAL and the PROOF, not the desk.
+  // A daemon with no named workspace keeps its allowlist beside the default
+  // one, and the file being absent means an EMPTY allowlist rather than an
+  // error — so the failure mode of an unconfigured workspace is a capability
+  // that refuses every origin, never one that allows any.
+  const chromeOriginsPath = join(opts.workspace ?? '.zeno', ALLOWLIST_FILE);
+  const chrome: ChromeDesk = opts.chromeDeskFor ?? chromeDesk({ policy: () => readOriginPolicy(chromeOriginsPath) });
+  /** Runs that PROVED the extension live. Membership is what makes the tools exist. */
+  const chromeRuns = new Set<string>();
+
+  /**
+   * Give a run the owner's Chrome, or don't — and prove it either way.
+   *
+   * Two conditions before the proof is even attempted: the owner switched the
+   * capability on, and the run is governed at all. Then the extension must
+   * ANSWER and name the profile it is installed in. A subsystem that cannot be
+   * proved live costs the run its Chrome tools — absent from the command line
+   * rather than merely refused — and the run says so out loud.
+   */
+  async function openChromeRun(runId: string): Promise<{ readonly granted: boolean; readonly note: string | null }> {
+    if (opts.forgeChrome !== true) return { granted: false, note: null };
+    let proof;
+    try {
+      proof = await chrome.prove();
+    } catch (err) {
+      proof = { live: false, note: `the Chrome proof itself failed — ${(err as Error).message}` };
+    }
+    if (!proof.live) return { granted: false, note: `${CHROME_UNPROVEN_NOTE} (${proof.note})` };
+    chromeRuns.add(runId);
+    return { granted: true, note: null };
+  }
+
+  /** A run's grant dies with the run. The browser outlives it; the permission does not. */
+  function closeChromeRun(runId: string): void {
+    chromeRuns.delete(runId);
+  }
+
+  /** Both host routes carry the same credential, so they check it the same way. */
+  function chromeHostAuthorised(req: IncomingMessage): boolean {
+    const presented = header(req, 'x-zeno-chrome') ?? '';
+    return opts.chromeToken !== undefined && presented !== '' && sameSecret(presented, opts.chromeToken);
+  }
+
+  const chromeHostDenial = {
+    error: {
+      code: 'chrome-credential-invalid',
+      message: 'That is not this Zeno’s Chrome bridge credential.',
+      resolve:
+        'Re-register the native host against this workspace: node packages/chrome-bridge/install/register-host.mjs <extension-id>',
+    },
+  };
+
+  /**
+   * The native host's long poll. Authenticated by the CHROME credential, which
+   * opens this route and `/chrome/result` and nothing else — it cannot approve,
+   * cannot propose, and cannot read the ledger.
+   *
+   * This route only hands out work the daemon itself created. There is no shape
+   * of request here that lets the browser ORIGINATE an operation.
+   */
+  async function postChromeAttach(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!chromeHostAuthorised(req)) return json(res, 403, chromeHostDenial);
+    await readJson(req);
+    const request = await chrome.take();
+    json(res, 200, { request });
+  }
+
+  /** The native host's answer to one operation. Same credential, same two routes. */
+  async function postChromeResult(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!chromeHostAuthorised(req)) return json(res, 403, chromeHostDenial);
+    const body = await readJson(req);
+    const carry = (name: string): Record<string, string> => {
+      const v = str(body, name);
+      return v === null || v === '' ? {} : { [name]: v };
+    };
+    const accepted = chrome.settle({
+      id: typeof body['id'] === 'number' ? body['id'] : -1,
+      ok: body['ok'] === true,
+      detail: str(body, 'detail') ?? '',
+      ...carry('url'),
+      ...carry('title'),
+      ...carry('text'),
+      ...carry('jpeg'),
+      ...carry('profile'),
+    });
+    json(res, 200, { accepted });
+  }
+
+  /**
+   * Perform one approved operation in the owner's Chrome. Authenticated by the
+   * RUN credential, exactly as /forge/browse is.
+   *
+   * This route does not decide. By the time a call arrives, the origin has been
+   * checked against the owner's allowlist and Zeno's never-list, the owner has
+   * read a capsule naming that origin and saying it is their authenticated
+   * profile, approved it once, and a receipt exists.
+   */
+  async function postForgeChrome(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const presented = header(req, 'x-zeno-gate') ?? '';
+    const body = await readJson(req);
+    const runId = str(body, 'runId') ?? '';
+    const run = gateRuns.get(runId);
+    if (presented === '' || run === undefined || !sameSecret(presented, run.token)) {
+      return json(res, 403, {
+        error: {
+          code: 'gate-credential-invalid',
+          message: 'That is not a live Zeno run credential.',
+          resolve: 'A run credential is minted per run and dies with it. Nothing happened in your browser.',
+        },
+      });
+    }
+    if (!chromeRuns.has(runId)) {
+      return json(res, 200, {
+        result: {
+          ok: false,
+          detail:
+            'This run was never given your Chrome. Zeno grants it only when you have switched it on and the extension in your own browser has proved itself live.',
+        },
+      });
+    }
+    const result = await chrome.ask(str(body, 'op') ?? '', body['input']);
+    json(res, 200, { result });
+  }
+
+  /**
+   * The owner's Chrome allowlist, read and changed. OWNER-ONLY, and that is the
+   * whole design: adding an origin is a standing decision made deliberately in
+   * the Zeno window, never a capsule an agent can raise mid-run. An agent that
+   * could request its own allowlist entry would have turned the one decision
+   * that bounds this capability into one more click in a stream of clicks.
+   */
+  async function postChromeOrigins(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') {
+      return json(res, 403, {
+        error: {
+          code: 'owner-only',
+          message: 'Only the owner can change which sites Zeno may act on in their own Chrome.',
+          resolve: 'Do it from the Zeno window.',
+        },
+      });
+    }
+    const body = await readJson(req);
+    const origin = str(body, 'origin') ?? '';
+    if (str(body, 'action') === 'remove') {
+      return json(res, 200, { policy: removeOrigin(chromeOriginsPath, origin) });
+    }
+    const added = addOrigin(chromeOriginsPath, origin);
+    if (!added.ok) {
+      return json(res, 400, {
+        error: {
+          code: 'chrome-origin-refused',
+          message: added.reason,
+          resolve: 'Pick an https origin that is not on Zeno’s never-list.',
+        },
+      });
+    }
+    json(res, 200, { policy: added.policy, origin: added.origin });
+  }
+
   /**
    * The bridge's one route. Authenticated by the RUN credential, not by a Zeno
    * token — it is handled before the general authentication below because the
@@ -605,7 +822,10 @@ export function createServer(opts: DaemonOptions): Server {
     // Everything about the decision — classifying the call, previewing it,
     // holding it, reading the receipt — happens here, in the one process that
     // holds the kernel. The bridge relays; it does not decide.
-    const decision = await decidePermission(body['request'], run.gate);
+    // The owner's Chrome allowlist is read FRESH for every request, not captured
+    // when the run started: they may add or remove an origin while a run is in
+    // flight, and the decision must be made against what they have decided now.
+    const decision = await decidePermission(body['request'], run.gate, readOriginPolicy(chromeOriginsPath));
     json(res, 200, { decision });
   }
 
@@ -710,6 +930,11 @@ export function createServer(opts: DaemonOptions): Server {
     // checks it itself. Everything it can do is ask a question.
     if (req.method === 'POST' && path === '/forge/permissions') return await postForgePermission(req, res);
     if (req.method === 'POST' && path === '/forge/browse') return await postForgeBrowse(req, res);
+    if (req.method === 'POST' && path === '/forge/chrome') return await postForgeChrome(req, res);
+    // The native-messaging host's two routes. Its own credential, checked inside
+    // each handler — it holds neither Zeno token and must not.
+    if (req.method === 'POST' && path === '/chrome/attach') return await postChromeAttach(req, res);
+    if (req.method === 'POST' && path === '/chrome/result') return await postChromeResult(req, res);
 
     // ---- everything below is authenticated ---------------------------------
     //
@@ -773,6 +998,12 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/skills') return serveSkills(res);
     if (req.method === 'GET' && path === '/forge/agents') return await serveForgeAgents(res);
     if (req.method === 'POST' && path === '/forge/run') return await postForgeRun(req, res, role);
+    // Which sites Zeno may act on in the owner's OWN Chrome. Owner-only, and
+    // deliberately not reachable by an agent under any credential.
+    if (req.method === 'POST' && path === '/chrome/origins') return await postChromeOrigins(req, res, role);
+    if (req.method === 'GET' && path === '/chrome/origins') {
+      return json(res, 200, { policy: readOriginPolicy(chromeOriginsPath), attached: chrome.attached() });
+    }
     if (req.method === 'POST' && path === '/forge/permissions/decline') {
       return await postForgePermissionDecline(req, res, role);
     }
@@ -1595,6 +1826,18 @@ export function createServer(opts: DaemonOptions): Server {
       browserGranted = browser.granted;
       browserNote = browser.note;
     }
+    // And the owner's OWN Chrome, on the same terms and in the same order: the
+    // extension in their browser must answer BEFORE the agent is started, and a
+    // run with no gate never reaches this. Unlike the sandboxed window it does
+    // not ride on `forgeNetwork` - see `GateWiring.chrome` for why acting as the
+    // owner and fetching a URL are two different questions with two switches.
+    let chromeGranted = false;
+    let chromeNote: string | null = null;
+    if (wiring !== null) {
+      const asOwner = await openChromeRun(runId);
+      chromeGranted = asOwner.granted;
+      chromeNote = asOwner.note;
+    }
     try {
       const result = agentId === 'local'
         ? await runLocalModel(tree.path, task, model, effort)
@@ -1612,9 +1855,10 @@ export function createServer(opts: DaemonOptions): Server {
                       // is handed can never declare a server this run did not
                       // demonstrate. The tool list and the server list come from
                       // the same two booleans by construction.
-                      mcpConfig: gateMcpConfig({ browser: browserGranted }),
+                      mcpConfig: gateMcpConfig({ browser: browserGranted, chrome: chromeGranted }),
                       network: opts.forgeNetwork === true,
                       browser: browserGranted,
+                      chrome: chromeGranted,
                     },
                     env: gateEnv(url, wiring.token, runId),
                   }
@@ -1656,7 +1900,7 @@ export function createServer(opts: DaemonOptions): Server {
       // The owner asked for a governed agent and got a file-only one; that is
       // the most important true thing about the run, and burying it under "the
       // CLI exited 1" is how a missing gate goes unnoticed.
-      const note = [gateNote, browserNote, result.note].filter((n): n is string => typeof n === 'string' && n !== '').join(' ');
+      const note = [gateNote, browserNote, chromeNote, result.note].filter((n): n is string => typeof n === 'string' && n !== '').join(' ');
       return {
         run: { ok: result.ok, agentId: result.agentId, model: result.model, effort: result.effort ?? null, log: result.log, note: note === '' ? null : note },
         changed,
@@ -1670,6 +1914,9 @@ export function createServer(opts: DaemonOptions): Server {
       // The window dies with the run too. A browser outliving its run would be a
       // page left open, logged in, with nothing left to account for what it did.
       closeBrowseRun(runId);
+      // The grant on the owner's own browser dies with the run too. The browser
+      // does not - it is theirs - but nothing is left able to act in it.
+      closeChromeRun(runId);
       try { tree.cleanup(); } catch { /* best effort */ }
     }
   }
