@@ -61,6 +61,18 @@ $ zeno verify
 
 <div align="center"><sub>Illustrative — the exact commands and flags live in <a href="#-examples">Examples</a>.</sub></div>
 
+<div align="center">
+
+<br>
+
+<img src="docs/demos/gate.gif" width="880" alt="An agent proposes a change to package.json. Zeno holds it at tier T1, shows the owner the exact sentence, the action hash, the tier and the target path, and writes a signed receipt after one approval.">
+
+<sub><b>The gate, recorded.</b> An agent asks to touch <code>package.json</code> &middot; it is <b>held</b> &middot; the capsule
+states exactly what would happen &middot; one click &middot; a <b>signed receipt</b> exists.<br>
+A real recording of the real window, not a mockup. All four demos: <a href="docs/demos/">docs/demos</a>.</sub>
+
+</div>
+
 ---
 
 <details open>
@@ -255,6 +267,26 @@ means the same thing whichever agent you pick.
 
 </details>
 
+<div align="center">
+
+<br>
+
+<img src="docs/demos/forge.gif" width="880" alt="A task is typed into Forge. The agent runs headless in a throwaway git worktree; the file it wrote opens in the editor; the routine write is applied and receipted automatically, and the commit is receipted separately.">
+
+<sub><b>Forge, recorded.</b> A task in &middot; headless in a throwaway worktree &middot; the file it wrote, read back out of the
+repository.<br>An ordinary source file is routine, so it is applied and receipted without interrupting anyone
+(<code>local.write &middot; T0</code>). The commit is its own act, and its own receipt (<code>vcs.commit &middot; T1</code>).</sub>
+
+<br><br>
+
+<img src="docs/demos/shell.gif" width="880" alt="A governed Forge run asks to run a shell command. The capsule carries the literal command string at tier T3, kind shell.exec, and the approved run lands a verified receipt.">
+
+<sub><b>And the same gate for a command.</b> The run asks to execute <code>node --version</code> and is stopped mid-run. The
+capsule carries the <b>literal command string</b><br>at <code>T3 &middot; shell.exec</code>. One approval, one attempt, and a
+<code>verified</code> receipt in the same ledger as every file edit.</sub>
+
+</div>
+
 ---
 
 ## 🔒 How the safety works
@@ -289,6 +321,18 @@ sequenceDiagram
     O->>D: POST /approvals
     D-->>O: signed receipt
 ```
+
+<div align="center">
+
+<br>
+
+<img src="docs/demos/self-approval.gif" width="880" alt="The same capsule, approved by a client carrying the proposer token. The daemon answers 403 self-approval-forbidden, and the ledger panel underneath still reads empty.">
+
+<sub><b>L6, recorded.</b> The same capsule &mdash; approved by a client carrying the <b>proposer</b> token, which is what an
+agent holds.<br><code>403 self-approval-forbidden</code>, and the ledger under it still reads
+<i>nothing has been committed yet</i>.</sub>
+
+</div>
 
 <details>
 <summary><b>The receipt chain — why a hash chain alone isn't enough</b></summary>
@@ -461,11 +505,12 @@ and the same inputs produce a byte-identical ledger.
 
 ```text
 Zeno/
-├─ packages/            fourteen independently-testable packages
+├─ packages/            fifteen independently-testable packages
 │  ├─ kernel/           the gate — tiers, policy, compare-and-swap, signed ledger, jailed executors
 │  ├─ daemon/           loopback server + chromeless window — the boundary that makes L6 structural
 │  ├─ forge/            governed coding-agent runner + worktree isolation + the tool-call gate
 │  ├─ browse/           a browser Zeno starts and bounds — one isolated window per run, http(s) only
+│  ├─ chrome-bridge/    the owner's OWN signed-in Chrome — MV3 extension + native host, off by default
 │  ├─ desktop/          the native application window, and the daemon's lifetime
 │  ├─ counsel/          meeting engine — cited decisions, action items, open questions
 │  ├─ vault/            governed local memory + daily brief
@@ -532,7 +577,10 @@ A sample of what that caught, and fixed:
 Zeno is local-first, not air-gapped. Being precise about this matters more than a slogan.
 
 **Nothing can reach *in*.** The daemon binds to `127.0.0.1` — not your network, not your router,
-not another machine. There is no inbound surface at all.
+not another machine. There is no inbound surface at all. That includes the Chrome bridge below: its
+native-messaging host is *started by Chrome* and speaks over Chrome's own stdio pipe, then reaches
+**out** to the address Zeno already binds. It opens no port of its own — deliberately, because a
+helper listening anywhere would make the sentence above false.
 
 **Outbound, this is the whole list — and each line is something you switched on:**
 
@@ -542,6 +590,7 @@ not another machine. There is no inbound surface at all.
 | **A command a Forge agent runs** | Only after you approve **that exact command**, once | Wherever the command itself goes. `npm test` goes nowhere; `npm install` reaches a registry; `curl` reaches whatever you read on the capsule and agreed to |
 | **`WebFetch` / `WebSearch`** | Only if you set `ZENO_FORGE_NETWORK=1`, **and then still approve every call** | The URL or query shown on the capsule. **Off by default** — see below |
 | **Zeno's own browser** | Only if you set `ZENO_FORGE_NETWORK=1`, **and** Zeno proves a window of its own is live, **and then still approve every navigation** | The exact URL shown on the capsule, fetched by a Chromium window Zeno started — fresh session, no profile, no cookies, no extensions, `http(s)` only. **Off by default**; `ZENO_FORGE_BROWSER=0` switches it off even with the network on |
+| **Your OWN, signed-in Chrome** | Only if you set `ZENO_FORGE_CHROME=1`, **and** install the Zeno extension yourself, **and** Zeno proves that extension is live, **and** the origin is on an allowlist **you** wrote, **and then still approve every single action** | Whatever that origin is — **as you**, with your cookies and your sessions. This is categorically different from every other line here: it is the only one that can act *as you* rather than merely send bytes. **Off by default.** Banking, mail, cloud consoles, identity providers and password managers are refused outright and your allowlist cannot override that. See below |
 | **GitHub Issues** | Only if you set `ZENO_GITHUB_REPO` | `api.github.com`, read-only |
 | **Speech recognition** | Only while you hold-to-talk, or record in Counsel | Your *browser* sends the audio to its vendor. Not on-device |
 
@@ -612,6 +661,76 @@ to. If it cannot, the run gets **no browser tools at all**: absent from `--tools
 in `--mcp-config`, and the run says so in its note. All five are also named in `permissions.ask`,
 because *not* being pre-approved was already proved insufficient once — see above.
 
+**The agent can also act in the browser you are actually logged into — and that is a different
+thing entirely.** Reading a page in a throwaway window is one capability; doing something on a site
+*as you* is another, and this section exists so nobody confuses them. It is **off by default**, and
+it is the only capability in Zeno that is.
+
+*Why an extension and not remote debugging.* The obvious route is `--remote-debugging-port`, and it
+is closed by design. Since **Chrome 136** those debugging switches are **ignored** against the
+default user-data-dir and work only when paired with a non-default `--user-data-dir` — which uses a
+different encryption key and therefore holds **none** of your real cookies or logins. Google
+hardened this precisely because malware was abusing CDP to attach to real profiles and pull state
+out of them. So CDP either does not work, or works against a fresh profile — and a fresh profile is
+what `zeno_browse` above already is, done better. The supported route is a **Manifest V3
+extension** plus a **native-messaging host**, and it has the property that matters more than
+convenience: *you* install it, in your own browser, and you can see and remove it there.
+
+*It is a separate tool namespace, on purpose.* `mcp__zeno_chrome__*`, never merged into
+`mcp__zeno_browse__*`. Two blast radii, two names, two shapes of capsule — so that a receipt read
+weeks later says which browser acted.
+
+*Everything here is rated strictly above its sandboxed twin.* Nothing in your real Chrome is T2 or
+below, because even a read is a read of authenticated content:
+
+| | The sandboxed window | **Your signed-in Chrome** |
+|---|---|---|
+| `read` `screenshot` | `net.fetch` (T2) | **`shell.exec` (T3)** — what is on the page is whatever *you* are signed in to. That is a read of your private content, not of a public page |
+| `navigate` | `net.fetch` (T2) | **`shell.exec` (T3)** — a signed-in navigation is not an anonymous fetch. The request carries your session, so a plain link can log you out, unsubscribe you, or confirm something |
+| `click` `type` | `shell.exec` (T3) | **`destructive` (T3)** — the loudest kind the tier model has. A click here sends the message, accepts the terms, places the order, deletes the thing — in your name, from your account |
+
+*Every capsule names the origin and says whose browser it is.* It reads
+`Your signed-in Chrome · https://github.com — click "#merge"`, and the reasons say in as many words
+that this is your authenticated profile and **not** the throwaway window. You should never have to
+work out which browser a capsule means.
+
+*Per-origin consent, and it is your standing decision — not a question asked mid-run.* An origin
+that is not on your allowlist is **refused before a capsule exists**, exactly as a `file:` URL is
+refused for the sandboxed window. Adding one is an owner-only act done in the Zeno window and
+written to `.zeno/chrome-origins.json`, which you can read and delete in one glance. An agent
+cannot request an allowlist entry under any credential — a standing decision that can be asked for
+in the moment is not a standing decision, it is one more click in a stream of clicks. **An absent
+file means an empty allowlist**, so a fresh workspace has this capability able to reach nowhere.
+Chrome enforces its own second consent independently: the extension ships with `host_permissions`
+empty and gains a site only when you grant it from its popup, with a gesture Chrome requires and no
+code here can fake.
+
+*A never-list your allowlist cannot override.* Banking and payments, mail, cloud consoles, identity
+providers and password managers are refused outright — a short, grouped, readable list plus one
+label rule (`bank`, `banking`, `netbanking`), in the spirit of the shell rules above: a rule you
+cannot hold in your head is a rule you cannot audit. It is checked **before** the allowlist, so an
+origin on both is refused. You can *extend* it (`neverExtra`) and you cannot subtract from it. And
+`https` only — stricter than the sandboxed window, because a plaintext page in that profile puts
+your session cookie on the wire.
+
+*Proved, not assumed* — the same discipline as the gate and the sandboxed window, at the third
+subsystem. Chrome running, the extension enabled, the host registered, the manifest naming the
+right extension id: any of those can be quietly untrue, and a disabled extension looks exactly like
+a working one. So before the agent starts, the extension must answer a test call **and name the
+profile it is installed in**. If it cannot, the run gets **no Chrome tools at all** — absent from
+`--tools`, no server in `--mcp-config` — and says so in its note. All five are named in
+`permissions.ask` too, for the reason above.
+
+*One at a time, never a queue.* A second operation while one is outstanding is refused rather than
+parked, so an approval you gave five minutes ago can never fire into a page you have since navigated
+away from. And the origin on the capsule is the origin that acts: the extension compares the tab in
+front against what you approved and refuses a mismatch rather than carrying the approval across.
+
+*Setting it up* — three deliberate steps, none of them automatic:
+`chrome://extensions` → Developer mode → **Load unpacked** → `packages/chrome-bridge/extension`;
+then `node packages/chrome-bridge/install/register-host.mjs <extension-id>`; then start Zeno with
+`ZENO_FORGE_CHROME=1`. Zeno will not install an extension that can act as you.
+
 **Why network is off by default, and commands are not.** They fail differently. A command you
 approved and regret is a mistake you can see the consequences of and often undo; bytes that left
 the machine cannot be recalled by refusing the next call. `WebSearch` also fires constantly, and a
@@ -626,6 +745,7 @@ one approval per command is a cost worth paying. Egress is not, unless you say s
 | `ZENO_FORGE_NETWORK=1` | The only way `WebFetch` and `WebSearch` exist at all. Unset (the default) and they are not on the agent's command line |
 | `ZENO_FORGE_SHELL=0` | Puts Forge back to file-only: no `Bash`, no permission host, and `--permission-prompts none` so anything that would ask is denied outright |
 | `ZENO_FORGE_BROWSER=0` | No browser, even with the network on. Its five tools are absent from the agent's command line — not refused, **absent** |
+| `ZENO_FORGE_CHROME=1` | The only way the agent can touch your **own, signed-in Chrome** at all. Unset (the default) and its five tools are not on the command line, whatever else is installed or running. It does *not* ride on `ZENO_FORGE_NETWORK`: "may the agent fetch a URL" and "may the agent act as me" are different questions and get different switches |
 | *(nothing to set)* | Third-party MCP servers. A governed run is launched `--strict-mcp-config` with only Zeno's OWN servers declared — the permission host, and the browser when this run proved it has one — so no MCP server the machine happens to have configured joins a run |
 
 **What a receipt for a command proves, exactly.** That you authorised *this* tool with *these*
