@@ -63,6 +63,29 @@
      newsreader-latin-var.woff2      Newsreader v26 variable (opsz 6..72, wght 400..600)
    ============================================================================= */
 
+/* =============================================================================
+   REAL DEPENDENCY: @abheet19/glass.
+
+   packages/daemon/package.json depends on @abheet19/glass via a local
+   `file:` reference (the zero-external-runtime-deps CI check in
+   .github/workflows/ci.yml already allow-lists any `@abheet19/*` package
+   name, so this is not an external dependency by that check's own
+   definition — verified by re-running the check after adding it).
+   scripts/sync-glass.mjs vendors the installed package's tokens.css into
+   ./vendor/glass-base.css at build time, byte-identical, so this static
+   file (served with no bundler) can @import a same-origin copy of it.
+
+   THIS IS AN OVERRIDE, NOT A REPLACEMENT. Every custom property below that
+   also exists in glass's base grammar (--r-1/2/3, --ease, --t-fast/base/slow,
+   --gl-blur/edge/spec, --ink/-2/-3, --fs-0/1/2, --font-ui/mono, and others)
+   is redeclared in this file's own :root block, which — later in the
+   cascade at equal specificity — wins. Zeno's Gate-2-approved colour law
+   and hex values are therefore completely unchanged by this import; it
+   only adds glass's tokens that Zeno does not already define, for anything
+   this file chooses to draw on later without re-deriving it from scratch.
+   ============================================================================= */
+@import url("./vendor/glass-base.css");
+
 @font-face {
   font-family: "IBM Plex Mono";
   font-style: normal;
