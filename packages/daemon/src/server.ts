@@ -1824,7 +1824,7 @@ export function createServer(opts: DaemonOptions): Server {
     model: string | undefined,
     effort: 'low' | 'medium' | 'high' | undefined,
   ): Promise<RunOutcome> {
-    const runId = `run-${opts.kernel.receipts().length}-${Date.now().toString(36)}`;
+    const runId = `run-${opts.kernel.receipts().length}-${Date.now().toString(36)}-${randomUUID()}`;
     let tree;
     try {
       tree = createWorktree(opts.sandbox, runId, gitRunner);
