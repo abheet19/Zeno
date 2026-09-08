@@ -68,8 +68,16 @@ $ zeno verify
 <img src="docs/demos/gate.gif" width="880" alt="An agent proposes a change to package.json. Zeno holds it at tier T1, shows the owner the exact sentence, the action hash, the tier and the target path, and writes a signed receipt after one approval.">
 
 <sub><b>The gate, recorded.</b> An agent asks to touch <code>package.json</code> &middot; it is <b>held</b> &middot; the capsule
-states exactly what would happen &middot; one click &middot; a <b>signed receipt</b> exists.<br>
-A real recording of the real window, not a mockup. All four demos: <a href="docs/demos/">docs/demos</a>.</sub>
+states exactly what would happen &middot; one click &middot; a <b>signed receipt</b> exists.</sub>
+
+<br><br>
+
+<img src="docs/demos/forge.gif" width="880" alt="A task is typed into Forge. The agent runs headless in a throwaway git worktree; the file it wrote opens in the editor; the routine write is applied and receipted automatically, and the commit is receipted separately.">
+
+<sub><b>Forge, recorded.</b> A task is typed in &middot; the agent runs headless in a throwaway git worktree &middot;
+the file it wrote opens in the editor &middot; the routine write is applied and <b>receipted automatically</b>, and the
+commit is receipted separately.<br>
+Real recordings of the real window, not mockups. All four demos: <a href="docs/demos/">docs/demos</a>.</sub>
 
 </div>
 
@@ -284,6 +292,13 @@ repository.<br>An ordinary source file is routine, so it is applied and receipte
 <sub><b>And the same gate for a command.</b> The run asks to execute <code>node --version</code> and is stopped mid-run. The
 capsule carries the <b>literal command string</b><br>at <code>T3 &middot; shell.exec</code>. One approval, one attempt, and a
 <code>verified</code> receipt in the same ledger as every file edit.</sub>
+
+<br><br>
+
+<sub>&#9673; <b>No recording of Counsel yet</b> — the two demos above are Forge's; Command's is in the hero at the top.
+Counsel's own claim is source-citation, not screen capture: every decision and action item it produces cites the
+exact transcript line it came from, and an item with no citation cannot be constructed — a property-tested guarantee
+(<code>150 + 500 randomized trials</code> asserting no fabrication), not a screenshot away.</sub>
 
 </div>
 
