@@ -1,5 +1,9 @@
 # 39 — Independent Audit (verify-not-trust)
 
+> **Historical audit — 2026-09-04.** Counts, line numbers and open findings below bind to the
+> working tree this audit inspected. Use `docs/43-ACCEPTANCE-EVIDENCE.md` for current acceptance
+> boundaries and `docs/35-HOW-TO-TEST.md` for the current gate.
+
 **For:** the planning instance and the owner.
 **From:** an independent review pass — six auditors, each re-ran the tests and read the source; none trusted docs 34/38.
 **Date:** 2026-09-04.

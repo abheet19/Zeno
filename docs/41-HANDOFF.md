@@ -1,5 +1,9 @@
 # Zeno — Handoff
 
+> **Historical handoff — 2026-09-05.** This records an earlier working tree. Its file counts,
+> package counts, build shape and test totals are not current. Use `docs/35-HOW-TO-TEST.md` for
+> current commands and `docs/43-ACCEPTANCE-EVIDENCE.md` for the current evidence boundary.
+
 **To:** the planning agent that designed Zeno
 **From:** the implementation session
 **Date:** 2026-09-05

@@ -11,8 +11,8 @@ reach on its own. If a flow broke, the GIF would show it breaking.
 |---|---|
 | [`gate.gif`](gate.gif) | **The whole thesis.** An agent proposes a change to `package.json`. It is held at tier **T1** — nothing has happened. The capsule states the exact sentence that was hashed into `provenanceHash`, the action hash, why the tier is what it is, and the literal target path. The owner approves once, and a **signed receipt** lands in the ledger: `verified`, with its own hash, the base it observed, and `prev receipt · null · genesis entry`. |
 | [`self-approval.gif`](self-approval.gif) | **The refusal.** The same capsule, but the client posting the approval carries the **proposer** token — the credential an agent holds. The daemon answers `403 self-approval-forbidden`: *"The proposer token cannot approve. Only the owner token can."* The panel under it still reads **the ledger is empty; nothing has been committed yet**. This is structural, not prompted: the approval route has no branch that says yes. |
-| [`shell.gif`](shell.gif) | **A command through the same gate.** A governed Forge run asks to run a shell command. It does not get to run it. The capsule carries the **literal command string** — `Run: node --version` — at tier **T3**, kind `shell.exec`. One approval, one attempt, and a `verified` receipt with `external effect  tool-grant:…` sitting in the same ledger as every file edit. |
-| [`forge.gif`](forge.gif) | **The coding agent, end to end.** A task goes in; the agent runs headless in a throwaway git worktree it cannot escape; the file it wrote comes back readable in the editor. An ordinary source file is a routine edit, so it is applied and receipted **without interrupting anyone** — `local.write · T0 · verified`. The commit is a separate act and takes its own path: `vcs.commit · T1`, previewed and receipted. The chain ends verified over both. |
+| [`shell.gif`](shell.gif) | **A Claude Code command through Zeno's gate.** A governed run asks to run a shell command. It does not get to run it. The capsule carries the **literal command string** — `Run: node --version` — at tier **T3**, kind `shell.exec`. One approval, one attempt, and a `verified` receipt with `external effect  tool-grant:…` sitting in the same ledger as every file edit. |
+| [`forge.gif`](forge.gif) | **The current Forge owner-review flow.** A real task changes `package.json` in a disposable Git fixture and isolated worktree. Forge opens the exact file diff, holds it at **T1**, and waits. The owner approves it in the Session pane, a durable **verified** receipt appears, and the built-in terminal runs real `git status --short`, showing `M package.json` with exit code 0. |
 
 ## Why there is no `verify.gif`
 
@@ -41,18 +41,21 @@ npm install                    # playwright is a devDependency
 npx playwright install chromium
 npm run build
 
-node tools/record-demos.mjs              # all four
+node tools/record-demos.mjs              # all four: gate, self-approval, forge, shell
 node tools/record-demos.mjs gate shell   # just these
 ```
 
-`shell` and `forge` start a **governed Forge run**, so they need the `claude` CLI on `PATH` and
+`shell` starts a **governed Claude Code Forge run**, so it needs the `claude` CLI on `PATH` and
 signed in. `gate` and `self-approval` need nothing but the daemon and take about a minute between
-them.
+them. `forge` creates and commits a tiny Git fixture under `.demo-scratch/forge-fixture`, submits a
+real file proposal through the daemon, approves it with the owner credential, and runs a real
+terminal command. It never points the recorder at the repository being documented.
 
 The recorder starts its own daemon on its own workspace (`.zeno-demo`) and its own port (`7399`,
 override with `ZENO_DEMO_PORT`), so it never contends with a Zeno you already have running — two
 daemons on one workspace would fork the receipt chain, and the daemon correctly refuses. The
-workspace is deleted afterwards. Set `PYTHON` if `python` is not the interpreter with Pillow on it.
+workspace and disposable Forge fixture are deleted afterwards. Set `PYTHON` if `python` is not the
+interpreter with Pillow on it.
 
 Frames land in `.demo-scratch/frames/<name>/` alongside a `manifest.json`. To retime or re-quantise
 a demo without re-recording it, edit that manifest and run the assembler on its own:

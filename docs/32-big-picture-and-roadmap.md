@@ -1,5 +1,9 @@
 # Zeno — The Big Picture (the plan, how it connects, what's next)
 
+> **Historical implementation note.** This document describes the Phase 1 P1-01/P1-02 slice,
+> not the current complete product surface. Use [the current study pack](44-STUDY-PACK.md) for the
+> present architecture and [the test guide](35-HOW-TO-TEST.md) for reproducible behavior.
+
 Read this *before* the code walkthrough. It's the map. The walkthrough is the
 street-level detail; this is the view from above.
 

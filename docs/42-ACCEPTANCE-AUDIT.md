@@ -1,5 +1,10 @@
 # Acceptance audit — 2026-09-05
 
+> **Historical audit — do not quote as current acceptance status.** The headline below did not
+> retain an AC-ID-to-artifact mapping and later work changed both the implementation and the test
+> surface. No canonical ledger row was promoted by that audit. See
+> `docs/43-ACCEPTANCE-EVIDENCE.md` for the current evidence boundary.
+
 Graded against the tree as it stands, by running it, not by reading it. Where a
 claim below says "verified", something was executed and its output observed.
 

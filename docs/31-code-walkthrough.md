@@ -1,5 +1,9 @@
 # Zeno — Code Walkthrough (Phase 1, slices P1-01 + P1-02)
 
+> **Historical implementation note.** This document describes the Phase 1 P1-01/P1-02 slice,
+> not the current complete product surface. Use [the current study pack](44-STUDY-PACK.md) for the
+> present architecture and [the test guide](35-HOW-TO-TEST.md) for reproducible behavior.
+
 A guided tour of everything we've built so far, written so you can *understand* it —
 not just trust it. It explains each piece, the idea behind it, and the concepts we
 leaned on. Read it top to bottom once; it builds up.

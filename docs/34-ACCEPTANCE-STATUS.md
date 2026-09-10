@@ -1,5 +1,10 @@
 # 34 — Acceptance Status
 
+> **Historical snapshot — 2026-09-04.** Package counts, test results and implementation states
+> below describe that frozen tree and are not current evidence. See
+> `docs/43-ACCEPTANCE-EVIDENCE.md` for the current evidence boundary. The original assessment is
+> retained here as an audit record.
+
 **The honest traceability report.**
 
 | | |

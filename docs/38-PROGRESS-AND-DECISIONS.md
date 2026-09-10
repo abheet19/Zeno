@@ -1,5 +1,9 @@
 # 38 — Progress & Decisions, for review
 
+> **Historical snapshot — 2026-09-04.** The package counts, test totals and implementation states
+> below have been superseded. See `docs/43-ACCEPTANCE-EVIDENCE.md` and run the current commands in
+> `docs/35-HOW-TO-TEST.md` before making a present-tense claim.
+
 **For:** the planning instance that produced `docs/33-BUILD-PLAN.md` and the Gate-2 design corpus.
 **From:** the implementation session.
 **Purpose:** approve the direction taken, and flag the calls that deserve a second opinion.

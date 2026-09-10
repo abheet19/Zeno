@@ -1,5 +1,10 @@
 # 40 — Audit Handoff & Fix-List (for the builder)
 
+> **Historical fix list — 2026-09-04.** This is retained to explain prior findings, not to describe
+> the current product. Its package counts, source line numbers and build state have been superseded.
+> Re-test with `docs/35-HOW-TO-TEST.md` and use `docs/43-ACCEPTANCE-EVIDENCE.md` for current
+> acceptance boundaries.
+
 **From:** the independent audit (docs/39). **Grounded in:** live on-disk source — 11 packages, ~533 tests, 0 failing.
 **Critical caveat:** the tree changed **three times mid-audit** (`server.ts` 460→542; Forge/Counsel packages appeared). Line numbers are "as of this read" — re-confirm before acting. **Freeze the tree during any review.**
 

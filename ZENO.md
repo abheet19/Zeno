@@ -13,9 +13,11 @@ silently folding them in would make the context unreviewable. The file is capped
 part. `buildRunContext` puts this file first, memory second, and the owner's task last.
 
 **What it can and cannot do.** It adds to what an agent KNOWS. It cannot add to what an
-agent may DO. Every effect is still classified, previewed, approved by the owner,
-committed once and signed into a receipt, and an agent may propose but never approve.
-A sentence in here that reads like a permission is not one.
+agent may DO. An agent's edits remain in a disposable worktree until they become project
+proposals. Project effects are classified and receipted; bounded T0 direct proposals may
+auto-apply, while Forge model output and higher-risk effects are held for owner review.
+An agent may propose but never approve. A sentence in here that reads like a permission
+is not one.
 
 **One honest edge.** Zeno treats this file as the owner's standing instruction, because
 on the owner's own machine it is. A repository cloned from elsewhere brings a
@@ -32,7 +34,7 @@ what HAPPENS is structural, enforced by a kernel, not by an agent's good behavio
 
 ## Conventions an agent should assume
 
-- **Zero external runtime dependencies.** CI scans every `packages/*/package.json` for
+- **Zero external npm runtime dependencies.** CI scans every `packages/*/package.json` for
   a `dependencies` entry that is not `@abheet19/*` and fails. There is no exception.
 - **Pure logic, injected IO.** Deciding is separate from doing: the pure module takes a
   reader/store/clock, and one clearly-named `*-node.ts` file is the only thing that

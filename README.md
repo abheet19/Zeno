@@ -2,7 +2,9 @@
 
 <br>
 
-# ⧗ &nbsp;Z E N O
+<img src="packages/daemon/public/brand/mark.svg" alt="Zeno" width="112">
+
+# Z E N O
 
 ### **Reason before action.**
 
@@ -50,7 +52,7 @@ $ zeno propose  package.json     "bump version"          # touches config
 $ zeno propose  package.json     "…"  --self-approve     # the agent tries to sign off
   403     proposed this action and so cannot also approve it
 
-# in Forge, the agent asks to run its tests
+# in a Claude Code Forge run, the agent asks to run its tests
   Bash    "npm test"                                      # tier T3 · one click
   granted → ran once → receipted                          # the command is on the record too
 
@@ -72,12 +74,12 @@ states exactly what would happen &middot; one click &middot; a <b>signed receipt
 
 <br><br>
 
-<img src="docs/demos/forge.gif" width="880" alt="A task is typed into Forge. The agent runs headless in a throwaway git worktree; the file it wrote opens in the editor; the routine write is applied and receipted automatically, and the commit is receipted separately.">
+<img src="docs/demos/forge.gif" width="880" alt="A Forge task edits a disposable repository in an isolated worktree. Zeno holds the file change for owner review, records the approval and verified receipt, then shows the resulting git status in its terminal.">
 
-<sub><b>Forge, recorded.</b> A task is typed in &middot; the agent runs headless in a throwaway git worktree &middot;
-the file it wrote opens in the editor &middot; the routine write is applied and <b>receipted automatically</b>, and the
-commit is receipted separately.<br>
-Real recordings of the real window, not mockups. All four demos: <a href="docs/demos/">docs/demos</a>.</sub>
+<sub><b>Forge, recorded on the current owner-review flow.</b> A real task changes a disposable Git fixture
+in an isolated worktree &middot; the file is held at T1 &middot; the owner reviews and approves it &middot; a verified
+receipt lands &middot; the built-in terminal confirms the working-tree change.<br>
+Recording provenance and limits: <a href="docs/demos/">docs/demos</a>.</sub>
 
 </div>
 
@@ -86,6 +88,7 @@ Real recordings of the real window, not mockups. All four demos: <a href="docs/d
 <details open>
 <summary><b>Contents</b></summary>
 
+- [Study pack: learn Zeno end to end](docs/44-STUDY-PACK.md)
 - [The problem](#the-problem)
 - [The idea](#the-idea)
 - [At a glance](#-at-a-glance)
@@ -99,6 +102,11 @@ Real recordings of the real window, not mockups. All four demos: <a href="docs/d
 - [What it doesn't do yet](#-what-it-doesnt-do-yet)
 
 </details>
+
+> **Learning or reviewing the implementation?** Start with the
+> [current study pack](docs/44-STUDY-PACK.md), then use the
+> [hands-on test guide](docs/35-HOW-TO-TEST.md). They separate shipped behavior from historical
+> prototypes and acceptance targets.
 
 ---
 
@@ -151,11 +159,11 @@ Three rules fall out of that, and they are the whole product:
 | **The gate** · `kernel` | classify → preview → approve → **one** attempt → signed receipt | Stable · heavily tested |
 | **Signed ledger** | Ed25519 signatures over a hash chain; `verify` checks **both** | Stable |
 | **⌘ Command** | live approval queue over resumable SSE with declared gaps | Working |
-| **⚒ Forge** | governed coding agent in a throwaway git worktree — full tool surface, every escaping call gated | Working |
+| **⚒ Forge** | isolated Claude Code, Codex or local-model run; model output is held before it reaches the selected repository | Working |
 | **◎ Counsel** | meeting notes where every item cites its source line | Working |
 | **Local models** | drives [Ollama](https://ollama.com) over loopback — offline, $0 | Working · best-effort |
 | **Mesh** · 2nd device | pairing, sealed envelopes, convergent replication | Protocol core · no phone app yet |
-| **Voice** | wake phrase & command grammar — no utterance can approve | Early |
+| **Voice** | push-to-talk + wake phrase; local Whisper in the desktop when separately installed, Web Speech fallback in a browser; no utterance can approve | Early |
 
 <sub>Honest status, not a roadmap promise. The unglamorous edges are in [what it doesn't do yet](#-what-it-doesnt-do-yet).</sub>
 
@@ -173,12 +181,14 @@ Three rules fall out of that, and they are the whole product:
 git clone https://github.com/abheet19/Zeno.git
 cd Zeno
 npm install
-npm run up
+npm run app
 ```
 
 A real desktop window — no address bar, no tabs,
 its own taskbar entry. Same approach as VS Code
 and Obsidian: the UI is HTML, the window is native.
+
+For a daemon-only browser session, run `npm run up` and open the exact nonce-bearing URL it prints.
 
 </td>
 <td width="50%" valign="top">
@@ -202,12 +212,13 @@ a native window, not a browser tab.
 <br>
 
 Zeno drives [Ollama](https://ollama.com) over loopback, so any model you pull appears in Forge's
-picker automatically. On a 12 GB card:
+picker automatically. The current local default is `qwen3:8b`; available memory, prompt size and
+task complexity still determine whether a model finishes inside the run deadline.
 
 ```powershell
-ollama pull qwen3:14b     # best quality that stays fully resident
-ollama pull qwen3:8b      # balanced
-ollama pull qwen3:4b      # fast
+ollama pull qwen3:8b      # current default and practical starting point
+ollama pull qwen3:14b     # larger; may exceed the deadline on constrained hardware
+ollama pull qwen3:4b      # smaller; faster, with weaker edit-format reliability
 ```
 
 Nothing leaves the machine, and nothing costs money.
@@ -240,10 +251,13 @@ history where it happened, rather than silently stitching itself back together.
 
 The governed coding agent.
 
-Point **Claude Code** or a **local open-source model** at a repo. It runs headless in a throwaway
-git worktree it cannot escape, and every file it touches returns as an ordinary approval capsule.
-It has the **real** tool surface — it can run your tests — and every command that could reach past
-the worktree stops at the same gate first. Same gate, whichever model wrote it.
+Let Forge route a task among **Claude Code**, **Codex** and a **local Ollama model**, or select one
+yourself. Each runs headless in a throwaway git worktree. Files collected from the run return as
+ordinary approval capsules, and the selected repository stays unchanged until you decide.
+
+The command boundary depends on the provider. Claude Code routes its shell and enabled egress tools
+through Zeno's per-call approval gate. Codex runs with its own auto-reviewed workspace-write sandbox
+and ignores ambient user configuration. The local Ollama path has no shell tool surface.
 
 </td>
 <td width="33%" valign="top">
@@ -266,12 +280,13 @@ decision, because an item with no citation cannot be constructed.
 <br>
 
 ```
- Agent  [ Claude Code ▾ ]     Model  [ qwen3:14b ▾ ]     Effort  [ high ▾ ]
+ Auto route [✓]   Agent [ Codex ▾ ]   Model [ gpt-5.6-terra ▾ ]   Effort [ high ▾ ]
 ```
 
-Effort is real, not decorative. On a thinking model it maps to the reasoning budget —
-`low` disables thinking for a fast answer, `high` makes it reason before answering. The same dial
-means the same thing whichever agent you pick.
+Effort is real, not decorative, but providers interpret it differently. For the local Ollama
+adapter, `low` uses the non-thinking path and higher levels enable thinking. Claude Code and Codex
+receive effort through their own supported CLI/model mapping. The selected value is recorded with
+the run; it is not a claim that unlike providers use numerically equivalent reasoning budgets.
 
 </details>
 
@@ -279,17 +294,16 @@ means the same thing whichever agent you pick.
 
 <br>
 
-<img src="docs/demos/forge.gif" width="880" alt="A task is typed into Forge. The agent runs headless in a throwaway git worktree; the file it wrote opens in the editor; the routine write is applied and receipted automatically, and the commit is receipted separately.">
+<img src="docs/demos/forge.gif" width="880" alt="A Forge task edits a disposable repository in an isolated worktree. Zeno holds the file change for owner review, records the approval and verified receipt, then shows the resulting git status in its terminal.">
 
-<sub><b>Forge, recorded.</b> A task in &middot; headless in a throwaway worktree &middot; the file it wrote, read back out of the
-repository.<br>An ordinary source file is routine, so it is applied and receipted without interrupting anyone
-(<code>local.write &middot; T0</code>). The commit is its own act, and its own receipt (<code>vcs.commit &middot; T1</code>).</sub>
+<sub><b>Forge's owner-review path.</b> Model output stays isolated until the owner approves the exact
+file change. The same run then exposes its verified receipt and real Git status inside Forge.</sub>
 
 <br><br>
 
 <img src="docs/demos/shell.gif" width="880" alt="A governed Forge run asks to run a shell command. The capsule carries the literal command string at tier T3, kind shell.exec, and the approved run lands a verified receipt.">
 
-<sub><b>And the same gate for a command.</b> The run asks to execute <code>node --version</code> and is stopped mid-run. The
+<sub><b>Claude Code's command gate.</b> The run asks to execute <code>node --version</code> and is stopped mid-run. The
 capsule carries the <b>literal command string</b><br>at <code>T3 &middot; shell.exec</code>. One approval, one attempt, and a
 <code>verified</code> receipt in the same ledger as every file edit.</sub>
 
@@ -402,8 +416,8 @@ that never leaves the machine.
 A governance tool whose supply chain you cannot audit is not a governance tool. Nothing in any
 `packages/*/dependencies` comes from outside this repo — **CI asserts it on every push.**
 
-`git`, `ollama` and the Claude Code CLI are named honestly as **external binaries**: a different
-kind of dependency, invoked with `shell: false` and never interpolated into a shell string.
+`git`, `ollama`, the Claude Code and Codex CLIs, and the optional whisper.cpp runtime are named
+honestly as **external binaries**: a different kind of dependency. They are not installed by npm.
 
 </details>
 
@@ -455,9 +469,9 @@ npm run demo
 **Run a local model as a coding agent, fully offline.**
 
 ```powershell
-ollama pull qwen3:14b
-# Forge → Agent: Local · Model: qwen3:14b · Effort: high
-# its edits arrive in Command as approval capsules
+ollama pull qwen3:8b
+# Forge → Agent: Local · Model: qwen3:8b · Effort: low
+# valid file edits arrive in Command as approval capsules
 ```
 
 </details>
@@ -480,6 +494,7 @@ flowchart TB
     CMD & FRG & CNS --> API
     FRG -.-> OLL[ollama · loopback]
     FRG -.-> CC[claude code]
+    FRG -.-> CX[codex]
     CC -.->|may I run this?| API
     GATE --> EX[jailed executors<br/>file · git]
 
@@ -496,7 +511,11 @@ flowchart TB
 |---|---|
 | `kernel` | The gate — tiers, policy, compare-and-swap, signed ledger, jailed executors |
 | `daemon` | Loopback server and the window; the process boundary that makes L6 structural |
+| `desktop` | Native Electron window, project selection, process lifetime and optional local speech bridge |
 | `forge` | Headless agent runner, worktree isolation, the model/effort registry, and the permission host that turns an escaping tool call into a capsule |
+| `assistant` | Ask Zeno snapshot, grounding and inert proposal/delegation parsing |
+| `browse` | Isolated Chromium session controlled through bounded, governed tools |
+| `chrome-bridge` | Optional bridge to the owner's signed-in Chrome, disabled by default |
 | `counsel` | Meeting engine — cited decisions, action items, open questions |
 | `vault` | Governed local memory and the daily brief |
 | `sanitizer` | Secret detection and redaction before anything is stored or sent |
@@ -520,7 +539,8 @@ and the same inputs produce a byte-identical ledger.
 
 ```text
 Zeno/
-├─ packages/            fifteen independently-testable packages
+├─ packages/            sixteen independently-testable packages
+│  ├─ assistant/        Ask Zeno snapshot, grounding + inert intent parsing
 │  ├─ kernel/           the gate — tiers, policy, compare-and-swap, signed ledger, jailed executors
 │  ├─ daemon/           loopback server + chromeless window — the boundary that makes L6 structural
 │  ├─ forge/            governed coding-agent runner + worktree isolation + the tool-call gate
@@ -536,7 +556,6 @@ Zeno/
 │  ├─ skills/           agent skills parsed as untrusted data — knowledge, never capability
 │  ├─ mcp/              MCP server — may propose and read, never approve
 │  └─ cli/              zeno · demo · verify · propose · backlog
-├─ build/               make-exe.mjs — bundles the single-file Zeno.exe
 ├─ docs/                design notes, audit handoff, honest status
 ├─ .github/workflows/   ci.yml — typecheck · lint · tests · zero-dependency proof
 └─ package.json         npm workspaces · zero runtime dependencies
@@ -554,8 +573,12 @@ npm run check     # typecheck · lint · tests · coverage gate
 ```
 
 The test suite is roughly the size of the source it guards — today `npm run check` runs
-**more than a thousand tests** across the checked packages — and the build fails on ambient non-determinism
+**more than a thousand tests** across all 16 workspaces — and the build fails on ambient non-determinism
 in the kernel: a kernel that can read the clock is a kernel that cannot be replayed.
+
+Green tests substantiate parts of the product contract; they do not complete acceptance rows that
+also require live hardware, external services or manual evidence. The dated mapping is in
+[`docs/43-ACCEPTANCE-EVIDENCE.md`](docs/43-ACCEPTANCE-EVIDENCE.md).
 
 Passing tests are not proof, so each component was attacked by reviewers whose job was to break it.
 A sample of what that caught, and fixed:
@@ -601,13 +624,13 @@ helper listening anywhere would make the sentence above false.
 
 | What | When | Where it goes |
 |---|---|---|
-| **Claude Code** | Only if you pick it as the agent in Forge | Your task and code context go to Anthropic — inherent to choosing a hosted model |
-| **A command a Forge agent runs** | Only after you approve **that exact command**, once | Wherever the command itself goes. `npm test` goes nowhere; `npm install` reaches a registry; `curl` reaches whatever you read on the capsule and agreed to |
-| **`WebFetch` / `WebSearch`** | Only if you set `ZENO_FORGE_NETWORK=1`, **and then still approve every call** | The URL or query shown on the capsule. **Off by default** — see below |
-| **Zeno's own browser** | Only if you set `ZENO_FORGE_NETWORK=1`, **and** Zeno proves a window of its own is live, **and then still approve every navigation** | The exact URL shown on the capsule, fetched by a Chromium window Zeno started — fresh session, no profile, no cookies, no extensions, `http(s)` only. **Off by default**; `ZENO_FORGE_BROWSER=0` switches it off even with the network on |
-| **Your OWN, signed-in Chrome** | Only if you set `ZENO_FORGE_CHROME=1`, **and** install the Zeno extension yourself, **and** Zeno proves that extension is live, **and** the origin is on an allowlist **you** wrote, **and then still approve every single action** | Whatever that origin is — **as you**, with your cookies and your sessions. This is categorically different from every other line here: it is the only one that can act *as you* rather than merely send bytes. **Off by default.** Banking, mail, cloud consoles, identity providers and password managers are refused outright and your allowlist cannot override that. See below |
+| **Hosted coding agent** | Only if Forge routes to, or you select, Claude Code or Codex and confirm that exact hosted run | Your task and bounded code context go to the selected provider — inherent to choosing a hosted model |
+| **A command in a Claude Code Forge run** | Only after you approve **that exact command**, once | Wherever the command itself goes. `npm test` goes nowhere; `npm install` reaches a registry; `curl` reaches whatever you read on the capsule and agreed to. Codex uses its own auto-reviewed workspace-write sandbox instead of this per-call Zeno gate |
+| **Claude Code `WebFetch` / `WebSearch`** | Only if you set `ZENO_FORGE_NETWORK=1`, **and then still approve every call** | The URL or query shown on the capsule. **Off by default** — see below |
+| **Zeno's browser for Claude Code** | Only if you set `ZENO_FORGE_NETWORK=1`, **and** Zeno proves a window of its own is live, **and then still approve every navigation** | The exact URL shown on the capsule, fetched by a Chromium window Zeno started — fresh session, no profile, no cookies, no extensions, `http(s)` only. **Off by default**; `ZENO_FORGE_BROWSER=0` switches it off even with the network on |
+| **Your OWN, signed-in Chrome from Claude Code** | Only if you set `ZENO_FORGE_CHROME=1`, **and** install the Zeno extension yourself, **and** Zeno proves that extension is live, **and** the origin is on an allowlist **you** wrote, **and then still approve every single action** | Whatever that origin is — **as you**, with your cookies and your sessions. This is categorically different from every other line here: it is the only one that can act *as you* rather than merely send bytes. **Off by default.** Banking, mail, cloud consoles, identity providers and password managers are refused outright and your allowlist cannot override that. See below |
 | **GitHub Issues** | Only if you set `ZENO_GITHUB_REPO` | `api.github.com`, read-only |
-| **Speech recognition** | Only while you hold-to-talk, or record in Counsel | Your *browser* sends the audio to its vendor. Not on-device |
+| **Speech recognition** | Only while you hold-to-talk, enable wake mode, or record in Counsel | In the desktop, Zeno uses local whisper.cpp only when its executable and model were separately installed. Without them, a browser session may fall back to Web Speech and send microphone audio to the browser maker; the disclosure shown before wake mode names the active path |
 
 Everything else is local. The gate, ledger, policy engine, memory, secret scanner and window make
 **zero** network calls. Local models run on your GPU over loopback. The UI loads no CDN, no web
@@ -621,7 +644,7 @@ $ grep -rn "https://" packages/*/src | grep -v api.github.com
 No telemetry, no crash reporting, no update check — **not configurable-off, simply absent.**
 
 <details>
-<summary><b>Forge's agent can run commands now. Exactly what that changed, and how to switch it off.</b></summary>
+<summary><b>Claude Code in Forge can run governed commands. Exactly what that changed, and how to switch it off.</b></summary>
 
 <br>
 
@@ -630,7 +653,7 @@ safety argument was geometric: the worktree is a throwaway, the tools cannot lea
 needed a decision. That argument was sound — and it was also why the agent could not run the test
 suite it had just written.
 
-**What it is now.** The tool surface is the real one, and the geometry is replaced by the gate
+**What it is now.** For the Claude Code provider, the tool surface is the real one and the geometry is replaced by the gate
 rather than stretched. Every call is sorted by **what escapes**:
 
 | | Tools | What happens |
@@ -650,7 +673,7 @@ asked a question only the running kernel can answer. If it cannot answer, the ru
 ungoverned: it drops to the file-only surface below and **says so in the run's note**. A gate that
 cannot be shown to work costs the agent a capability, never you the guarantee.
 
-**The agent has a browser, and it is one Zeno starts.** Reading a page is something a coding agent
+**The Claude Code provider has a browser, and it is one Zeno starts.** Reading a page is something a coding agent
 genuinely needs, and there were two ways to give it one. An external MCP browser server would have
 been the easy one — and `tools.ts` already says why it is the wrong one: an MCP server is *a process
 outside the worktree that Zeno neither started nor bounds.* So the browser is **embedded**. Zeno
@@ -676,7 +699,7 @@ to. If it cannot, the run gets **no browser tools at all**: absent from `--tools
 in `--mcp-config`, and the run says so in its note. All five are also named in `permissions.ask`,
 because *not* being pre-approved was already proved insufficient once — see above.
 
-**The agent can also act in the browser you are actually logged into — and that is a different
+**The Claude Code provider can also act in the browser you are actually logged into — and that is a different
 thing entirely.** Reading a page in a throwaway window is one capability; doing something on a site
 *as you* is another, and this section exists so nobody confuses them. It is **off by default**, and
 it is the only capability in Zeno that is.
@@ -784,10 +807,29 @@ I would rather you read this here than discover it in a demo.
 
 - **No phone app.** Pairing, sealed envelopes and convergent replication are built and tested
   against a *simulated* second device — the mobile client is not written.
-- **Local models are best-effort.** A 14B model follows a strict edit format most of the time, not
-  every time. Claude Code for capability; local for privacy and $0.
-- **Routine edits apply without asking.** The deliberate trade that prevents approval fatigue. An
-  agent can never *approve* — but an ordinary edit inside its sandbox does go through. Always receipted.
+- **Local models are best-effort.** Forge rejects malformed or truncated model output instead of
+  treating it as an edit. `qwen3:8b` is the current default; larger models can exceed the bounded run
+  deadline and smaller models can be less reliable at the edit contract. Hosted CLIs remain the
+  higher-capability option; local Ollama remains the private, zero-API-cost option.
+- **Local speech is separately provisioned.** The repository and Windows installer do not bundle a
+  whisper.cpp executable or model. If they are absent, the desktop cannot claim local recognition;
+  a browser session may offer its clearly disclosed Web Speech fallback instead.
+- **Voice does not identify or learn the owner.** Voice activity detection suppresses some silence and
+  noise, but there is no speaker biometric, personal voice model or acoustic wake-word engine. Wake
+  matching happens after transcription, so background speech and recognition errors remain possible.
+- **Counsel is microphone-only.** Meeting attachment matches a supported app's window title; it does
+  not prove that the owner joined the call. Zeno does not capture remote/system audio or diarize
+  speakers automatically.
+- **Forge is a bounded IDE surface.** Monaco editing, repository search, source status, themes,
+  rainbow brackets, rules/skills, test discovery and connector facts are wired. There is no VSIX or
+  Marketplace extension host; snippet manifests are catalogued but not injected; TypeScript and
+  JavaScript editor diagnostics are syntax-level rather than a replacement for project type-checking.
+- **The terminal is one-shot and non-interactive.** Its tabs retain bounded command history for the
+  current window, but they are not PTYs and do not preserve shell state. CI and Debug explicitly
+  report that no runner or debugger is wired.
+- **Direct bounded routine proposals may apply without asking.** The deliberate T0 trade reduces
+  approval fatigue. Forge model output is stricter: it remains in the throwaway worktree and each
+  resulting file is held for owner review before it reaches the selected repository.
 - **A tool call is approved, or ignored.** The capsule has an Approve control and no Decline
   control yet, so today a command you do not want is refused by *not clicking* — it lapses, and a
   lapse is a refusal, never a grant. The route to decline one outright exists (`POST
@@ -799,7 +841,11 @@ I would rather you read this here than discover it in a demo.
   naming the ledger, keys, token or policy are rated louder. A command spelled to avoid every
   pattern is still `shell.exec`, still T3, and still stops — the protection is that you read the
   literal string, not that Zeno understood it.
-- **No connectors, model gateway or credential broker.** Out of scope for a $0, single-machine build.
+- **No third-party connector host, model gateway or credential broker.** Forge exposes the bundled,
+  run-scoped Zeno MCP capability set and does not attach ambient external MCP servers.
+- **No remote telemetry pipeline.** There is no Sentry, PostHog, crash upload or remote analytics
+  dashboard. Operational evidence is local status, bounded process output and the signed receipt
+  ledger.
 - **macOS is cut**, not deferred.
 
 ---
