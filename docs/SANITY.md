@@ -35,10 +35,13 @@ Get-FileHash .\dist-app\Zeno-Setup-0.1.0-x64.exe -Algorithm SHA256
 
 ## Retained evidence for the current candidate
 
-- `verification-work/zeno-release-068e9cf-check.log`: exact implementation commit, 1,455 tests, 1,453 passed, 2 explicit Windows symlink skips, 0 failed across 16 workspace summaries.
-- `verification-work/zeno-packaged-f10-output/zeno-packaged-ui-acceptance.json`: 21/21 final-package Command, Settings, Forge, zoom, and mobile checks with zero page or console errors.
-- `verification-work/zeno-packaged-hold-to-talk-f10.json`: physical final-package hold-to-talk heard the exact phrase, routed it, returned to Idle, and released capture.
-- `dist-app/Zeno-0.1.0-x64-portable.exe` and `dist-app/Zeno-Setup-0.1.0-x64.exe`: packaging completed; hashes are in `CONTEXT.md` and `docs/43-ACCEPTANCE-EVIDENCE.md`.
+- `verification-work/zeno-release-db674c0-check.log`: exact post-dark implementation commit, 1,456 tests, 1,454 passed, 2 explicit Windows symlink skips, 0 failed across 16 workspace summaries.
+- `verification-work/zeno-packaged-dark-default-report.json`: a fresh profile booted Graphite dark before CSS; saved System, Light, and Dark choices still won; zero page or console errors.
+- `verification-work/zeno-packaged-dark-full-output/zeno-packaged-ui-acceptance.json`: 21/21 dark-package Command, Settings, Forge, zoom, and mobile checks with zero page or console errors; the retained URL token is redacted.
+- `verification-work/zeno-packaged-dark-answer-only.json`: exact `WRITE A for loop` prompt returned valid JavaScript in 4.376 s with no file proposal or repository/approval change.
+- `verification-work/zeno-packaged-dark-local-held-edit.json` plus `zeno-packaged-dark-local-held-edit-receipt.json`: `qwen3:8b` proposed one exact held file in 825 ms, left the fixture unchanged before approval, landed the exact 48 bytes after approval, and recorded a verified signed receipt.
+- `verification-work/zeno-packaged-hold-to-talk-f10.json`: the immediately preceding F10 package heard the physical hold-to-talk phrase, routed it, returned to Idle, and released capture. `db674c0` changed theme bootstrap only; a post-dark physical microphone rerun has not been retained.
+- `dist-app/Zeno-0.1.0-x64-portable.exe` (`4F23B7C053E8BE63398A564069901B2FE12107787B279D564393912373B0EBE1`) and `dist-app/Zeno-Setup-0.1.0-x64.exe` (`3653BDF41934921985DEF7AB49BBFF40A402D7C79EF880FD185989407266A322`): current dark candidate artifacts.
 
 ## Release sequence
 

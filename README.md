@@ -200,7 +200,8 @@ npm run build:app
 ```
 
 Produces a real Windows app in `dist-app/` —
-a native window, not a browser tab.
+a native window, not a browser tab. A new profile starts in Graphite dark; saved System, Glass Dawn,
+or Graphite choices override that default on later launches.
 
 </td>
 </tr>
@@ -213,7 +214,11 @@ a native window, not a browser tab.
 
 Zeno drives [Ollama](https://ollama.com) over loopback, so any model you pull appears in Forge's
 picker automatically. The current local default is `qwen3:8b`; available memory, prompt size and
-task complexity still determine whether a model finishes inside the run deadline.
+task complexity still determine whether a model finishes inside the run deadline. On the retained
+dark package, the exact prompt `WRITE A for loop` returned valid JavaScript in 4.376 seconds, and a
+separate one-file fixture produced a held edit in 825 ms, stayed unchanged before approval, then
+landed the exact reviewed bytes with a verified receipt. Those are narrow fixtures, not a general
+quality or latency guarantee; see [the evidence boundary](docs/43-ACCEPTANCE-EVIDENCE.md).
 
 ```powershell
 ollama pull qwen3:8b      # current default and practical starting point
