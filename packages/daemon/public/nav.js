@@ -45,6 +45,11 @@
 
 const STORAGE_KEY = 'zeno.surface';
 const DEFAULT_SURFACE = 'command';
+const PRODUCT_NAMES = Object.freeze({
+  command: 'Zeno Command',
+  forge: 'Zeno Forge',
+  counsel: 'Zeno Counsel',
+});
 
 const items = Array.from(document.querySelectorAll('[data-nav]'));
 const surfaces = new Map();
@@ -57,6 +62,14 @@ const names = items.map((i) => i.dataset.nav).filter((n) => surfaces.has(n));
 
 let current = null;
 const inited = new Set();
+
+/** Keep the native window title and the visible compound mark in sync. */
+function showProductName(name) {
+  const productName = PRODUCT_NAMES[name] || PRODUCT_NAMES[DEFAULT_SURFACE];
+  document.title = productName;
+  const wordmark = document.querySelector('.brand-word');
+  if (wordmark) wordmark.textContent = productName;
+}
 
 /* ---- localStorage, every call wrapped: a private window, a browser with site
    data blocked, or storage that throws on access must not take the nav down. -- */
@@ -121,6 +134,7 @@ function show(name, opts) {
   // Expose the active product to the shell so Forge can use a compact IDE
   // frame while Command and Counsel retain their editorial layout.
   document.documentElement.setAttribute('data-zeno-surface', name);
+  showProductName(name);
 
   current = name;
   if (persist) remember(name);
