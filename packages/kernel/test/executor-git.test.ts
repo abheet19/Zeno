@@ -53,6 +53,8 @@ interface FakeState {
   landed: string[];
   /** What `rev-parse --show-toplevel` reports. */
   toplevel: string;
+  /** Git's cwd relative to that root: empty only when cwd is the root itself. */
+  prefix: string;
   /**
    * What `ls-files --error-unmatch` knows about, i.e. the paths git has by exactly
    * these names. `null` means "git knows whatever you ask about", which is the
@@ -94,7 +96,7 @@ interface FakeGit extends GitRunner {
 
 /** An in-memory git that models exactly the verbs this executor may use. */
 function fakeGit(init: Partial<FakeState> = {}, override?: Override): FakeGit {
-  const state: FakeState = { head: HEAD0, dirty: [], indexed: [], landed: [], toplevel: ROOT, tracked: null, ...init };
+  const state: FakeState = { head: HEAD0, dirty: [], indexed: [], landed: [], toplevel: ROOT, prefix: '', tracked: null, ...init };
   const calls: string[][] = [];
   const cwds: string[] = [];
   return {
@@ -117,6 +119,7 @@ function fakeGit(init: Partial<FakeState> = {}, override?: Override): FakeGit {
       /** What the INDEX holds under these pathspecs — `git diff --cached`. */
       const staged = state.indexed.filter((p) => matches(specs, p));
       if (verb === 'rev-parse' && a[1] === '--show-toplevel') return OK(state.toplevel + '\n');
+      if (verb === 'rev-parse' && a[1] === '--show-prefix') return OK(state.prefix + '\n');
       if (verb === 'rev-parse') {
         return state.head === NO_COMMITS ? { status: 1, stdout: '', stderr: '' } : OK(state.head + '\n');
       }
@@ -400,8 +403,8 @@ test('JAIL — the link check is not opt-in: a spec cannot be built without a re
 
 test('JAIL — a repoRoot nested inside someone else’s checkout is refused', async () => {
   // git would happily act on the ENCLOSING repository; containment against the
-  // wrong root is not containment.
-  const git = fakeGit({ toplevel: pResolve(sep + 'other-repo') });
+  // wrong root is not containment. Git reports that cwd's non-empty position.
+  const git = fakeGit({ toplevel: pResolve(sep + 'other-repo'), prefix: 'nested/' });
   await assert.rejects(
     () => runExec(specOf(git), commitOf(['a.ts'])),
     (e) => e instanceof PolicyError && /not the root of the repository/.test(e.message),
@@ -409,18 +412,14 @@ test('JAIL — a repoRoot nested inside someone else’s checkout is refused', a
   assert.equal(git.ran('add'), false);
 });
 
-test('JAIL — the root check compares REAL paths, so a linked temp dir still matches', async () => {
-  // A temp dir that is itself a link (macOS /tmp, a Windows 8.3 name) reports a
-  // different-looking toplevel for the very same directory.
-  const linked = pResolve(sep + 'repo-link');
-  const fs: SandboxFs = {
-    readFile: () => null,
-    writeAtomic: () => undefined,
-    realpath: (p) => (p === linked || p === pResolve(ROOT) ? pResolve(ROOT) : p),
-  };
-  const git = fakeGit({ toplevel: linked, dirty: ['a.ts'] });
-  const proof = await runExec(specOf(git, fs), commitOf(['a.ts']));
+test('JAIL — Git root position accepts 8.3, long-name, and linked aliases of one directory', async () => {
+  // Git resolved the cwd itself. An empty prefix proves cwd is the repository
+  // root even when --show-toplevel returns a different string spelling for it.
+  const alias = pResolve(sep + 'repo-long-name');
+  const git = fakeGit({ toplevel: alias, prefix: '', dirty: ['a.ts'] });
+  const proof = await runExec(specOf(git), commitOf(['a.ts']));
   assert.equal(proof.effect, 'git:' + git.state.head);
+  assert.equal(git.ran('--show-prefix'), true, 'identity came from Git, not path-string equality');
 });
 
 test('JAIL — a DIRECTORY cannot widen one approval into every file beneath it', async () => {

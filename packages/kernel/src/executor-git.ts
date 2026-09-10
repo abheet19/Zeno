@@ -156,10 +156,15 @@ export function gitHead(spec: GitSpec): string {
 function assertRepoRoot(spec: GitSpec): string {
   const root = pResolve(spec.repoRoot);
   const top = pResolve(mustRun(spec, ['rev-parse', '--show-toplevel'], 'rev-parse --show-toplevel').stdout.trim());
-  const same =
-    samePath(top, root) ||
-    samePath(spec.fs.realpath(top), spec.fs.realpath(root));
-  if (!same) {
+  // Compare the working directory's POSITION in Git's repository rather than
+  // comparing path strings. Windows can spell one directory with either its
+  // long name or an 8.3 alias, and Node's realpath may preserve the spelling it
+  // was given. Git already resolved the cwd to discover this repository, so an
+  // empty --show-prefix is the filesystem-identity proof that cwd IS its root;
+  // a nested cwd always produces a non-empty prefix. This keeps the enclosing-
+  // repository guard without treating two aliases of one directory as different.
+  const prefix = mustRun(spec, ['rev-parse', '--show-prefix'], 'rev-parse --show-prefix').stdout.replace(/\r?\n$/, '');
+  if (prefix !== '') {
     throw new PolicyError(
       'policy-schema-invalid',
       `"${root}" is not the root of the repository git would act on (${top}).`,
