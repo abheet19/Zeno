@@ -255,7 +255,11 @@ function createWindow() {
     },
   });
 
-  win.once('ready-to-show', () => win && win.show());
+  win.once('ready-to-show', () => {
+    if (!win || win.isDestroyed()) return;
+    win.maximize();
+    win.show();
+  });
   win.on('closed', () => { stopSpeech(); win = null; });
 
   // The menu bar is intentionally hidden, so own the normal IDE zoom contract

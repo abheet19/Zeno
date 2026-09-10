@@ -352,6 +352,7 @@ export function initForge(section) {
     contextErr: null,
     contextBusy: false,
     skillIds: new Set(),
+    skillQuery: '',
     choosing: false,
     folderNote: '',
     terminalBusy: false,
@@ -376,6 +377,10 @@ export function initForge(section) {
     rainbowBrackets: true,
     explorerOpen: true,
     sessionOpen: true,
+    thinkingExpanded: false,
+    memory: null,
+    memoryErr: null,
+    memoryBusy: false,
 
     pan: 'explorer',     // rgA panel
     insp: 'chat',        // rgC inspector tab
@@ -554,6 +559,7 @@ export function initForge(section) {
   try { S.rainbowBrackets = localStorage.getItem('zeno-forge-rainbow') !== '0'; } catch { /* storage is optional */ }
   try { S.explorerOpen = localStorage.getItem('zeno-forge-explorer') !== '0'; } catch { /* storage is optional */ }
   try { S.sessionOpen = localStorage.getItem('zeno-forge-session') !== '0'; } catch { /* storage is optional */ }
+  try { S.thinkingExpanded = localStorage.getItem('zeno-forge-thinking-expanded') === '1'; } catch { /* storage is optional */ }
 
   // Existing Forge renderers read these names throughout. Binding them to the
   // selected session keeps those renderers small while every asynchronous run
@@ -579,8 +585,8 @@ export function initForge(section) {
   rgA.setAttribute('aria-label', 'Explorer');
   rgB.setAttribute('aria-label', 'Code');
   rgC.setAttribute('aria-label', 'Agent session');
-  rgD.setAttribute('aria-label', 'Terminal, tests, CI and processes');
-  rgE.setAttribute('aria-label', 'Repository status');
+  rgD.setAttribute('aria-label', 'Problems, output, debug console, terminal and ports');
+  rgE.setAttribute('aria-label', 'Workspace and editor status');
   add(root, rgTop, rgA, rgB, rgD, rgC, rgE);
 
   // Side panes are first-class workbench regions. Keep their visibility and
@@ -909,9 +915,7 @@ export function initForge(section) {
       if (input) input.focus();
     });
     item('Terminal', 'Open the owner terminal', () => { setView('ide'); S.draw = 'terminal'; setDrawerMin(false); paintD(); });
-    item('Help', 'Open repository rules and installed skills', () => {
-      setView('ide'); setPaneOpen('explorer', true); S.pan = 'rules'; paintA();
-    });
+    item('Help', 'Open repository rules and installed skills', openSkillsCatalog);
 
     const centre = btn('fgworkspace', null, () => {
       setView('ide'); setPaneOpen('explorer', true); S.pan = 'search'; paintA();
@@ -965,6 +969,15 @@ export function initForge(section) {
     ['tasks', 'Task board'],
   ];
 
+  /** Open the capability catalog in the session inspector; Lens stays exact context. */
+  function openSkillsCatalog() {
+    if (S.view === 'ide' && !S.sessionOpen) setPaneOpen('session', true);
+    S.insp = 'skills';
+    paintC();
+    if (!S.context && !S.contextBusy) void loadContext();
+    if (!S.extensions && !S.extensionsBusy) void loadExtensions();
+  }
+
   function paintA() {
     const st = S.status;
 
@@ -995,6 +1008,10 @@ export function initForge(section) {
       const b = btn(null, label, () => {
         S.pan = id;
         paintA();
+        if (id === 'rules') {
+          if (!S.context && !S.contextBusy) void loadContext();
+          if (!S.extensions && !S.extensionsBusy) void loadExtensions();
+        }
         if (id === 'tests' && !S.tests && !S.testsBusy) void loadTests();
         if (id === 'extensions' && !S.extensions && !S.extensionsBusy) void loadExtensions();
         if (id === 'mcp' && !S.connectors && !S.connectorsBusy) void loadConnectors();
@@ -1346,7 +1363,7 @@ export function initForge(section) {
           add(wrap, box);
         }
         const actions = el('div', 'acts');
-        const choose = btn('btn sm', 'Open Rules & skills', () => { S.pan = 'rules'; paintA(); });
+        const choose = btn('btn sm', 'Open Rules & skills', openSkillsCatalog);
         add(actions, choose);
         add(wrap, actions, el('div', 'hint', catalog.note || 'Zeno capability catalog.'));
         add(wrap, renderNote('VS Code Marketplace and VSIX extensions are not compatible with this build. The list above contains only capabilities Zeno found locally and can describe truthfully.'));
@@ -1355,7 +1372,7 @@ export function initForge(section) {
     },
 
     /* ---- source-backed views; absent sources still say so plainly. -------- */
-    rules() { return contextPanel(); },
+    rules() { return rulesSkillsPanel(); },
     mcp() {
       const wrap = el('div', 'pw');
       const hd = el('div', 'acts');
@@ -1396,16 +1413,51 @@ export function initForge(section) {
       );
     },
     tasks() {
-      const wrap = el('div', 'pw');
-      add(wrap, renderUnwired(
-        'The work desk lives on Command',
-        'Forge does not hold a task board of its own. What is assigned, proposed and waiting is Command’s list, drawn from the same daemon.',
-      ));
-      const acts = el('div', 'acts');
-      const go = btn('btn sm', 'Open Command');
-      go.setAttribute('data-go', 'command');
-      add(acts, go);
-      add(wrap, acts);
+      const wrap = el('div', 'pw fgworkflows');
+      const head = el('div', 'acts');
+      add(head, el('b', null, 'Workflow launcher'));
+      const fresh = btn('btn sm', '+ New workflow', () => {
+        S.insp = 'chat';
+        addSession();
+        if (!S.sessionOpen) setPaneOpen('session', true);
+      });
+      fresh.disabled = S.sessions.length >= 8;
+      fresh.title = fresh.disabled ? 'Forge keeps at most eight concurrent sessions.' : 'Create an independent session and focus its task composer.';
+      add(head, el('span', 'sp'), fresh);
+      add(wrap, head, el('div', 'hint',
+        'Each workflow below is a real independent Forge session. Runs may overlap, and every run keeps its provider, progress, cancellation, result, files, and approvals.'));
+      for (const session of S.sessions) {
+        const state = session.routing ? 'routing' : session.running ? phaseLabel(session.runProgress) : sessionTabState(session);
+        const row = el('div', 'fgworkflow-row');
+        const main = btn('fgworkflow-main', null, () => {
+          S.selectedSessionId = session.id;
+          S.insp = session.runs.length ? 'runs' : 'chat';
+          if (!S.sessionOpen) setPaneOpen('session', true);
+          paintC(); paintE();
+        });
+        const last = session.runs[session.runs.length - 1];
+        add(main, glyph('●', `fgsession-dot ${sessionTabState(session)}`), el('span', 'nm', session.name),
+          el('span', 'tag', `${session.agentId}${session.model ? ` · ${session.model}` : ''}`));
+        add(main, el('span', 'hint', session.running
+          ? `${state} · ${session.runProgress ? session.runProgress.orchestrationPercent : 0}% orchestration`
+          : last ? `${last.ok ? 'completed' : 'failed'} · ${last.files} file${last.files === 1 ? '' : 's'}` : 'ready for a task'));
+        add(row, main);
+        if (session.running) {
+          const cancel = btn('fgicon', '■', () => void cancelRun(session));
+          cancel.setAttribute('aria-label', `Cancel ${session.name}`);
+          cancel.disabled = session.canceling || !session.runId;
+          cancel.title = cancel.disabled ? 'Cancellation is already in progress or the run has not started.' : `Cancel ${session.name} and its process descendants`;
+          add(row, cancel);
+        }
+        add(wrap, row);
+      }
+      const topology = el('details', 'fgcapability-gap');
+      add(topology, el('summary', null, 'Parent and child agent topology'),
+        el('div', 'hint', 'Unavailable: the current Forge backend starts independent sessions and does not emit parent/child agent relationships, delegated subagent status, or a workflow graph. No decorative child agents are shown.'));
+      const command = btn('btn sm ghost', 'Open Command work desk');
+      command.setAttribute('data-go', 'command');
+      add(topology, command);
+      add(wrap, topology);
       return wrap;
     },
   };
@@ -2375,7 +2427,7 @@ export function initForge(section) {
    * rgC — the agent session: tabs, the conversation, the composer     *
    * ================================================================ */
 
-  const INSP = [['chat', 'Chat'], ['plan', 'Plan'], ['runs', 'Runs'], ['actions', 'Actions'], ['lens', 'Lens']];
+  const INSP = [['chat', 'Session'], ['plan', 'Plan'], ['runs', 'Runs'], ['actions', 'Actions'], ['lens', 'Lens'], ['skills', 'Skills']];
 
   function sessionTabState(item) {
     if (item.running && item.runProgress && item.runProgress.terminal === true) {
@@ -2420,31 +2472,75 @@ export function initForge(section) {
     }
   }
 
+  function selectInspector(id) {
+    S.insp = INSP.some(([candidate]) => candidate === id) ? id : 'chat';
+    paintC();
+    if (S.insp === 'lens') {
+      if (!S.context && !S.contextBusy) void loadContext();
+      if (!S.memory && !S.memoryBusy) void loadMemory();
+      scheduleRunContext(activeSession());
+    }
+    if (S.insp === 'skills') {
+      if (!S.context && !S.contextBusy) void loadContext();
+      if (!S.extensions && !S.extensionsBusy) void loadExtensions();
+    }
+  }
+
+  function composerLocation(session) {
+    const routedId = session.route && session.route.agentId ? session.route.agentId : session.agentId;
+    if (session.autoRoute && !(session.route && session.route.agentId)) return 'Auto route';
+    const selected = provider(routedId);
+    if (!selected) return `Provider: ${routedId || 'unavailable'}`;
+    return selected.hosted === false || selected.id === 'local' ? 'Local' : 'Cloud';
+  }
+
   function paintC() {
     const session = activeSession();
     const ses = el('div', 'sesrow');
     const last = session.runs[session.runs.length - 1];
-    add(ses, el('b', null, 'Session'));
-    const label = el('span', 'sesname', last ? `${session.name} · ${short(last.task, 32)}` : `${session.name} · ready`);
+    const breadcrumb = el('div', 'fgsession-breadcrumb');
+    add(breadcrumb, el('b', null, workspaceName(S.status)), glyph('›', 'sep'), el('span', null, session.name));
+    const label = el('span', 'sesname', last ? short(last.task, 42) : 'Ready for a task');
     if (last) label.title = last.task;
-    add(ses, el('span', 'sp'), label);
+    add(ses, breadcrumb, el('span', 'sp'), label);
+
     // What is owed, where it is owed, said in the header of the surface that
     // owes it. Drawn from the capsules actually held, never from a click.
     const owed = gatesWaiting();
     if (owed > 0) {
       const chip = el('span', 'chip');
       chip.dataset.state = 'warn';
-      add(chip, glyph('◈', 'chip-glyph'));
-      add(chip, document.createTextNode(`${owed} awaiting your decision`));
-      chip.title = 'Every capsule the daemon is holding is in this thread, whatever proposed it. Nothing lands until you approve it.';
+      add(chip, glyph('◈', 'chip-glyph'), document.createTextNode(`${owed} waiting`));
+      chip.title = 'Approval capsules currently held by the daemon.';
+      add(ses, chip);
+    }
+    const lens = btn('fgicon', '@', () => selectInspector('lens'));
+    lens.setAttribute('aria-label', 'Open exact run context');
+    lens.title = 'Open exact sanitized run context';
+    add(ses, lens);
+    if (S.view === 'ide') {
+      const hide = btn('fgicon', '×', () => setPaneOpen('session', false));
+      hide.setAttribute('aria-label', 'Hide Session panel');
+      hide.title = 'Hide Session panel';
+      add(ses, hide);
+    }
+    if (S.streamDown) {
+      const chip = el('span', 'chip');
+      chip.dataset.state = 'warn';
+      add(chip, glyph('!', 'chip-glyph'), document.createTextNode('reconnecting'));
+      chip.title = 'The approval stream dropped and is retrying.';
       add(ses, chip);
     }
 
+    const sessionRail = el('aside', 'fgsession-rail');
+    sessionRail.setAttribute('aria-label', 'Project conversations');
+    const railTitle = el('div', 'fgsessions-title');
+    add(railTitle, el('span', null, 'Project'), el('b', null, workspaceName(S.status)), el('span', null, 'Conversations'));
     const sessions = el('div', 'fgsessions');
     sessions.setAttribute('role', 'tablist');
     sessions.setAttribute('aria-label', 'Agent sessions');
     for (const item of S.sessions) {
-      const b = btn(null, null, () => {
+      const b = btn('fgsession-tab', null, () => {
         S.selectedSessionId = item.id;
         paintC();
         paintE();
@@ -2455,55 +2551,49 @@ export function initForge(section) {
       paintSessionTab(b, item);
       add(sessions, b);
     }
-    const addAgent = btn('fgsession-add', '+', addSession);
+    const sessionActions = el('div', 'fgsessions-actions');
+    const addAgent = btn('fgicon', '+', addSession);
     addAgent.setAttribute('aria-label', 'New agent session');
-    addAgent.title = 'New agent session';
+    addAgent.title = 'New independent agent session';
     addAgent.disabled = S.sessions.length >= 8;
-    add(sessions, addAgent);
-    const closeAgent = btn('fgsession-add', '×', closeActiveSession);
+    const closeAgent = btn('fgicon', '×', closeActiveSession);
     closeAgent.setAttribute('aria-label', 'Close selected agent session');
     closeAgent.disabled = S.sessions.length <= 1 || session.running || session.routing;
     closeAgent.title = S.sessions.length <= 1
       ? 'Forge keeps one agent session open.'
       : session.running || session.routing
-        ? 'Stop or wait for this agent session before closing it.'
+        ? 'Stop or wait for this session before closing it.'
         : `Close ${session.name}`;
-    add(sessions, closeAgent);
-    if (S.streamDown) {
-      const chip = el('span', 'chip');
-      chip.dataset.state = 'warn';
-      add(chip, glyph('!', 'chip-glyph'));
-      add(chip, document.createTextNode('live connection down'));
-      chip.title = 'The /stream subscription dropped and is retrying. A capsule raised in the meantime will appear when it reconnects — it is not lost, only late here.';
-      add(ses, chip);
-    }
+    add(sessionActions, addAgent, closeAgent);
+    add(sessionRail, railTitle, sessions, sessionActions);
 
     const tabs = el('div', 'insp-tabs');
     tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Session views');
     for (const [id, name] of INSP) {
-      const b = btn(null, name, () => { S.insp = id; paintC(); });
+      const b = btn(null, name, () => selectInspector(id));
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', id === S.insp ? 'true' : 'false');
       add(tabs, b);
     }
 
     const bd = el('div', 'insp-bd');
-    add(bd, INSPECTOR[S.insp] ? INSPECTOR[S.insp]() : INSPECTOR.chat());
+    const transcript = el('div', 'fgtranscript');
+    add(transcript, INSPECTOR[S.insp] ? INSPECTOR[S.insp]() : INSPECTOR.chat());
+    add(bd, transcript);
 
-    /* the composer: the task that starts a run */
+    /* The sticky composer keeps the primary task and next action visible. */
     const compose = el('div', 'compose');
     const input = el('textarea');
     input.rows = 2;
     input.maxLength = 16_000;
     input.id = 'zf-task';
-    input.placeholder = session.routing ? 'choosing the route…' : session.running ? 'this agent is running…' : 'Ask anything or describe a change… ↵ to run';
-    input.setAttribute('aria-label', 'The task to hand the agent');
+    input.placeholder = session.routing ? 'Choosing the route…' : session.running ? 'This agent is running…' : 'Ask Zeno to inspect, explain, or change this repository';
+    input.setAttribute('aria-label', 'Task for the agent');
     input.value = session.draft;
     input.disabled = session.routing || session.running || !OWNER_TOKEN;
     input.addEventListener('input', () => {
       session.draft = input.value;
-      // A changed task is a different outbound payload, so an earlier consent
-      // can never silently carry over to it.
       session.hostedConfirmation = null;
       invalidateRunContext(session);
       if (S.insp === 'lens') scheduleRunContext(session);
@@ -2512,29 +2602,53 @@ export function initForge(section) {
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter' && !ev.shiftKey && canRun(session)) { ev.preventDefault(); void doRun(session); }
     });
-    const sendBtn = btn('btn sm', session.routing ? 'Routing…' : session.running ? 'Running…' : 'Run', () => void doRun(session));
+    add(compose, input);
+
+    const controls = el('div', 'composer-actions');
+    const addContext = btn('fgicon', '+', openSkillsCatalog);
+    addContext.setAttribute('aria-label', 'Add context from rules and skills');
+    addContext.title = 'Add context from the repository Skills catalog';
+    const exactContext = btn('fgicon', '@', () => selectInspector('lens'));
+    exactContext.setAttribute('aria-label', 'Inspect exact context');
+    exactContext.title = 'Inspect the exact bounded prompt, repository rules, and Vault recall';
+    const codeMode = btn('fgicon fgcode-mode', '</>', () => {
+      setView('ide');
+      requestAnimationFrame(() => paneViews[S.focusedGroup]?.editor?.focus());
+    });
+    codeMode.setAttribute('aria-label', 'Code mode');
+    codeMode.setAttribute('aria-pressed', S.view === 'ide' ? 'true' : 'false');
+    codeMode.title = 'Code mode opens the editor workspace; it does not change provider permissions.';
+    add(controls, addContext, exactContext, codeMode, buildPickers(session), el('span', 'sp'));
+
+    const locationChip = el('span', 'fgroute-state', composerLocation(session));
+    locationChip.title = session.autoRoute && !(session.route && session.route.agentId)
+      ? 'Zeno will choose from providers proved available for this task.'
+      : 'Where the currently selected provider runs.';
+    add(controls, locationChip);
+    const voice = btn('fgicon', '◉', () => {
+      document.querySelector('[data-nav="command"]')?.click();
+      requestAnimationFrame(() => document.querySelector('.zv-ptt')?.focus());
+    });
+    voice.setAttribute('aria-label', 'Open voice input');
+    voice.title = 'Open Command and focus its local hold-to-talk control';
+    const sendBtn = btn('fgsend', '↑', () => void doRun(session));
+    sendBtn.setAttribute('aria-label', session.routing ? 'Routing task' : session.running ? 'Task running' : 'Submit task');
+    sendBtn.title = 'Submit task · Enter';
     sendBtn.disabled = !canRun(session);
-    add(compose, input, sendBtn);
+    add(controls, voice, sendBtn);
 
-    const hostedGate = session.hostedConfirmation ? renderHostedConfirmation(session) : null;
-
-    /* the footer: the model and effort selectors, from GET /forge/agents */
-    const crow = el('div', 'crow');
-    add(crow, buildPickers(session));
-    const skillButton = btn('btn sm', `Skills (${S.skillIds.size})`, () => { S.insp = 'lens'; paintC(); });
-    skillButton.title = 'Select the installed skills included in the next run';
-    add(crow, skillButton);
-    const route = el('div', 'fgroute');
-    route.dataset.auto = session.autoRoute ? '1' : '0';
-    add(route, glyph(session.autoRoute ? '◆' : '◇', 'fgroute-mark'), el('span', null,
+    const route = el('details', 'fgroute');
+    add(route, el('summary', null, `${composerLocation(session)} · route details`));
+    add(route, el('div', null,
       session.route && session.route.rationale
         ? session.route.rationale
         : session.autoRoute
-          ? 'Automatic routing uses task type, privacy, and providers proven available on this machine. A hosted choice still asks before sending code.'
-          : 'Manual routing is active; the selected provider, model, and effort will be used.'));
+          ? 'Automatic routing uses task type, privacy, and providers proved available on this machine. A hosted choice still asks before code is sent.'
+          : 'Manual routing uses the selected provider, model, and effort.'));
     const composerShell = el('div', 'composer-shell');
-    add(composerShell, compose, crow, route);
-    rgC.replaceChildren(ses, sessions, tabs, bd, ...(hostedGate ? [hostedGate] : []), composerShell);
+    const hostedGate = session.hostedConfirmation ? renderHostedConfirmation(session) : null;
+    add(composerShell, hostedGate, compose, controls, route);
+    rgC.replaceChildren(ses, sessionRail, tabs, bd, composerShell);
     paintTop();
   }
 
@@ -2579,8 +2693,7 @@ export function initForge(section) {
   }
 
   function buildPickers(session = activeSession()) {
-    const box = el('span');
-    box.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%';
+    const box = el('span', 'fgpickers');
     if (S.agentsErr) {
       add(box, el('span', null, `agents unavailable — ${S.agentsErr}`));
       return box;
@@ -2678,7 +2791,7 @@ export function initForge(section) {
       paintC(); paintE();
     });
 
-    add(box, agentSel, modelSel, effortSel, el('span', 'sp'), el('span', null, '↵ to run'));
+    add(box, agentSel, modelSel, effortSel);
     if (chosen && chosen.available === false) {
       add(box, el('span', 'fgprovider-note', chosen.unavailableReason || 'This provider is unavailable.'));
     }
@@ -2700,10 +2813,14 @@ export function initForge(section) {
         return wrap;
       }
       if (S.chat.length === 0 && S.gates.length === 0) {
-        add(wrap, renderUnwired(
-          'Nothing has been run yet',
-          'Type a task below and press Run. The agent works headless in an isolated throwaway worktree, and every file it changes arrives here — and in Command — as an approval capsule. Editing a file in the code pane and pressing Ctrl+S proposes it through the same gate. Nothing on this surface touches the sandbox on its own.',
-        ));
+        const empty = el('div', 'fgempty');
+        add(empty, glyph('✦', 'fgempty-mark'), el('h2', null, 'What should Zeno work on?'),
+          el('p', null, 'Describe a task below. Forge will show the current state and next action here.'));
+        const safety = el('details', 'fgempty-details');
+        add(safety, el('summary', null, 'How changes and approvals work'),
+          el('p', null, 'Runs use an isolated worktree. File changes become governed proposals, and non-routine effects wait in approval capsules.'));
+        add(empty, safety);
+        add(wrap, empty);
         return wrap;
       }
       // ONE TIMELINE. A capsule raised in the middle of a run belongs where it
@@ -2814,7 +2931,8 @@ export function initForge(section) {
         'Forge hands the task straight to the agent; nothing in this daemon produces a plan for you to approve first, so there is no plan to show. When a planning step exists, it will appear here.',
       );
     },
-    lens() { return contextPanel(); },
+    lens() { return lensPanel(); },
+    skills() { return rulesSkillsPanel(); },
   };
 
   function youTurn(t) {
@@ -2947,49 +3065,39 @@ export function initForge(section) {
     add(who, el('span', 'mchip', `${t.agentId}${t.model ? ' · ' + t.model : ''}${t.effort ? ' · ' + t.effort : ''}`));
     add(m, who);
 
-    // A factual line about what the run did, in the prototype's slot for the
-    // agent's inner voice. It reports mechanics we actually know — never
-    // invented reasoning.
-    add(m, el('div', 'think',
-      `${t.cancelled ? 'stopped by you' : 'ran headless'} in an isolated worktree · ${t.files.length} ${t.files.length === 1 ? 'file' : 'files'} changed · ${clock(t.at)}`));
-    if (t.tokenUsage) add(m, el('div', 'think', tokenUsageLabel(t.tokenUsage)));
-
-    // TOOL CALLS as discrete rows: one per file the run actually wrote, with the
-    // real line range it produced. A deletion/binary/oversized output is a
-    // visibly skipped row, never a write row that implies a capsule exists.
-    for (const f of t.files) {
-      const row = f.skipped ? el('div', 'tool') : btn('tool', null, () => openFile(f.path));
-      add(row, el('span', 'th', f.skipped ? 'skip' : 'write'));
-      const p = el('span', 'pth', f.lines ? `${f.path}:1–${f.lines}` : f.path);
-      p.title = f.skipped ? `${f.path} — ${f.skipped.note}` : f.path;
-      add(row, p);
-      add(row, el('span', 'ok', f.skipped ? 'not proposed' : (f.tier ? f.tier : '·')));
-      add(m, row);
-    }
-    if (t.files.length === 0) {
-      add(m, el('div', 'tool', 'no file operations — the run changed nothing'));
-    }
-
     const bub = el('div', 'bub');
     if (t.note) add(bub, el('div', null, t.note));
     if (t.log) add(bub, logBlocks(t.log));
     if (!t.note && !t.log) add(bub, el('div', null, 'The agent returned without any output to show.'));
     add(m, bub);
 
-    /* WAITING AND APPLIED ARE DIFFERENT FACTS, so they are different lines.
-       The daemon returns `auto` on every proposed capsule: a routine (T0) write
-       is committed and receipted by the kernel on the spot, and only a capsule
-       with `auto:false` is actually sitting on Command waiting for a decision.
-       Counting them together and calling the total "review before anything
-       lands" told the owner a change was waiting when it had ALREADY landed —
-       the one sentence this surface must never say. */
+    const activity = el('details', 'fgactivity-detail');
+    add(activity, el('summary', null,
+      `Run activity · ${t.files.length} file${t.files.length === 1 ? '' : 's'} · ${clock(t.at)}`));
+    add(activity, el('div', 'think',
+      `${t.cancelled ? 'Stopped by you' : 'Provider finished'} · isolated worktree inspected · governed proposals prepared`));
+    if (t.tokenUsage) add(activity, el('div', 'think', tokenUsageLabel(t.tokenUsage)));
+    const tools = el('div', 'fgactivity-tools');
+    for (const f of t.files) {
+      const row = f.skipped ? el('div', 'tool') : btn('tool', null, () => openFile(f.path));
+      add(row, el('span', 'th', f.skipped ? 'skip' : 'write'));
+      const p = el('span', 'pth', f.lines ? `${f.path}:1–${f.lines}` : f.path);
+      p.title = f.skipped ? `${f.path} — ${f.skipped.note}` : f.path;
+      add(row, p, el('span', 'ok', f.skipped ? 'not proposed' : (f.tier || '·')));
+      add(tools, row);
+    }
+    if (t.files.length === 0) add(tools, el('div', 'tool', 'No file operations'));
+    add(activity, tools, el('div', 'hint',
+      `Approvals: ${t.waiting || 0} waiting · ${t.applied || 0} routine applied. Provider plan steps and private reasoning are not exposed by the current backend.`));
+    add(m, activity);
+
     if (t.waiting > 0) {
-      const c = btn('cite', `↗ ${t.waiting} ${t.waiting === 1 ? 'capsule' : 'capsules'} on Command — ${t.waiting === 1 ? 'it has' : 'they have'} not landed until you approve ${t.waiting === 1 ? 'it' : 'them'}`);
+      const c = btn('cite', `↗ ${t.waiting} ${t.waiting === 1 ? 'capsule' : 'capsules'} awaiting your decision`);
       c.setAttribute('data-go', 'command');
       add(m, c);
     }
     if (t.applied > 0) {
-      const c = btn('cite', `✓ ${t.applied} routine ${t.applied === 1 ? 'change was' : 'changes were'} applied and receipted automatically — already in Command’s timeline, not awaiting a decision`);
+      const c = btn('cite', `✓ ${t.applied} routine ${t.applied === 1 ? 'change was' : 'changes were'} applied and receipted`);
       c.setAttribute('data-go', 'command');
       add(m, c);
     }
@@ -3007,7 +3115,7 @@ export function initForge(section) {
    * Processes & ports, reports the one process this page can actually
    * observe: the daemon it is talking to.                              */
 
-  const DRAWER = [['terminal', 'Terminal'], ['tests', 'Tests'], ['ci', 'CI'], ['procs', 'Processes & ports']];
+  const DRAWER = [['problems', 'Problems'], ['output', 'Output'], ['debugconsole', 'Debug Console'], ['terminal', 'Terminal'], ['ports', 'Ports']];
 
   /* Open or shut is one attribute on :root, because the CSS owns the collapsed
      layout. Every control that moves the drawer goes through here, for two
@@ -3020,8 +3128,10 @@ export function initForge(section) {
     if (min) R.setAttribute('data-drawer', 'min');
     else R.removeAttribute('data-drawer');
     if (colBtn) {
-      colBtn.textContent = min ? '▲ expand' : '▼ collapse';
+      colBtn.textContent = min ? '⌃' : '⌄';
       colBtn.setAttribute('aria-expanded', min ? 'false' : 'true');
+      colBtn.setAttribute('aria-label', min ? 'Expand bottom panel' : 'Collapse bottom panel');
+      colBtn.title = min ? 'Expand bottom panel' : 'Collapse bottom panel';
     }
     // The workbench bar mirrors the drawer state. Repaint that small strip so
     // its icon and accessible label always describe what the next click does.
@@ -3049,7 +3159,7 @@ export function initForge(section) {
         S.draw = id;
         if (drawerMin()) setDrawerMin(false);
         paintD();
-        if (id === 'tests' && !S.tests && !S.testsBusy) void loadTests();
+        if (id === 'output' && !S.tests && !S.testsBusy) void loadTests();
       });
       c.setAttribute('role', 'tab');
       c.setAttribute('aria-selected', id === S.draw ? 'true' : 'false');
@@ -3057,8 +3167,10 @@ export function initForge(section) {
       add(hd, c);
     }
     add(hd, el('span', 'sp'));
-    colBtn = btn('drawcol', drawerMin() ? '▲ expand' : '▼ collapse', () => setDrawerMin(!drawerMin()));
+    colBtn = btn('drawcol', drawerMin() ? '⌃' : '⌄', () => setDrawerMin(!drawerMin()));
     colBtn.setAttribute('aria-expanded', drawerMin() ? 'false' : 'true');
+    colBtn.setAttribute('aria-label', drawerMin() ? 'Expand bottom panel' : 'Collapse bottom panel');
+    colBtn.title = drawerMin() ? 'Expand bottom panel' : 'Collapse bottom panel';
     add(hd, colBtn);
 
     const bd = el('div', 'drawbody');
@@ -3129,7 +3241,61 @@ export function initForge(section) {
     return wrap;
   }
 
+  function markerInventory() {
+    const items = [];
+    if (!M) return { items, errors: 0, warnings: 0, ready: false };
+    for (const [path, model] of models) {
+      if (!model || model.isDisposed() || !DIAGNOSED.has(model.getLanguageId())) continue;
+      for (const marker of M.editor.getModelMarkers({ resource: model.uri })) items.push({ path, marker });
+    }
+    return {
+      items,
+      errors: items.filter(({ marker }) => marker.severity === M.MarkerSeverity.Error).length,
+      warnings: items.filter(({ marker }) => marker.severity === M.MarkerSeverity.Warning).length,
+      ready: true,
+    };
+  }
+
   const DRAWER_BODY = {
+    problems() {
+      const wrap = el('div', 'fgproblems-list');
+      const inventory = markerInventory();
+      if (!inventory.ready) return renderUnwired('Problems are loading', 'The bundled Monaco language services have not finished loading.');
+      add(wrap, el('div', 'hint', `${inventory.errors} error${inventory.errors === 1 ? '' : 's'} · ${inventory.warnings} warning${inventory.warnings === 1 ? '' : 's'} across open, supported files.`));
+      if (!inventory.items.length) add(wrap, renderNote('No problems reported for open files with an active Monaco language service.', 'gr'));
+      for (const { path, marker } of inventory.items) {
+        const row = btn('fgproblem-row', null, () => void openFile(path, marker.startLineNumber));
+        add(row, el('span', marker.severity === M.MarkerSeverity.Error ? 'rd' : 'cy', marker.severity === M.MarkerSeverity.Error ? '✕' : '△'),
+          el('span', 'nm', marker.message), el('span', 'tag', `${path}:${marker.startLineNumber}:${marker.startColumn}`));
+        row.title = `Open ${path} at line ${marker.startLineNumber}`;
+        add(wrap, row);
+      }
+      add(wrap, el('div', 'hint', 'Counts cover open files and only language services Monaco actually provides. Repository checks remain in the Tests view.'));
+      return wrap;
+    },
+    output() {
+      const wrap = el('div', 'fgoutput');
+      const results = [...S.testResults.values()];
+      const lastRun = S.runs[S.runs.length - 1];
+      if (!results.length && !lastRun) add(wrap, renderNote('No run or test output has been captured in this window.'));
+      if (lastRun) add(wrap, el('div', 'hint', `Latest agent run: ${lastRun.ok ? 'completed' : 'failed'} · ${lastRun.files} file${lastRun.files === 1 ? '' : 's'} · ${clock(lastRun.at)}`));
+      for (const result of results.slice(-5).reverse()) {
+        const detail = el('details', 'fgoutput-run');
+        add(detail, el('summary', null, `${result.ok ? '✓ passed' : '✕ failed'} · ${result.durationMs}ms · ${result.startedAt}`));
+        if (result.stdout) add(detail, el('pre', 'code', result.stdout));
+        if (result.stderr) add(detail, el('pre', 'code', result.stderr));
+        if (!result.stdout && !result.stderr) add(detail, el('div', 'hint', 'The test process returned no output.'));
+        add(wrap, detail);
+      }
+      const diagnostics = el('details', 'fgcapability-gap');
+      add(diagnostics, el('summary', null, 'CI and output sources'),
+        el('div', 'hint', 'No CI provider is wired to this daemon. Output here comes only from agent responses and repository tests run in this window.'));
+      add(wrap, diagnostics);
+      return wrap;
+    },
+    debugconsole() {
+      return renderUnwired('No debug session', 'The daemon exposes no debugger attach or debug-console route. Use repository tests or the owner terminal; this tab starts nothing.');
+    },
     terminal() {
       const wrap = el('div');
       const tabbar = el('div', 'acts fgterm-tabs');
@@ -3201,16 +3367,7 @@ export function initForge(section) {
       if (S.terminalErr) add(wrap, renderNote(S.terminalErr));
       return wrap;
     },
-    tests() {
-      return testPanel(true);
-    },
-    ci() {
-      return renderUnwired(
-        'No CI is wired',
-        'This daemon talks to no CI system. There is no pipeline, no job and no status to mirror, so none is drawn.',
-      );
-    },
-    procs() {
+    ports() {
       const wrap = el('div');
       const kv = el('dl', 'kv');
       kvAdd(kv, 'daemon', location.origin);
@@ -3291,84 +3448,69 @@ export function initForge(section) {
   function paintE() {
     const bits = [];
     const st = S.status;
+    const session = activeSession();
+    const statusButton = (className, text, title, action) => {
+      const control = btn(className, text, action);
+      control.title = title;
+      return control;
+    };
 
-    const repo = el('b', 'fgst-repo', workspaceName(st));
-    bits.push(repo);
+    bits.push(statusButton('fgstatus-item fgst-repo', `⌂ ${workspaceName(st)}`,
+      st && st.root ? String(st.root) : 'Selected workspace path is unavailable.',
+      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); }));
     if (st && st.repo) {
-      bits.push(el('span', 'fgst-branch', st.branch || '(no branch)'));
-      bits.push(el('span', 'fgst-head', st.head ? `HEAD ${st.head}` : 'HEAD — no commits yet'));
+      bits.push(statusButton('fgstatus-item fgst-branch', `⑂ ${st.branch || '(no branch)'}`,
+        `${st.head ? `HEAD ${st.head}` : 'No commits yet'} · Remote sync is unavailable in this build.`,
+        () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'scm'; paintA(); }));
       const n = (st.changed || []).length;
-      bits.push(el('span', 'fgst-tree', n === 0 ? 'worktree clean' : `worktree ${n} changed`));
+      bits.push(el('span', 'fgstatus-item fgst-tree', n === 0 ? '✓ clean' : `${n} changed`));
+      const sync = el('span', 'fgstatus-item fgst-sync', '↻ —');
+      sync.setAttribute('aria-label', 'Remote sync unavailable');
+      sync.title = 'The daemon reports local Git status and has no fetch, pull, push, or sync route.';
+      bits.push(sync);
     } else {
-      // Before the first answer we know nothing about the repository, so we say
-      // nothing about it. Reporting "not a git repository" here was a claim the
-      // window had not yet earned — it would have been printed even where a
-      // perfectly good repository existed and the read was simply in flight.
-      bits.push(el('span', 'fgst-tree',
-        S.statusErr ? 'status unavailable' : S.status ? 'not a git repository' : 'reading the repository…'));
+      bits.push(el('span', 'fgstatus-item fgst-tree',
+        S.statusErr ? 'status unavailable' : S.status ? 'not a Git repository' : 'reading Git…'));
     }
 
+    const running = S.sessions.filter((item) => item.running).length;
+    bits.push(el('span', 'fgstatus-item fgst-run', running ? `◉ ${running} running` : '▷ ready'));
+    bits.push(el('span', 'sp'));
+
+    const problems = markerInventory();
+    const problemButton = statusButton('fgstatus-item fgst-problems',
+      `✕ ${problems.errors}  △ ${problems.warnings}`,
+      problems.ready ? 'Problems reported by Monaco for open supported files.' : 'Monaco language services are still loading.',
+      () => { S.draw = 'problems'; setDrawerMin(false); paintD(); });
+    problemButton.disabled = !problems.ready;
+    bits.push(problemButton);
+
+    const model = S.file ? models.get(S.file) : null;
+    const position = ed && model && ed.getModel() === model ? ed.getPosition() : null;
     if (S.file && S.fileData && !S.fileData.binary) {
-      bits.push(el('span', 'fgst-file',
-        `${S.fileData.encoding} · ${S.fileData.eol} · ${S.fileData.lines} ln · ${bytesLabel(S.fileData.bytes)}`));
-      bits.push(el('span', 'fgst-caret', S.caret ? `ln ${S.caret}` : 'ln —'));
-    } else if (S.file && S.fileData && S.fileData.binary) {
-      bits.push(el('span', 'fgst-file', `binary · ${bytesLabel(S.fileData.bytes)}`));
+      const options = model ? model.getOptions() : null;
+      bits.push(el('span', 'fgstatus-item fgst-caret', position ? `Ln ${position.lineNumber}, Col ${position.column}` : S.caret ? `Ln ${S.caret}` : 'Ln —'));
+      bits.push(el('span', 'fgstatus-item fgst-spaces', options ? `${options.insertSpaces ? 'Spaces' : 'Tabs'}: ${options.tabSize}` : 'indent —'));
+      bits.push(el('span', 'fgstatus-item fgst-encoding', `${S.fileData.encoding} · ${S.fileData.eol}`));
+      bits.push(el('span', 'fgstatus-item fgst-language', model ? model.getLanguageId() : 'plain text'));
     } else {
-      bits.push(el('span', 'fgst-file', 'no file open'));
+      bits.push(el('span', 'fgstatus-item fgst-file', S.file ? 'binary file' : 'no file'));
     }
 
-    const sp = el('span', 'sp');
-    bits.push(sp);
-
-    /* EFFORT IS ONLY STATED WHERE IT MEANS SOMETHING. The registry tells us, per
-       rung, whether that agent takes an effort level (`supportsEffort`); the
-       picker already disables the control when it does not. Printing "effort
-       medium" here regardless described a setting that will not reach the run —
-       a small claim, but a false one, and the status bar is read as fact. Where
-       the rung declares no effort, the bar says nothing about effort. */
-    const chosenAgent = (S.agents && Array.isArray(S.agents.agents))
-      ? S.agents.agents.find((a) => a && a.id === S.agentId)
-      : null;
-    const effortCounts = !chosenAgent || chosenAgent.supportsEffort !== false;
-    const agent = el('span', 'fgst-agent');
-    add(agent, el('b', null, S.agentId));
-    add(agent, document.createTextNode(
-      ` · ${S.model || 'default model'}${effortCounts ? ` · effort ${S.effort}` : ''}`));
+    const theme = R.getAttribute('data-theme') || 'system';
+    const themeButton = statusButton('fgstatus-item fgst-theme', `◐ ${theme}`,
+      `Glass theme: ${theme}. Open Extensions & themes to change it.`,
+      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); if (!S.extensions && !S.extensionsBusy) void loadExtensions(); });
+    bits.push(themeButton);
+    const rainbow = statusButton('fgstatus-item fgst-rainbow', S.rainbowBrackets ? '{} rainbow' : '{} plain',
+      `Rainbow brackets are ${S.rainbowBrackets ? 'enabled' : 'disabled'}.`,
+      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); });
+    bits.push(rainbow);
+    bits.push(el('span', 'fgstatus-item fgst-notify', `♢ ${gatesWaiting()}`));
+    const location = composerLocation(session);
+    const agent = statusButton('fgstatus-item fgst-agent', `${location} · ${session.agentId}${session.model ? `/${session.model}` : ''}`,
+      'Active session provider and execution location.', () => { if (!S.sessionOpen) setPaneOpen('session', true); S.insp = 'chat'; paintC(); });
     bits.push(agent);
-
-    /* The egress line, and it is a statement of fact rather than a badge: a
-       local model runs on this machine and nothing leaves it; a hosted agent
-       reaches its own provider, and saying "local only" there would be false. */
-    const eg = el('span', 'chip fgst-egress');
-    const egLocal = S.agentId === 'local';
-    const egAvailable = !S.agents || providerAvailable(S.agentId);
-    eg.dataset.state = !egAvailable ? 'error' : egLocal ? 'listening' : 'warn';
-    add(eg, glyph(!egAvailable ? '!' : egLocal ? '⌂' : '↗', 'chip-glyph'));
-    add(eg, document.createTextNode(!egAvailable
-      ? 'provider unavailable'
-      : egLocal ? 'egress: local only' : 'egress: this agent reaches its own provider'));
-    bits.push(eg);
-
-    const mode = el('span', 'chip fgst-safety');
-    add(mode, glyph('◇', 'chip-glyph'));
-    add(mode, document.createTextNode('agents propose · terminal runs on your click'));
-    bits.push(mode);
-
-    /* THE VIEW SWITCH. A real button in the status bar, because a shortcut
-       nobody can see is not a discoverable control — the shortcut is on it, in
-       its title and its label, rather than instead of it. It says what the OTHER
-       view is, which is the only useful thing for a control that toggles. */
-    const agentView = S.view === 'agent';
-    const vw = btn('chip fgview', null, () => setView(agentView ? 'ide' : 'agent'));
-    vw.dataset.state = agentView ? 'listening' : '';
-    vw.setAttribute('aria-pressed', agentView ? 'true' : 'false');
-    add(vw, glyph(agentView ? '▤' : '▣', 'chip-glyph'));
-    add(vw, document.createTextNode(agentView ? 'full IDE  ⌃⇧A' : 'agent only  ⌃⇧A'));
-    vw.title = agentView
-      ? 'Bring back the explorer, the code pane and the drawer. Ctrl+Shift+A.'
-      : 'Collapse the explorer, the code pane and the drawer, and give the whole window to the agent session — with every approval capsule in line. Ctrl+Shift+A.';
-    bits.push(vw);
 
     rgE.replaceChildren(...bits);
   }
@@ -3442,15 +3584,226 @@ export function initForge(section) {
     }, 250);
   }
 
-  function contextPanel() {
+  function setSkillSelected(id, selected) {
+    if (selected) S.skillIds.add(id); else S.skillIds.delete(id);
+    // Skills become part of the outbound prompt, so changing them invalidates
+    // any hosted consent that was bound to the previous prompt.
+    for (const session of S.sessions) {
+      session.hostedConfirmation = null;
+      invalidateRunContext(session);
+    }
+    paintA(); paintC();
+    scheduleRunContext(activeSession());
+  }
+
+  function catalogMatches(query, ...values) {
+    if (!query) return true;
+    return values.some((value) => String(value ?? '').toLocaleLowerCase().includes(query));
+  }
+
+  /**
+   * The discoverable capability catalog. It combines the selected repository's
+   * actionable rules/skills with the daemon's read-only global inventory. Lens
+   * remains the exact prompt preview and never doubles as a library browser.
+   */
+  function rulesSkillsPanel() {
+    const wrap = el('div', 'pw');
+    wrap.style.overflowWrap = 'anywhere';
+
+    const heading = el('div', 'acts');
+    add(heading, el('b', null, 'Rules & skills'));
+    const busy = S.contextBusy || S.extensionsBusy;
+    const refresh = btn('btn sm ghost', busy ? 'Reading…' : 'Refresh catalog', () => {
+      void loadContext();
+      void loadExtensions();
+    });
+    refresh.disabled = busy;
+    add(heading, el('span', 'sp'), refresh);
+    add(wrap, heading);
+
+    const search = el('div', 'sform');
+    const input = el('input');
+    input.id = 'zf-skill-search';
+    input.type = 'search';
+    input.placeholder = 'Search rules, skills and sources';
+    input.setAttribute('aria-label', 'Search repository rules and local skills');
+    input.value = S.skillQuery;
+    input.addEventListener('input', () => {
+      S.skillQuery = input.value;
+      const caret = input.selectionStart ?? input.value.length;
+      paintA();
+      requestAnimationFrame(() => {
+        const next = rgA.querySelector('#zf-skill-search');
+        if (!next) return;
+        next.focus();
+        next.setSelectionRange(caret, caret);
+      });
+    });
+    add(search, input);
+    add(wrap, search, el('div', 'hint',
+      'Repository skills can be selected for a run. Global skills are catalogued read-only until they are installed in the selected repository. Rules and skills grant no tool permission.'));
+
+    if (S.contextErr) add(wrap, renderNote(`Repository rules and skills unavailable: ${S.contextErr}`, 'rd'));
+    if (S.extensionsErr) add(wrap, renderNote(`Global capability catalog unavailable: ${S.extensionsErr}`, 'rd'));
+    if (busy) add(wrap, renderNote('Reading repository and local capability sources…'));
+
+    const query = S.skillQuery.trim().toLocaleLowerCase();
+    const context = S.context || {};
+    const catalog = S.extensions || {};
+    const allRules = Array.isArray(context.rules) ? context.rules : [];
+    const rules = allRules.filter((rule) =>
+      catalogMatches(query, rule.path, rule.body));
+    const repositorySkills = new Map(
+      (Array.isArray(context.skills) ? context.skills : []).map((skill) => [skill.id, skill]),
+    );
+    const catalogSkills = Array.isArray(catalog.skills) ? catalog.skills : [];
+    const skillEntries = [...catalogSkills];
+    for (const skill of repositorySkills.values()) {
+      if (skillEntries.some((entry) => entry.id === skill.id && entry.selectableInThisRepository === true)) continue;
+      skillEntries.push({
+        ...skill,
+        provenance: 'selected repository',
+        sourcePath: context.dir,
+        selectableInThisRepository: true,
+      });
+    }
+    const skills = skillEntries
+      .filter((skill) => catalogMatches(
+        query,
+        skill.id,
+        skill.name,
+        skill.description,
+        skill.provenance,
+        skill.sourcePath,
+        skill.status,
+        skill.verdict,
+      ))
+      .sort((a, b) => Number(b.selectableInThisRepository) - Number(a.selectableInThisRepository)
+        || String(a.name || a.id).localeCompare(String(b.name || b.id)));
+    const allBuiltins = Array.isArray(catalog.builtins) ? catalog.builtins : [];
+    const repositorySkillCount = skillEntries.filter((skill) => skill.selectableInThisRepository === true).length;
+    const otherSkillCount = Math.max(0, skillEntries.length - repositorySkillCount);
+    add(wrap, el('div', 'hint',
+      `${allRules.length} repository rule${allRules.length === 1 ? '' : 's'} · ` +
+      `${repositorySkillCount} selectable skill${repositorySkillCount === 1 ? '' : 's'} · ` +
+      `${otherSkillCount} other local skill${otherSkillCount === 1 ? '' : 's'} · ` +
+      `${allBuiltins.length} bundled capabilit${allBuiltins.length === 1 ? 'y' : 'ies'}`));
+
+    add(wrap, el('div', 'd', `repository rules · ${rules.length}`));
+    if (!S.context && !S.contextErr) add(wrap, renderNote('Reading rules from the selected repository…'));
+    else if (!rules.length) add(wrap, renderNote(query
+      ? 'No repository rule matches this search.'
+      : 'No supported repository rule file was found.'));
+    for (const rule of rules) {
+      const detail = el('details', 'box');
+      const name = String(rule.path || 'rule').replace(/\\/g, '/').split('/').pop();
+      add(detail, el('summary', null, `${name} · active${rule.truncated ? ' · truncated' : ''}`));
+      add(detail, el('div', 'hint', `Path: ${rule.path} · ${rule.bytes} bytes`));
+      add(detail, el('div', 'hint', 'selected repository · active for agent runs · no additional authority'));
+      const body = el('pre', null, rule.body || '');
+      body.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto';
+      add(detail, body);
+      add(wrap, detail);
+    }
+
+    const sources = (Array.isArray(catalog.skillSources) ? catalog.skillSources : [])
+      .filter((source) => catalogMatches(query, source.path, source.provenance, source.reason));
+    add(wrap, el('div', 'd', 'local skill sources'));
+    if (!S.extensions && !S.extensionsErr) add(wrap, renderNote('Reading repository and global skill libraries…'));
+    else if (!sources.length) add(wrap, renderNote(query
+      ? 'No skill source matches this search.'
+      : 'No local skill source was available.'));
+    if (sources.length) {
+      const sourceDetails = el('details', 'box');
+      const installed = sources.reduce((sum, source) => sum + (Number(source.installed) || 0), 0);
+      const unreadable = sources.reduce((sum, source) => sum + (Number(source.unreadable) || 0), 0);
+      add(sourceDetails, el('summary', null,
+        `${sources.length} source${sources.length === 1 ? '' : 's'} · ${installed} installed · ${unreadable} unreadable`));
+      for (const source of sources) {
+        const sourceRow = el('div', 'box');
+        add(sourceRow, el('b', null, source.provenance || 'local skill source'));
+        add(sourceRow, el('div', 'hint', source.path || 'path unavailable'));
+        add(sourceRow, el('div', 'hint', source.reason
+          ? `unreadable · ${source.reason}`
+          : `${source.installed || 0} installed · ${source.unreadable || 0} unreadable`));
+        add(sourceDetails, sourceRow);
+      }
+      add(wrap, sourceDetails);
+    }
+
+    add(wrap, el('div', 'd', `installed skills · ${skills.length}`));
+    if ((S.context || S.extensions) && !skills.length) add(wrap, renderNote(query
+      ? 'No installed skill matches this search.'
+      : 'No repository or global Agent Skill was found.'));
+    for (const skill of skills) {
+      const box = el('div', 'box');
+      const repositorySkill = repositorySkills.get(skill.id);
+      const selectable = skill.selectableInThisRepository === true && !!repositorySkill;
+      const head = el('div', 'acts');
+      if (selectable) {
+        const label = el('label');
+        const check = el('input');
+        check.type = 'checkbox';
+        check.checked = S.skillIds.has(skill.id);
+        check.disabled = S.running || S.contextBusy || !OWNER_TOKEN;
+        check.addEventListener('change', () => setSkillSelected(skill.id, check.checked));
+        add(label, check, document.createTextNode(` ${skill.name || skill.id}`));
+        add(head, label);
+      } else {
+        add(head, el('b', null, skill.name || skill.id));
+      }
+      const status = skill.status === 'unreadable' ? 'unreadable' : (skill.verdict || skill.status || 'available');
+      add(head, el('span', 'sp'), el('span', 'tag', `${status} · ${selectable ? 'repository' : 'read-only'}`));
+      add(box, head);
+      const metadata = el('details');
+      add(metadata, el('summary', null, 'Description, source and screening'));
+      if (skill.description) add(metadata, el('div', null, skill.description));
+      add(metadata, el('div', 'hint', `${skill.provenance || 'unknown provenance'} · ${skill.status === 'unreadable' ? (skill.reason || 'reason unavailable') : status}`));
+      add(metadata, el('div', 'hint', `Source: ${skill.sourcePath || context.dir || 'path unavailable'}`));
+      const detail = repositorySkill || skill;
+      for (const finding of Array.isArray(detail.findings) ? detail.findings : []) {
+        add(metadata, el('div', 'hint', `${finding.severity}: ${finding.why || finding.rule}`));
+      }
+      if (Array.isArray(skill.permissions) && skill.permissions.length) {
+        add(metadata, el('div', 'hint', `Permission: ${skill.permissions.join(', ')}. ${skill.authority || ''}`));
+      }
+      add(box, metadata);
+      add(wrap, box);
+    }
+
+    const builtins = allBuiltins
+      .filter((entry) => catalogMatches(query, entry.id, entry.name, entry.kind, entry.status, entry.provenance));
+    add(wrap, el('div', 'd', `bundled capabilities · ${builtins.length}`));
+    for (const entry of builtins) {
+      const detail = el('details', 'box');
+      add(detail, el('summary', null, `${entry.name || entry.id} · ${entry.status || 'status unavailable'}`));
+      add(detail, el('div', 'hint', `${entry.provenance || 'source unavailable'} · ${entry.kind || 'capability'}`));
+      add(wrap, detail);
+    }
+    for (const failure of Array.isArray(context.failed) ? context.failed : []) {
+      add(wrap, renderNote(`Unreadable repository skill: ${typeof failure === 'string' ? failure : JSON.stringify(failure)}`, 'rd'));
+    }
+    const limits = el('details', 'box');
+    add(limits, el('summary', null, 'Compatibility and capability boundaries'));
+    if (catalog.note) add(limits, el('div', 'hint', catalog.note));
+    add(limits, el('div', 'hint', 'VS Code Marketplace, VSIX packages and an external extension host are not supported by this build.'));
+    add(wrap, limits);
+    return wrap;
+  }
+
+  function lensPanel() {
     const session = activeSession();
     const wrap = el('div', 'pw');
     wrap.style.overflowWrap = 'anywhere';
-    const refresh = btn('btn sm', S.contextBusy ? 'Reading…' : 'Refresh rules & skills', () => void loadContext());
-    refresh.disabled = S.contextBusy || S.running;
-    add(wrap, refresh);
-    if (S.contextBusy) add(wrap, renderNote('Reading the selected repository…'));
-    if (S.contextErr) add(wrap, renderNote(`Rules and skills unavailable: ${S.contextErr}`));
+    const heading = el('div', 'acts');
+    add(heading, el('b', null, 'Exact run context'));
+    const refresh = btn('btn sm ghost', S.contextBusy ? 'Reading…' : 'Refresh sources', () => void loadContext());
+    refresh.disabled = S.contextBusy || session.running;
+    add(heading, el('span', 'sp'), refresh);
+    add(wrap, heading, el('div', 'hint',
+      'Lens previews the exact sanitized, bounded prompt for this task. Browse and select installed capabilities in Rules & skills.'));
+    if (S.contextBusy) add(wrap, renderNote('Refreshing repository context sources…'));
+    if (S.contextErr) add(wrap, renderNote(`Context sources unavailable: ${S.contextErr}`, 'rd'));
     const memoryBox = el('div', 'box');
     const memoryLabel = el('label');
     const memorySwitch = el('input');
@@ -3470,51 +3823,47 @@ export function initForge(section) {
       : 'Disabled for this session. The Vault remains enabled, stored, searchable, and unchanged.'));
     add(wrap, memoryBox);
 
-    const context = S.context;
-    if (!context) return wrap;
-    add(wrap, el('div', 'hint', `Skill library: ${context.dir || 'location unavailable'}`));
-    add(wrap, el('b', null, 'Repository rules'));
-    add(wrap, el('div', 'hint', 'These files are included in agent tasks. They grant no extra permission and cannot override your request.'));
+    const vault = el('details', 'box fgvault');
+    const memories = S.memory
+      ? (Array.isArray(S.memory.entries) ? S.memory.entries : Array.isArray(S.memory.notes) ? S.memory.notes : [])
+      : [];
+    add(vault, el('summary', null,
+      S.memoryBusy ? 'Reading Vault memory…' : S.memoryErr ? 'Vault memory unavailable' : `${memories.length} Vault record${memories.length === 1 ? '' : 's'} across sessions`));
+    if (S.memoryErr) add(vault, renderNote(S.memoryErr, 'rd'));
+    if (!S.memory && !S.memoryBusy && !S.memoryErr) add(vault, el('div', 'hint', 'Open this section or refresh to read persistent cross-session memory.'));
+    const vaultActions = el('div', 'acts');
+    const vaultRefresh = btn('btn sm ghost', S.memoryBusy ? 'Reading…' : 'Refresh Vault', () => void loadMemory());
+    vaultRefresh.disabled = S.memoryBusy;
+    add(vaultActions, vaultRefresh);
+    add(vault, vaultActions);
+    for (const memory of memories.slice(0, 12)) {
+      const item = el('details', 'fgmemory-row');
+      add(item, el('summary', null, memory.description || memory.title || memory.id || 'Vault record'));
+      add(item, el('div', 'hint', `${memory.kind || 'record'} · ${memory.source || 'source unavailable'} · ${memory.updatedAt || memory.createdAt || 'time unavailable'}`));
+      add(item, el('div', null, memory.body || 'No body was returned.'));
+      add(vault, item);
+    }
+    if (memories.length > 12) add(vault, el('div', 'hint', `Showing 12 of ${memories.length} records.`));
+    add(vault, el('div', 'hint', 'Bulk import is unavailable because this daemon exposes no memory-import route. Individual owner-authored records use the existing governed Vault surface.'));
+    vault.addEventListener('toggle', () => { if (vault.open && !S.memory && !S.memoryBusy) void loadMemory(); });
+    add(wrap, vault);
+
+    const context = S.context || {};
     const rules = Array.isArray(context.rules) ? context.rules : [];
-    if (!rules.length) add(wrap, renderNote('No supported rule files were found in this repository.'));
-    for (const rule of rules) {
-      const detail = el('details');
-      add(detail, el('summary', null, `${rule.path} · ${rule.bytes} bytes${rule.truncated ? ' · truncated' : ''}`));
-      const body = el('pre', null, rule.body || '');
-      body.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto';
-      add(detail, body); add(wrap, detail);
-    }
-    add(wrap, el('b', null, 'Skills for the next run'));
-    add(wrap, el('div', 'hint', 'Select skills deliberately. Screening findings are advisory; every action still uses its existing permission boundary.'));
-    const skills = Array.isArray(context.skills) ? context.skills : [];
-    if (!skills.length) add(wrap, renderNote('No installed skills were found. Add a skill under this library, then refresh.'));
-    for (const skill of skills) {
-      const row = el('div', 'box');
-      const label = el('label');
-      const check = el('input'); check.type = 'checkbox';
-      check.checked = S.skillIds.has(skill.id);
-      check.disabled = S.running || S.contextBusy || !OWNER_TOKEN;
-      check.addEventListener('change', () => {
-        if (check.checked) S.skillIds.add(skill.id); else S.skillIds.delete(skill.id);
-        // Skills become part of the outbound prompt, so changing them invalidates
-        // any hosted consent that was bound to the previous prompt.
-        for (const session of S.sessions) {
-          session.hostedConfirmation = null;
-          invalidateRunContext(session);
-        }
-        paintA(); paintC();
-        scheduleRunContext(activeSession());
-      });
-      add(label, check, document.createTextNode(` ${skill.name || skill.id}`));
-      add(row, label, el('div', null, skill.description || ''), el('div', 'hint', `${skill.verdict || 'not screened'} · ${skill.bytes || 0} bytes`));
-      for (const finding of skill.findings || []) add(row, el('div', 'hint', `${finding.severity}: ${finding.why || finding.rule}`));
-      add(wrap, row);
-    }
-    for (const failure of context.failed || []) add(wrap, renderNote(`Unreadable skill: ${typeof failure === 'string' ? failure : JSON.stringify(failure)}`));
-    if (context.note) add(wrap, renderNote(context.note));
+    const selected = (Array.isArray(context.skills) ? context.skills : [])
+      .filter((skill) => S.skillIds.has(skill.id));
+    const sourceSummary = el('div', 'box');
+    add(sourceSummary, el('b', null, 'Included repository context'));
+    add(sourceSummary, el('div', null,
+      `${rules.length} rule file${rules.length === 1 ? '' : 's'} · ${selected.length} selected skill${selected.length === 1 ? '' : 's'}`));
+    add(sourceSummary, el('div', 'hint', selected.length
+      ? `Skills: ${selected.map((skill) => skill.name || skill.id).join(', ')}`
+      : 'No repository skill is selected for this run.'));
+    const manage = btn('btn sm ghost', 'Manage rules & skills', openSkillsCatalog);
+    add(sourceSummary, manage);
+    add(wrap, sourceSummary);
 
     const previewTask = nextContextTask(session);
-    add(wrap, el('b', null, 'Exact context for the next run'));
     if (!previewTask) {
       add(wrap, renderNote('Type a task below. Forge Lens will then assemble and show the exact sanitized, bounded prompt before the run starts.'));
       return wrap;
@@ -3558,7 +3907,7 @@ export function initForge(section) {
       add(wrap, renderNote(`${exact.sanitization.redacted} sensitive value${exact.sanitization.redacted === 1 ? '' : 's'} redacted before this context can reach a model.`, 'cy'));
     }
     const promptDetail = el('details', 'box');
-    promptDetail.open = true;
+    promptDetail.open = false;
     add(promptDetail, el('summary', null,
       `Exact bounded prompt · ${exact.characters || 0}/${exact.limit || 0} characters · sha256 ${short(exact.hash, 18)}`));
     const prompt = el('pre', null, exact.prompt || '');
@@ -3584,6 +3933,17 @@ export function initForge(section) {
     // stayed the same. Their previous hash is no longer a truthful preflight.
     for (const session of S.sessions) invalidateRunContext(session);
     paintA(); paintC();
+  }
+
+  async function loadMemory() {
+    if (S.memoryBusy) return;
+    S.memoryBusy = true; S.memoryErr = null;
+    paintC();
+    const result = await api('/memory');
+    S.memoryBusy = false;
+    if (!result.ok) { S.memory = null; S.memoryErr = `Vault memory could not be read: ${errText(result)}`; }
+    else { S.memory = result.data || { notes: [] }; S.memoryErr = null; }
+    paintC();
   }
 
   async function loadTests() {
@@ -3616,12 +3976,12 @@ export function initForge(section) {
   async function loadExtensions() {
     if (S.extensionsBusy) return;
     S.extensionsBusy = true; S.extensionsErr = null;
-    paintA();
+    paintA(); paintC();
     const result = await api('/forge/extensions');
     S.extensionsBusy = false;
     if (!result.ok) { S.extensions = null; S.extensionsErr = errText(result); }
     else S.extensions = result.data || {};
-    paintA();
+    paintA(); paintC();
   }
 
   async function loadConnectors() {
@@ -4620,7 +4980,7 @@ export function initForge(section) {
     runClock = null;
   }
 
-  /** The in-flight turn. Honest about what it does and does not know. */
+  /** The in-flight turn. The disclosure reports bounded orchestration only. */
   function runningBlock() {
     const session = activeSession();
     const progress = session.runProgress || initialRunProgress(
@@ -4629,24 +4989,25 @@ export function initForge(section) {
     const m = el('div', 'msg me fgrunning');
     m.setAttribute('aria-live', 'polite');
     const who = el('div', 'who');
-    add(who, el('span', null, 'Zeno Forge'));
-    add(who, el('span', 'mchip', `${progress.agentId}${progress.model ? ' · ' + progress.model : ''}`));
+    add(who, el('span', null, 'Zeno Forge'), el('span', 'mchip', `${progress.agentId}${progress.model ? ' · ' + progress.model : ''}`));
     add(m, who);
-    const bub = el('div', 'bub');
+    const shell = el('div', 'bub');
     const row = el('div', 'fgrun');
     const transport = runTransportState(session);
+    const disclosure = el('details', 'fgthinking');
+    disclosure.open = S.thinkingExpanded;
+    disclosure.addEventListener('toggle', () => {
+      S.thinkingExpanded = disclosure.open;
+      try { localStorage.setItem('zeno-forge-thinking-expanded', disclosure.open ? '1' : '0'); } catch { /* storage is optional */ }
+    });
+    const summary = el('summary', 'fgthinking-summary');
     const spin = el('span', `fgspin${transport.terminal ? ` terminal ${transport.label}` : ''}`);
     spin.setAttribute('aria-hidden', 'true');
-    const cancel = btn('btn sm ghost', transport.terminal ? 'Finished' : session.canceling ? 'Canceling…' : 'Cancel', () => void cancelRun(session));
-    cancel.disabled = !transport.canCancel;
-    cancel.title = transport.terminal
-      ? 'The provider ended; waiting for the authoritative run response.'
-      : session.canceling
-      ? 'Waiting for the agent process to stop and report any partial files.'
-      : 'Stop this agent process and all of its descendants.';
-    add(row, spin, el('span', 'fgrun-lb', transport.label), el('span', 'sp'), el('span', 'fgrun-el', elapsedLabel(session)), cancel);
-    add(bub, row);
-    add(bub, el('div', 'fgrun-phase', phaseLabel(progress)));
+    add(summary, spin, el('span', 'fgrun-lb', transport.terminal ? 'Finishing' : 'Thinking'),
+      el('span', 'fgrun-phase', phaseLabel(progress)), el('span', 'sp'), el('span', 'fgrun-el', elapsedLabel(session)), glyph('›', 'fgthinking-chev'));
+    add(disclosure, summary);
+
+    const body = el('div', 'fgthinking-body');
     const track = el('div', 'fgrun-track');
     track.setAttribute('role', 'progressbar');
     track.setAttribute('aria-label', 'Forge orchestration progress');
@@ -4656,28 +5017,37 @@ export function initForge(section) {
     const fill = el('span', 'fgrun-fill');
     fill.style.width = `${progress.orchestrationPercent}%`;
     add(track, fill);
-    add(bub, track);
-    add(bub, el('div', 'fgrun-facts',
-      `Orchestration: ${progress.completed} / ${progress.total} · ${progress.orchestrationPercent}%`));
-    add(bub, el('div', 'fgrun-tokens', tokenUsageLabel(progress.tokenUsage)));
-    if (S.runProgressStreamDown) {
-      add(bub, renderNote(
-        'Live orchestration updates are reconnecting. The final run response remains authoritative.',
-        'cy',
-      ));
+    add(body, track, el('div', 'fgrun-facts',
+      `Orchestration ${progress.completed}/${progress.total} · ${progress.orchestrationPercent}%`));
+    const milestones = [
+      'Check selected provider',
+      'Prepare isolated worktree and governed tools',
+      'Run selected provider',
+      'Inspect changed files',
+      'Prepare governed proposals',
+    ];
+    const plan = el('ol', 'fgthinking-plan');
+    for (let index = 0; index < milestones.length; index++) {
+      const item = el('li', index < progress.completed ? 'done' : index === progress.completed && !progress.terminal ? 'active' : 'pending', milestones[index]);
+      add(plan, item);
     }
-    if (session.runProgressStale) {
-      add(bub, renderNote(
-        'Some live progress events could not be replayed. This phase may be stale; the final run response will reconcile it.',
-        'cy',
-      ));
-    }
-    add(bub, el('div', null, transport.terminal
-      ? 'The provider has ended. Waiting for the authoritative run response and governed proposals.'
-      : 'The percentage covers Zeno’s orchestration milestones, not provider generation. Review proposed changes and permission requests here.'));
-    if (session.cancelNote) add(bub, renderNote(session.cancelNote, session.canceling ? 'cy' : 'rd'));
-    if (session.route && session.route.rationale) add(bub, renderNote(session.route.rationale, 'cy'));
-    add(m, bub);
+    add(body, plan, el('div', 'fgrun-tokens', tokenUsageLabel(progress.tokenUsage)));
+    add(body, el('div', 'hint',
+      `Tool calls and files changed become available only in the final run response · ${gatesWaiting()} approval${gatesWaiting() === 1 ? '' : 's'} currently waiting.`));
+    add(body, el('div', 'hint', 'Provider plan steps, private reasoning, and model activity summaries are not exposed by this backend.'));
+    if (S.runProgressStreamDown) add(body, renderNote('Live orchestration updates are reconnecting. The final run response remains authoritative.', 'cy'));
+    if (session.runProgressStale) add(body, renderNote('Some live progress events could not be replayed. The final response will reconcile this state.', 'cy'));
+    if (session.cancelNote) add(body, renderNote(session.cancelNote, session.canceling ? 'cy' : 'rd'));
+    if (session.route && session.route.rationale) add(body, renderNote(session.route.rationale, 'cy'));
+    add(disclosure, body);
+    const cancel = btn('btn sm ghost', transport.terminal ? 'Finished' : session.canceling ? 'Canceling…' : 'Cancel', () => void cancelRun(session));
+    cancel.disabled = !transport.canCancel;
+    cancel.title = transport.terminal
+      ? 'The provider ended; waiting for the authoritative run response.'
+      : session.canceling ? 'Stopping the agent process and its descendants.' : 'Stop this agent process and all descendants.';
+    add(row, disclosure, cancel);
+    add(shell, row);
+    add(m, shell);
     return m;
   }
 

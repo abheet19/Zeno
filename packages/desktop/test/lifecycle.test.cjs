@@ -214,6 +214,27 @@ test('the desktop daemon starts without opening a Windows console window', () =>
   assert.match(source, /spawn\(process\.execPath, \[entry\], \{[\s\S]*?windowsHide:\s*true[\s\S]*?shell:\s*false[\s\S]*?\}\)/);
 });
 
+test('the desktop opens its primary window maximized without kiosk mode', () => {
+  const source = readFileSync(join(__dirname, '..', 'main.cjs'), 'utf8');
+  const readyHandler = source.match(/win\.once\('ready-to-show',[\s\S]*?\n  \}\);/);
+  assert.ok(readyHandler, 'the primary window must wait until it is ready before showing');
+  assert.match(readyHandler[0], /win\.maximize\(\);[\s\S]*?win\.show\(\);/);
+  assert.doesNotMatch(source, /\bkiosk\s*:\s*true\b|\.setKiosk\(true\)/);
+});
+
+test('Forge opens Skills as a searchable catalog while Lens stays the exact-context inspector', () => {
+  const source = readFileSync(join(__dirname, '..', '..', 'daemon', 'public', 'forge.js'), 'utf8');
+  const skillsCta = source.match(/const addContext = [^\n]+/);
+  assert.ok(skillsCta, 'the run composer must expose its Skills action');
+  assert.match(skillsCta[0], /openSkillsCatalog/);
+  assert.doesNotMatch(skillsCta[0], /S\.insp|lens/);
+  assert.match(source, /rules\(\) \{ return rulesSkillsPanel\(\); \}/);
+  assert.match(source, /lens\(\) \{ return lensPanel\(\); \}/);
+  assert.match(source, /Search rules, skills and sources/);
+  assert.match(source, /catalog\.skillSources/);
+  assert.match(source, /Repository skills can be selected for a run\. Global skills are catalogued read-only/);
+});
+
 test('the packaged app includes every local module required by the desktop entry point', () => {
   const desktopRoot = join(__dirname, '..');
   const main = readFileSync(join(desktopRoot, 'main.cjs'), 'utf8');
