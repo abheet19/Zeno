@@ -904,10 +904,14 @@ export function initForge(section) {
       editor.trigger('zeno.menu', 'editor.action.smartSelect.expand', null);
     }));
     item('View', 'Switch between the full IDE and focused agent', () => setView(S.view === 'ide' ? 'agent' : 'ide'));
-    item('Go', 'Search the selected repository', () => {
-      setView('ide'); setPaneOpen('explorer', true); S.pan = 'search'; paintA();
+    const openRepositorySearch = () => {
+      if (S.view !== 'ide') setView('ide');
+      if (!S.explorerOpen) setPaneOpen('explorer', true);
+      S.pan = 'search';
+      paintA();
       requestAnimationFrame(() => rgA.querySelector('.sform input')?.focus());
-    });
+    };
+    item('Go', 'Search the selected repository', openRepositorySearch);
     item('Run', 'Focus the agent task composer', () => {
       if (!S.sessionOpen) setPaneOpen('session', true);
       S.insp = 'chat'; paintC();
@@ -917,10 +921,7 @@ export function initForge(section) {
     item('Terminal', 'Open the owner terminal', () => { setView('ide'); S.draw = 'terminal'; setDrawerMin(false); paintD(); });
     item('Help', 'Open repository rules and installed skills', openSkillsCatalog);
 
-    const centre = btn('fgworkspace', null, () => {
-      setView('ide'); setPaneOpen('explorer', true); S.pan = 'search'; paintA();
-      requestAnimationFrame(() => rgA.querySelector('.sform input')?.focus());
-    });
+    const centre = btn('fgworkspace', null, openRepositorySearch);
     centre.setAttribute('aria-label', 'Search files in the Forge workspace');
     centre.title = 'Search files and symbols in the selected repository';
     const st = S.status;
@@ -985,11 +986,13 @@ export function initForge(section) {
     const head = el('div', 'mdl');
     const name = el('b', null, st && st.repo ? repoName(st) : 'sandbox');
     name.title = st && st.root ? String(st.root) : 'the daemon sandbox';
-    const open = btn('btn sm', S.choosing ? 'Opening…' : 'Open folder', () => void chooseFolder());
+    const open = btn('fgicon', S.choosing ? '…' : '+', () => void chooseFolder());
     open.disabled = S.choosing || anySessionRunning() || S.terminalBusy || !!S.testRunId || S.saving;
+    open.setAttribute('aria-label', S.choosing ? 'Opening folder' : 'Open folder');
     open.title = 'Choose the repository Zeno should work in';
-    const reload = btn('btn sm', S.reloading ? 'Reading…' : 'Reload', () => void reloadRepo());
+    const reload = btn('fgicon', S.reloading ? '…' : '↻', () => void reloadRepo());
     reload.disabled = S.reloading || S.choosing;
+    reload.setAttribute('aria-label', S.reloading ? 'Reading repository' : 'Reload repository');
     reload.title = S.readAt ? `Last read at ${clockOf(S.readAt)}` : 'Refresh files, providers, repository rules and skills';
     head.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
     add(head, name, el('span', 'sp'), open, reload);
@@ -2618,7 +2621,7 @@ export function initForge(section) {
     codeMode.setAttribute('aria-label', 'Code mode');
     codeMode.setAttribute('aria-pressed', S.view === 'ide' ? 'true' : 'false');
     codeMode.title = 'Code mode opens the editor workspace; it does not change provider permissions.';
-    add(controls, addContext, exactContext, codeMode, buildPickers(session), el('span', 'sp'));
+    add(controls, addContext, exactContext, codeMode, el('span', 'sp'));
 
     const locationChip = el('span', 'fgroute-state', composerLocation(session));
     locationChip.title = session.autoRoute && !(session.route && session.route.agentId)
@@ -2637,6 +2640,9 @@ export function initForge(section) {
     sendBtn.disabled = !canRun(session);
     add(controls, voice, sendBtn);
 
+    const routingControls = el('div', 'composer-routing');
+    add(routingControls, buildPickers(session));
+
     const route = el('details', 'fgroute');
     add(route, el('summary', null, `${composerLocation(session)} · route details`));
     add(route, el('div', null,
@@ -2647,7 +2653,7 @@ export function initForge(section) {
           : 'Manual routing uses the selected provider, model, and effort.'));
     const composerShell = el('div', 'composer-shell');
     const hostedGate = session.hostedConfirmation ? renderHostedConfirmation(session) : null;
-    add(composerShell, hostedGate, compose, controls, route);
+    add(composerShell, hostedGate, compose, controls, routingControls, route);
     rgC.replaceChildren(ses, sessionRail, tabs, bd, composerShell);
     paintTop();
   }
@@ -2816,6 +2822,23 @@ export function initForge(section) {
         const empty = el('div', 'fgempty');
         add(empty, glyph('✦', 'fgempty-mark'), el('h2', null, 'What should Zeno work on?'),
           el('p', null, 'Describe a task below. Forge will show the current state and next action here.'));
+        const starters = el('div', 'fgempty-starters');
+        const seed = (label, task) => {
+          const button = btn(null, label, () => {
+            const current = activeSession();
+            current.draft = task;
+            current.hostedConfirmation = null;
+            invalidateRunContext(current);
+            paintC();
+            requestAnimationFrame(() => rgC.querySelector('#zf-task')?.focus());
+          });
+          button.title = `Put “${task}” in the composer`;
+          add(starters, button);
+        };
+        seed('Explain this repository', 'Explain this repository and its main architecture.');
+        seed('Find failing checks', 'Run the repository checks and explain any failures.');
+        seed('Plan a change', 'Help me plan a bounded change in this repository.');
+        add(empty, starters);
         const safety = el('details', 'fgempty-details');
         add(safety, el('summary', null, 'How changes and approvals work'),
           el('p', null, 'Runs use an isolated worktree. File changes become governed proposals, and non-routine effects wait in approval capsules.'));
@@ -3695,7 +3718,7 @@ export function initForge(section) {
       ? 'No repository rule matches this search.'
       : 'No supported repository rule file was found.'));
     for (const rule of rules) {
-      const detail = el('details', 'box');
+      const detail = el('details', 'fgcatalog-row');
       const name = String(rule.path || 'rule').replace(/\\/g, '/').split('/').pop();
       add(detail, el('summary', null, `${name} · active${rule.truncated ? ' · truncated' : ''}`));
       add(detail, el('div', 'hint', `Path: ${rule.path} · ${rule.bytes} bytes`));
@@ -3714,13 +3737,13 @@ export function initForge(section) {
       ? 'No skill source matches this search.'
       : 'No local skill source was available.'));
     if (sources.length) {
-      const sourceDetails = el('details', 'box');
+      const sourceDetails = el('details', 'fgcatalog-group');
       const installed = sources.reduce((sum, source) => sum + (Number(source.installed) || 0), 0);
       const unreadable = sources.reduce((sum, source) => sum + (Number(source.unreadable) || 0), 0);
       add(sourceDetails, el('summary', null,
         `${sources.length} source${sources.length === 1 ? '' : 's'} · ${installed} installed · ${unreadable} unreadable`));
       for (const source of sources) {
-        const sourceRow = el('div', 'box');
+        const sourceRow = el('div', 'fgcatalog-subrow');
         add(sourceRow, el('b', null, source.provenance || 'local skill source'));
         add(sourceRow, el('div', 'hint', source.path || 'path unavailable'));
         add(sourceRow, el('div', 'hint', source.reason
@@ -3735,8 +3758,12 @@ export function initForge(section) {
     if ((S.context || S.extensions) && !skills.length) add(wrap, renderNote(query
       ? 'No installed skill matches this search.'
       : 'No repository or global Agent Skill was found.'));
+    const otherSkills = skills.filter((skill) => skill.selectableInThisRepository !== true);
+    const otherSkillsGroup = el('details', 'fgcatalog-group');
+    otherSkillsGroup.open = Boolean(query);
+    add(otherSkillsGroup, el('summary', null, `Other local skills · ${otherSkills.length}`));
     for (const skill of skills) {
-      const box = el('div', 'box');
+      const box = el('div', 'fgcatalog-row');
       const repositorySkill = repositorySkills.get(skill.id);
       const selectable = skill.selectableInThisRepository === true && !!repositorySkill;
       const head = el('div', 'acts');
@@ -3768,14 +3795,15 @@ export function initForge(section) {
         add(metadata, el('div', 'hint', `Permission: ${skill.permissions.join(', ')}. ${skill.authority || ''}`));
       }
       add(box, metadata);
-      add(wrap, box);
+      add(selectable ? wrap : otherSkillsGroup, box);
     }
+    if (otherSkills.length) add(wrap, otherSkillsGroup);
 
     const builtins = allBuiltins
       .filter((entry) => catalogMatches(query, entry.id, entry.name, entry.kind, entry.status, entry.provenance));
     add(wrap, el('div', 'd', `bundled capabilities · ${builtins.length}`));
     for (const entry of builtins) {
-      const detail = el('details', 'box');
+      const detail = el('details', 'fgcatalog-row');
       add(detail, el('summary', null, `${entry.name || entry.id} · ${entry.status || 'status unavailable'}`));
       add(detail, el('div', 'hint', `${entry.provenance || 'source unavailable'} · ${entry.kind || 'capability'}`));
       add(wrap, detail);
@@ -3783,7 +3811,7 @@ export function initForge(section) {
     for (const failure of Array.isArray(context.failed) ? context.failed : []) {
       add(wrap, renderNote(`Unreadable repository skill: ${typeof failure === 'string' ? failure : JSON.stringify(failure)}`, 'rd'));
     }
-    const limits = el('details', 'box');
+    const limits = el('details', 'fgcatalog-row');
     add(limits, el('summary', null, 'Compatibility and capability boundaries'));
     if (catalog.note) add(limits, el('div', 'hint', catalog.note));
     add(limits, el('div', 'hint', 'VS Code Marketplace, VSIX packages and an external extension host are not supported by this build.'));
@@ -4917,9 +4945,9 @@ export function initForge(section) {
 
   /* ---- the two views ----------------------------------------------------- *
    * IDE — the five regions, unchanged.
-   * AGENT — rgA, rgB and rgD collapse and rgC takes the whole window: one
-   *         column of conversation, at a readable measure, with the approval
-   *         capsules in line. The CSS owns the layout (one attribute on :root,
+   * AGENT — rgA, rgB and rgD collapse and rgC becomes a focused conversation
+   *         workspace with a compact history rail and readable transcript.
+   *         The CSS owns the layout (one attribute on :root,
    *         exactly as the drawer's collapsed state works); this owns the
    *         attribute, the preference and the two things that must be told the
    *         window changed shape — the editor, which measures itself, and the
@@ -4927,6 +4955,9 @@ export function initForge(section) {
 
   function setView(next) {
     S.view = next === 'agent' ? 'agent' : 'ide';
+    // Agent mode is the focused conversation surface. Do not carry a dense
+    // diagnostic/catalog tab into it when the owner switches from the IDE.
+    if (S.view === 'agent') S.insp = 'chat';
     R.setAttribute('data-forge-view', S.view);
     try {
       localStorage.setItem(VIEW_KEY, S.view);
