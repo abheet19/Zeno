@@ -1080,7 +1080,9 @@ async function refresh(listEl) {
     getJSON('/forge/status').catch(() => ({ repo: false, unread: true })),
     getJSON('/memory').catch(() => null),          // null = no vault, or unread: no node
     getJSON('/counsel/meetings').catch(() => null),
-    wantAgents ? getJSON('/forge/agents').catch(() => null) : Promise.resolve(AGENTS),
+    // Command observes a running local runtime but never starts one merely to
+    // paint the orb. Opening Forge or explicitly running locally may start it.
+    wantAgents ? getJSON('/forge/agents?passive=1').catch(() => null) : Promise.resolve(AGENTS),
   ]);
   if (wantAgents) { AGENTS = agents; agentsRead = true; agentsAt = Date.now(); }
   buildTopology(state, work, forge, mem, meetings, agents);

@@ -1583,7 +1583,6 @@ export function createServer(opts: DaemonOptions): Server {
     for (const controller of activeForgeRuns.values()) controller.abort();
     activeForgeRuns.clear();
   });
-  if (opts.ollamaAutoStart === true) void ensureOllama();
   return server;
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -1713,7 +1712,9 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/forge/extensions') return serveForgeExtensions(res);
     if (req.method === 'GET' && path === '/forge/connectors') return serveForgeConnectors(res);
     if (req.method === 'GET' && path === '/skills') return serveSkills(res);
-    if (req.method === 'GET' && path === '/forge/agents') return await serveForgeAgents(res);
+    if (req.method === 'GET' && path === '/forge/agents') {
+      return await serveForgeAgents(res, url.searchParams.get('passive') !== '1');
+    }
     if (req.method === 'POST' && path === '/forge/context') return await postForgeContext(req, res);
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(req, res, role);
@@ -2963,8 +2964,8 @@ export function createServer(opts: DaemonOptions): Server {
     }
   }
 
-  async function serveForgeAgents(res: ServerResponse): Promise<void> {
-    if (opts.ollamaAutoStart === true) await ensureOllama();
+  async function serveForgeAgents(res: ServerResponse, mayStartLocalRuntime: boolean): Promise<void> {
+    if (mayStartLocalRuntime && opts.ollamaAutoStart === true) await ensureOllama();
     const availability = await probeAgents();
     const localModels = [...availability.localModels];
     const agents = AGENTS.map((agent) => {

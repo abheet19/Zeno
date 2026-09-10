@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 interface TicketAction {
   readonly jump: string;
@@ -47,4 +48,9 @@ test('the Command field consumes frames only while its visible animated canvas i
   assert.equal(shouldAnimateField({ ...active, visibilityState: 'hidden' }), false);
   assert.equal(shouldAnimateField({ ...active, fieldList: true }), false);
   assert.equal(shouldAnimateField({ ...active, motion: false }), false);
+});
+
+test('opening Command observes local models without starting the Ollama service', () => {
+  const source = readFileSync(new URL('../../public/field.js', import.meta.url), 'utf8');
+  assert.match(source, /getJSON\('\/forge\/agents\?passive=1'\)/);
 });
