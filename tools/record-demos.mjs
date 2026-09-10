@@ -8,13 +8,14 @@
  * routes an agent uses, clicks the same buttons the owner clicks, and
  * photographs whatever comes back. If a flow breaks, the GIF shows it breaking.
  *
- *   node tools/record-demos.mjs                 # every flow
+ *   node tools/record-demos.mjs                 # current flows
  *   node tools/record-demos.mjs gate shell      # only these
  *
- * Flows:  gate · self-approval · shell · forge
+ * Current flows:  gate · self-approval · forge · shell
  *
- * `shell` and `forge` start a governed Forge run, which needs the `claude` CLI
- * on PATH and signed in. The other two need nothing but the daemon.
+ * `forge.gif` records the current owner-review workbench flow against a small,
+ * disposable repository. `shell` starts a governed Claude Code run and needs
+ * the `claude` CLI on PATH and signed in. The other scenes need only the daemon.
  *
  * Requires:  npm install                        (playwright is a devDependency)
  *            npx playwright install chromium
@@ -28,7 +29,7 @@
  * workspace is removed on exit; the captured frames stay in .demo-scratch (which
  * is gitignored) so a GIF can be re-assembled without re-recording it.
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -37,6 +38,7 @@ import { chromium } from 'playwright';
 const ROOT = resolve(import.meta.dirname, '..');
 const WORKSPACE = join(ROOT, '.zeno-demo');
 const SCRATCH = join(ROOT, '.demo-scratch');
+const PROJECT = join(SCRATCH, 'forge-fixture');
 const OUTDIR = join(ROOT, 'docs', 'demos');
 const PORT = Number(process.env['ZENO_DEMO_PORT'] ?? 7399);
 
@@ -63,7 +65,12 @@ const PYTHON = process.env['PYTHON'] ?? 'python';
 function startDaemon() {
   const child = spawn(process.execPath, [join('packages', 'daemon', 'dist', 'src', 'main.js')], {
     cwd: ROOT,
-    env: { ...process.env, ZENO_DIR: WORKSPACE, ZENO_PORT: String(PORT) },
+    env: {
+      ...process.env,
+      ZENO_DIR: WORKSPACE,
+      ZENO_PROJECT_DIR: PROJECT,
+      ZENO_PORT: String(PORT),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let banner = '';
@@ -87,6 +94,27 @@ function startDaemon() {
 }
 
 const proposerToken = () => readFileSync(join(WORKSPACE, 'proposer.token'), 'utf8').trim();
+
+/** Build the real, disposable repository shown in every recording. */
+function prepareProject() {
+  rmSync(PROJECT, { recursive: true, force: true });
+  mkdirSync(join(PROJECT, '.agents', 'skills', 'verify'), { recursive: true });
+  writeFileSync(join(PROJECT, 'README.md'), '# Zeno recording fixture\n\nA disposable repository used only by the demo recorder.\n');
+  writeFileSync(join(PROJECT, 'AGENTS.md'), '# Repository rules\n\n- Keep changes exact and reviewable.\n- Run verification before reporting success.\n');
+  writeFileSync(join(PROJECT, 'hello.ts'), 'export const hello = (name: string) => `Hello, ${name}`;\n');
+  writeFileSync(join(PROJECT, 'package.json'), JSON.stringify({
+    name: 'zeno-recording-fixture',
+    version: '1.0.0',
+    private: true,
+    scripts: { test: 'node --test' },
+  }, null, 2) + '\n');
+  writeFileSync(join(PROJECT, '.agents', 'skills', 'verify', 'SKILL.md'), '# Verify\n\nRun the smallest relevant check and report its real result.\n');
+  execFileSync('git', ['init', '-q'], { cwd: PROJECT, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.name', 'Zeno Demo'], { cwd: PROJECT, stdio: 'ignore' });
+  execFileSync('git', ['config', 'user.email', 'demo@localhost'], { cwd: PROJECT, stdio: 'ignore' });
+  execFileSync('git', ['add', '.'], { cwd: PROJECT, stdio: 'ignore' });
+  execFileSync('git', ['commit', '-qm', 'recording fixture'], { cwd: PROJECT, stdio: 'ignore' });
+}
 
 /** POST as the AGENT — the proposer token, the one that can ask for anything and approve nothing. */
 async function agentPost(path, body) {
@@ -299,6 +327,67 @@ async function selfApproval(browser, url) {
 }
 
 /**
+ * forge.gif — the current workbench, using a real repository and gate.
+ *
+ * The proposer creates a package change through /previews. Forge receives that
+ * exact held action over SSE, the owner reviews and approves it in the Session
+ * pane, and the terminal then proves the selected repository changed. The
+ * fixture is discarded after the recording.
+ */
+async function forge(browser, url) {
+  const page = await openWindow(browser, url);
+  const rec = new Recorder(page, 'forge');
+
+  await page.click('[data-nav="forge"]');
+  await page.waitForSelector('.forge .rgTop');
+  await page.waitForTimeout(1800);
+
+  const agentsFile = page.getByRole('button', { name: /AGENTS\.md/ }).last();
+  if (await agentsFile.count()) {
+    await agentsFile.click();
+    await page.waitForTimeout(900);
+  }
+  await rec.hold(2200); // readable Explorer, Monaco, terminal and Session together
+
+  const nextPackage = JSON.stringify({
+    name: 'zeno-recording-fixture',
+    version: '2.0.0',
+    private: true,
+    scripts: { test: 'node --test' },
+  }, null, 2) + '\n';
+  const proposed = await agentPost('/previews', {
+    relPath: 'package.json',
+    contents: nextPackage,
+    summary: 'Update the recording fixture package version to 2.0.0',
+  });
+  if (proposed.status !== 200) throw new Error('Forge preview failed: ' + JSON.stringify(proposed));
+
+  await page.waitForSelector('.rgC button.zn-approve', { timeout: 20_000 });
+  await rec.burst(8, 140);
+  await rec.hold(2600); // the held proposal is visible in the active agent session
+
+  const approve = await aim(page, '.rgC button.zn-approve');
+  await rec.hold(1700);
+  await approve.click();
+  await page.waitForSelector('.rgC [data-receipt], .rgC .zn-seal', { timeout: 20_000 }).catch(() => {});
+  await page.waitForTimeout(1400);
+  await rec.burst(8, 130);
+  await rec.hold(2600); // the same capsule now carries its durable outcome
+
+  const terminalTab = page.getByRole('tab', { name: 'Terminal' });
+  await terminalTab.click();
+  const command = page.locator('.rgD input[placeholder^="Type a command"]');
+  await command.fill('git status --short');
+  await rec.hold(1200);
+  await page.getByRole('button', { name: 'Run command' }).click();
+  await page.waitForFunction(() => document.querySelector('.rgD')?.textContent?.includes('exit 0'), null, { timeout: 20_000 });
+  await rec.hold(3000); // a real owner-triggered terminal result in the selected folder
+
+  await rec.write();
+  await page.close();
+}
+
+/**
  * shell.gif — a command through the same gate.
  * A governed Forge run asks to run a shell command. It does not get to run it.
  * The capsule carries the literal command string, the owner grants it once, and
@@ -359,88 +448,16 @@ async function shell(browser, ctx) {
 
 const SHELL_TASK = 'Run the command node --version with the Bash tool, then stop. Do not edit any file.';
 
-/**
- * forge.gif — the coding agent, end to end.
- * A task goes in, the agent works headless in a throwaway git worktree, and the
- * file it wrote comes back readable in the editor. An ordinary source file is a
- * routine edit, so it is applied and receipted without interrupting anyone — and
- * then the consequential act, the commit, stops and waits like everything else.
- */
-async function forge(browser, ctx) {
-  const page = await openWindow(browser, ctx.url());
-  const rec = new Recorder(page, 'forge');
-
-  await page.click('[data-nav="forge"]');
-  await page.waitForTimeout(2200);
-  await rec.hold(1800); // the repository is empty and nothing has run
-
-  const box = page.locator('input[placeholder^="Describe the change"]');
-  await box.click();
-  await box.type(FORGE_TASK, { delay: 24 });
-  await rec.hold(2000);
-  await box.press('Enter');
-  await rec.burst(6, 340);
-
-  // The agent is headless in a worktree it cannot escape. Waiting for it is the
-  // boring part of the demo, so it is waited through rather than filmed.
-  await page.waitForSelector('text=greet.js', { timeout: 600_000 });
-  await page.waitForTimeout(2500);
-  await rec.hold(3000); // the file it wrote, listed by git — not by the agent's say-so
-
-  // Open it in the editor. The pane reads the file out of the repository — with
-  // nothing selected it shows nothing, so what appears here is what is on disk.
-  await page.locator('.tree button', { hasText: 'greet.js' }).first().click();
-  await page.waitForSelector('.monaco-editor', { timeout: 60_000 }).catch(() => {});
-  await page.waitForTimeout(3000);
-  await rec.hold(4400); // the code the agent actually wrote
-
-  // An ordinary source file is a routine edit: applied and receipted, uninterrupted.
-  await page.click('[data-nav="command"]');
-  await page.waitForTimeout(1400);
-  await aim(page, '[data-jump="timeline"]');
-  await page.click('[data-jump="timeline"]');
-  await page.waitForTimeout(1400);
-  await rec.hold(4000); // local.write · T0 · verified — and one uncommitted change
-
-  // The commit is a separate act, and it is not routine. `Commit through the gate`
-  // previews a vcs.commit, takes the owner's click as the approval, and lands one
-  // commit with a receipt of its own — it is the only write Forge itself performs.
-  await page.click('[data-nav="forge"]');
-  await page.waitForTimeout(1600);
-  await page.click('button:has-text("Source control")');
-  await page.waitForTimeout(1600);
-  await rec.hold(2600); // untracked · master · the one button, and what it says it does
-  const msg = page.locator('input[placeholder="commit message"]');
-  await msg.click();
-  await msg.type('add greet.js', { delay: 45 });
-  await rec.hold(1800);
-  await page.click('button:has-text("Commit through the gate")');
-  await rec.burst(8, 240);
-  await page.waitForTimeout(2000);
-  await rec.hold(3200); // committed once — the working tree is clean again
-
-  await page.click('[data-nav="command"]');
-  await page.waitForTimeout(1400);
-  await aim(page, '[data-jump="timeline"]');
-  await page.click('[data-jump="timeline"]');
-  await page.waitForTimeout(1400);
-  await rec.hold(4600); // chain verified — 2 receipts: the write, and the commit
-
-  await rec.write();
-  await page.close();
-}
-
-const FORGE_TASK =
-  'Create a file greet.js that exports a function greet(name) returning a greeting string. Nothing else.';
-
 /* -------------------------------------------------------------------- main */
 
-const SCENES = { gate, 'self-approval': selfApproval, shell, forge };
+const SCENES = { gate, 'self-approval': selfApproval, forge, shell };
 
 async function main() {
   const wanted = process.argv.slice(2).filter((a) => !a.startsWith('-'));
   const names = wanted.length > 0 ? wanted : Object.keys(SCENES);
-  for (const n of names) if (!(n in SCENES)) throw new Error('unknown demo: ' + n);
+  for (const n of names) {
+    if (!(n in SCENES)) throw new Error('unknown demo: ' + n);
+  }
 
   mkdirSync(OUTDIR, { recursive: true });
 
@@ -460,13 +477,15 @@ async function main() {
       // Every demo starts from an empty ledger, so what it shows is only what it did.
       if (daemon) await daemon.stop();
       rmSync(WORKSPACE, { recursive: true, force: true });
+      prepareProject();
       await ctx.restart();
-      await (n === 'shell' || n === 'forge' ? SCENES[n](browser, ctx) : SCENES[n](browser, url));
+      await (n === 'shell' ? SCENES[n](browser, ctx) : SCENES[n](browser, url));
     }
   } finally {
     await browser.close();
     if (daemon) await daemon.stop();
     rmSync(WORKSPACE, { recursive: true, force: true });
+    rmSync(PROJECT, { recursive: true, force: true });
   }
 }
 

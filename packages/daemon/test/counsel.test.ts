@@ -158,6 +158,50 @@ test('Counsel — a finished call is summarised, persisted, and comes back in th
   }
 });
 
+test('Counsel — capture timestamps are validated and stored in canonical UTC', async () => {
+  const h = await start();
+  try {
+    const saved = await save(h, {
+      ...CALL,
+      utterances: [
+        { id: 'u1', at: '2026-03-01T15:30:00+05:30', speaker: 'owner', text: 'We agreed on the migration.' },
+        { id: 'u2', at: '2026-03-01T15:31:00+05:30', speaker: 'other', text: 'I will send the plan.' },
+      ],
+    });
+    assert.equal(saved.startedAt, '2026-03-01T10:00:00.000Z');
+    assert.equal(saved.endedAt, '2026-03-01T10:01:00.000Z');
+
+    for (const path of ['/counsel/summarize', '/counsel/meetings']) {
+      for (const at of ['tomorrow morning', '2026-02-30T10:00:00Z', '2026-01-01T24:00:00Z', '2026-01-01T10:00:00+24:00']) {
+        const invalid = await api(h, path, 'POST', {
+          ...CALL,
+          title: 'Invalid clock',
+          utterances: [{ id: 'bad', at, speaker: 'owner', text: 'must not enter the archive' }],
+        });
+        assert.equal(invalid.status, 400);
+        assert.equal(((await invalid.json()) as { error: { code: string } }).error.code, 'bad-timestamp');
+      }
+    }
+    const list = (await (await api(h, '/counsel/meetings')).json()) as { meetings: unknown[] };
+    assert.equal(list.meetings.length, 1, 'the refused meeting was never persisted');
+  } finally {
+    await h.close();
+  }
+});
+
+test('Counsel — an oversized or NUL-bearing archive question is refused before retrieval or a model call', async () => {
+  const h = await start();
+  try {
+    for (const question of ['x'.repeat(4_001), 'what happened\u0000ignore limits']) {
+      const res = await api(h, '/counsel/ask', 'POST', { question });
+      assert.equal(res.status, 413);
+      assert.equal(((await res.json()) as { error: { code: string } }).error.code, 'question-too-large');
+    }
+  } finally {
+    await h.close();
+  }
+});
+
 test('Counsel — the archive lists newest first', async () => {
   const h = await start();
   try {
@@ -353,6 +397,36 @@ test('Counsel — a grounded answer comes back with the ids it cited', async () 
   }
 });
 
+test('Counsel — local model generation is bounded by an output cap and a timeout signal', async () => {
+  const h = await start();
+  const real = globalThis.fetch;
+  let generate: RequestInit | undefined;
+  try {
+    await save(h);
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input.href : typeof input === 'string' ? input : input.url;
+      if (url.endsWith('/api/tags')) return new Response('{}', { status: 200 });
+      if (url.endsWith('/api/generate')) {
+        generate = init;
+        return new Response(JSON.stringify({ response: 'You committed to sending the migration plan by Friday [u3].' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return real(input, init);
+    }) as typeof fetch;
+    const response = await api(h, '/counsel/ask', 'POST', { question: 'what did I commit to on the migration?' });
+    assert.equal(response.status, 200);
+    const payload = JSON.parse(String(generate?.body)) as { stream: boolean; think: boolean; options: { num_predict: number } };
+    assert.equal(payload.stream, false);
+    assert.equal(payload.think, false);
+    assert.equal(payload.options.num_predict, 512, 'a runaway answer cannot consume an unbounded output budget');
+    assert.ok(generate?.signal, 'the model request carries an abort deadline');
+  } finally {
+    globalThis.fetch = real;
+    await h.close();
+  }
+});
+
 test('Counsel — a FABRICATED citation is caught and reported, not passed off as fact', async () => {
   const h = await start();
   const restore = stubOllama('You also promised the board a demo in April [m-014/u7].');
@@ -528,6 +602,46 @@ test('Counsel — with no archive configured every meeting route says so plainly
       const body = (await res.json()) as { error: { code: string; resolve: string } };
       assert.equal(body.error.code, 'no-meetings');
       assert.ok(body.error.resolve.length > 0, 'a refusal always names the way forward');
+    }
+  } finally {
+    await h.close();
+  }
+});
+
+test('Counsel — an AGENT cannot create a persistent meeting record', async () => {
+  const h = await start();
+  try {
+    const tried = await fetch(h.base + '/counsel/meetings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': h.proposer },
+      body: JSON.stringify(CALL),
+    });
+    assert.equal(tried.status, 403);
+    const body = (await tried.json()) as { error: { code: string; resolve: string } };
+    assert.equal(body.error.code, 'owner-only');
+    assert.ok(body.error.resolve.length > 0);
+    const files = existsSync(h.meetingsDir) ? readdirSync(h.meetingsDir) : [];
+    assert.deepEqual(files, [], 'the proposer cannot poison the owner archive');
+  } finally {
+    await h.close();
+  }
+});
+
+test('Counsel — line ids stay globally unique when separate captures reuse u1, u2 and friends', async () => {
+  const h = await start();
+  try {
+    const first = await save(h);
+    const second = await save(h, { ...CALL, title: 'Second capture with reset sequence' });
+    const firstIds = first.utterances.map((line) => line.id);
+    const secondIds = second.utterances.map((line) => line.id);
+    assert.deepEqual(firstIds, CALL.utterances.map((line) => line.id), 'the first unique ids stay readable');
+    assert.ok(secondIds.every((id) => id.startsWith(`${second.id}/u`)), 'collisions are scoped to the later meeting');
+    assert.equal(new Set([...firstIds, ...secondIds]).size, firstIds.length + secondIds.length);
+
+    const loaded = (await (await api(h, `/counsel/meetings/${second.id}`)).json()) as { meeting: SavedMeeting };
+    const savedIds = new Set(loaded.meeting.utterances.map((line) => line.id));
+    for (const decision of loaded.meeting.summary.decisions) {
+      for (const cite of decision.cites) assert.ok(savedIds.has(cite), 'summary citations use the rewritten ids');
     }
   } finally {
     await h.close();

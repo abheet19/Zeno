@@ -35,7 +35,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Compiled to dist/test/, so the daemon's public folder is three levels up. That
@@ -321,6 +321,21 @@ function text(node: Node): string {
   return [node.textContent, ...node.children.map(text)].filter(Boolean).join(' ');
 }
 
+function countTextWrites(node: Node): () => number {
+  let current = node.textContent;
+  let writes = 0;
+  Object.defineProperty(node, 'textContent', {
+    configurable: true,
+    enumerable: true,
+    get: () => current,
+    set: (value: string) => {
+      writes += 1;
+      current = String(value);
+    },
+  });
+  return () => writes;
+}
+
 const tick = (ms: number): Promise<void> => new Promise((r) => void setTimeout(r, ms));
 
 /* ---- 1. push-to-talk ------------------------------------------------------ */
@@ -366,6 +381,9 @@ test('SILENT LISTENING — the live bar hangs off <body>, where no surface toggl
   // inside the panel goes with it. The bar must not be inside the panel — it
   // must be a child of <body>, which nothing ever hides.
   assert.equal(bar.parent, p.body, 'the live bar must be mounted on <body>, not inside the panel');
+  const served = readFileSync(SERVED, 'utf8');
+  assert.match(served, /'pointer-events:none'/, 'status text must not intercept the application header');
+  assert.match(served, /'pointer-events:auto'/, 'the dedicated stop control remains clickable');
   assert.equal(
     byClass(p.one('zv-panel'), 'zv-live').length,
     0,
@@ -515,7 +533,7 @@ test('SILENT LISTENING — a remembered switch reopens the microphone with the b
   // is a microphone opening without a gesture, on whatever surface the shell
   // restores — so the bar has to be up from the first paint, not once the owner
   // navigates back to the surface the panel lives on.
-  const p = await mount(JSON.stringify({ on: true, disclosure: 2 }));
+  const p = await mount(JSON.stringify({ on: true, disclosure: 3 }));
 
   assert.equal(p.micOpen(), true, 'a remembered switch should re-arm');
   assert.equal(p.barShown(), true, 'and it must announce itself before anything else is shown');
@@ -530,5 +548,79 @@ test('SILENT LISTENING — consent to an older disclosure does not reopen the mi
   if (!AVAILABLE) return t.skip('no served panel');
   const p = await mount(JSON.stringify({ on: true, disclosure: 1 }));
   assert.equal(p.micOpen(), false, 'a stale disclosure version must re-ask, not re-arm');
+  assert.equal(p.barShown(), false);
+});
+
+
+test('network failure stops wake mode without a reconnect flicker loop', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount();
+  await p.arm();
+  p.wake.fail('network');
+  await tick(400);
+  assert.equal(p.micOpen(), false);
+  assert.equal(p.barShown(), false);
+  assert.equal(p.one('zv-wake-toggle').getAttribute('aria-pressed'), 'false');
+  assert.match(text(p.body), /speech service is unavailable/);
+});
+
+test('steady wake refresh does not rewrite unchanged status labels', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount();
+  await p.arm();
+  const reads = [
+    'zv-live-glyph',
+    'zv-live-word',
+    'zv-live-why',
+    'zv-live-stop',
+    'zv-state-glyph',
+    'zv-state-word',
+    'zv-state-detail',
+    'zv-wake-toggle',
+    'zv-retention-text',
+  ].map((name) => countTextWrites(p.one(name)));
+
+  // The wake timer refreshes twice in this window. Stable labels should retain
+  // their DOM nodes and text instead of flashing through redundant writes.
+  await tick(450);
+  assert.deepEqual(reads.map((read) => read()), Array(reads.length).fill(0));
+
+  p.one('zv-live-stop').fire('click');
+  await tick(40);
+});
+
+test('push-to-talk preserves a service error and does not restart while held', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount();
+  p.one('zv-ptt').fire('pointerdown');
+  await tick(30);
+  p.ptt.fail('network');
+  await tick(400);
+  assert.equal(p.micOpen(), false);
+  assert.equal(p.barShown(), false);
+  assert.match(text(p.body), /speech service is unavailable/);
+  assert.equal(p.one('zv-ptt').textContent, 'Hold to talk');
+});
+
+test('keyboard hold-to-talk opens on keydown and closes on keyup', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount();
+  p.one('zv-ptt').fire('keydown', { key: ' ', repeat: false });
+  await tick(30);
+  assert.equal(p.micOpen(), true);
+  p.one('zv-ptt').fire('keyup', { key: ' ' });
+  await tick(40);
+  assert.equal(p.micOpen(), false);
+  assert.equal(p.barShown(), false);
+});
+
+test('closing the microphone while the button is held cannot reopen it', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount();
+  p.one('zv-ptt').fire('pointerdown');
+  await tick(30);
+  p.one('zv-live-stop').fire('click');
+  await tick(400);
+  assert.equal(p.micOpen(), false);
   assert.equal(p.barShown(), false);
 });

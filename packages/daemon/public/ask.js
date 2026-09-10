@@ -1,410 +1,923 @@
 /*
- * ask.js — Ask Zeno, the typed half of the Command surface.
+ * Ask Zeno conversation surface.
  *
- * WHAT IT IS. One question box over POST /assistant/ask. The daemon shows a
- * local model a clipped snapshot of the owner's own Zeno — pending approvals,
- * receipts, backlog, repo, memories — and CHECKS the answer against it before
- * anybody sees it. So this file renders one of three things, and never blurs
- * them together:
+ * The composer keeps an in-memory thread for this renderer session. It does not
+ * silently persist raw chat to Vault or disk. Typed and voice turns share the
+ * same POST /assistant/ask path, grounding result, delegation path, hosted
+ * confirmation, and held approval capsules.
  *
- *   an ANSWER, with the fact ids it cited;
- *   a FLAGGED reply, when the grounding check found an invented id or an uncited
- *     claim — shown as prose that failed the check, never as an answer;
- *   a NOTE, when no model could answer at all.
- *
- * A confident lie about your own machine is worse than a refusal, so the refusal
- * is what this panel draws by default.
- *
- * WHAT AN ANSWER MAY CARRY. Two suggestions, and neither is an act:
- *
- *   a PROPOSAL — one file the owner might want written. It is already a capsule
- *     waiting in Approvals by the time this renders; this panel says so and
- *     points at it.
- *
- *   a DELEGATION — a job handed to a coding agent. A local model runs on this
- *     machine and has already run by the time the answer arrives, so what is
- *     drawn is what it PROPOSED. A hosted agent has NOT run and will not until
- *     the owner clicks, because it spends their money and sends their code off
- *     the machine — this panel says both of those in words, beside the button.
- *
- * THE RULE THIS FILE KEEPS. Nothing here is ever drawn as applied. A change an
- * agent wrote is a capsule awaiting the owner's approval, and the only verbs
- * this panel uses for one are "proposed" and "waiting". There is no fetch to
- * /approvals anywhere in it.
+ * Voice conversation uses the existing local Whisper adapter when Electron
+ * provides it. It never calls /approvals, never clicks a confirmation, and never
+ * starts hosted work from speech. System speech synthesis reads verified answers
+ * aloud with a voice the owner selects.
  */
 
-const R = document.documentElement;
+import { SpeechRecognition, localSpeech, waitForSpeechIdle } from './whisper.js';
+import {
+  captureOwnerLabel,
+  chooseSystemVoice,
+  createDispatchGate,
+  spokenReply,
+} from './ask-voice-model.js';
 
-/* ---- auth: the same token the rest of the window reads --------------------- */
+const R = document.documentElement;
+const MAX_TURNS = 80;
+const MAX_SPOKEN_CHARS = 2400;
+const VOICE_PREF_KEY = 'zeno.ask.systemVoice';
+const ASK_PROMPT =
+  'Zeno Forge Counsel Command approvals receipts Vault Ollama worktree repository ' +
+  'TypeScript JavaScript Node.js React Python PostgreSQL';
 
 const OWNER_TOKEN = (() => {
-  const m = document.querySelector('meta[name="zeno-token"]');
-  const v = m ? m.getAttribute('content') : '';
-  return typeof v === 'string' && v.trim() ? v.trim() : '';
+  const meta = document.querySelector('meta[name="zeno-token"]');
+  const value = meta ? meta.getAttribute('content') : '';
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
 })();
 
 function authHeaders(extra) {
-  const h = Object.assign({ accept: 'application/json' }, extra || {});
-  if (OWNER_TOKEN) h['x-zeno-token'] = OWNER_TOKEN;
-  return h;
+  const headers = Object.assign({ accept: 'application/json' }, extra || {});
+  if (OWNER_TOKEN) headers['x-zeno-token'] = OWNER_TOKEN;
+  return headers;
 }
 
 function el(tag, cls, text) {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined && text !== null) n.textContent = String(text);
-  return n;
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
 }
 
 function masked() {
   return R.getAttribute('data-lock') === '1';
 }
 
-/** The label a rung is shown under. The id, rather than an invented name, if unknown. */
 function agentLabel(agentId) {
   if (agentId === 'local') return 'a local model on this machine';
   if (agentId === 'claude-code') return 'Claude Code (Anthropic, over the network)';
+  if (agentId === 'codex') return 'Codex (OpenAI, over the network)';
   return agentId || 'an unnamed agent';
 }
-
-/* ---- the panel ------------------------------------------------------------- */
 
 function mountPanel() {
   const host = document.querySelector('[data-mount="ask"]');
   if (!host) return null;
 
   const panel = el('section', 'za-panel');
-  panel.setAttribute('aria-label', 'Ask Zeno');
+  panel.setAttribute('aria-label', 'Ask Zeno conversation');
   panel.style.cssText = [
-    'display:flex', 'flex-direction:column', 'gap:8px',
-    'padding:11px 13px', 'border:1px solid var(--rule,#242C31)', 'border-radius:12px',
-    'background:var(--g3,#151A1D)', 'color:var(--ink,#ECEBE6)', 'max-width:560px',
+    'display:flex', 'flex-direction:column', 'min-height:430px', 'max-height:min(680px,78vh)',
+    'border:1px solid var(--rule,#242C31)', 'border-radius:12px', 'overflow:hidden',
+    'background:var(--g3,#151A1D)', 'color:var(--ink,#ECEBE6)',
     'font:13px/1.5 system-ui,sans-serif',
   ].join(';');
 
-  const row = el('div', 'za-row');
-  row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+  const header = el('header', 'za-head');
+  header.style.cssText = [
+    'display:flex', 'align-items:center', 'gap:9px', 'flex-wrap:wrap',
+    'padding:10px 12px', 'border-bottom:1px solid var(--rule,#242C31)',
+    'background:var(--g2,#101416)',
+  ].join(';');
+  const title = el('strong', 'za-title', 'Ask Zeno');
+  title.style.cssText = 'margin-right:auto;font-size:13px';
+  const typedMode = el('button', 'za-mode za-mode-typed', 'Type');
+  const voiceMode = el('button', 'za-mode za-mode-voice', 'Voice conversation');
+  const clear = el('button', 'za-clear', 'Clear');
+  for (const button of [typedMode, voiceMode, clear]) {
+    button.type = 'button';
+    button.style.cssText = [
+      'padding:5px 9px', 'border-radius:6px', 'border:1px solid var(--rule-2,#2C353B)',
+      'background:transparent', 'color:var(--ink-2,#9AA1AC)',
+      'font:600 11.5px system-ui,sans-serif', 'cursor:pointer',
+    ].join(';');
+  }
+  typedMode.setAttribute('aria-pressed', 'true');
+  voiceMode.setAttribute('aria-pressed', 'false');
+  header.append(title, typedMode, voiceMode, clear);
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'za-input';
-  input.placeholder = 'Ask about your Zeno, or ask for something to be built…';
-  input.setAttribute('aria-label', 'Ask Zeno a question');
-  input.style.cssText = [
-    'flex:1 1 260px', 'min-width:0', 'padding:9px 12px', 'border-radius:8px',
-    'border:1px solid var(--rule-2,#2C353B)', 'background:var(--g2,#101416)',
-    'color:var(--ink,#ECEBE6)', 'font:13px system-ui,sans-serif',
+  const thread = el('div', 'za-thread');
+  thread.setAttribute('role', 'log');
+  thread.setAttribute('aria-label', 'Ask Zeno conversation');
+  thread.setAttribute('aria-live', 'polite');
+  thread.style.cssText = [
+    'flex:1 1 auto', 'min-height:210px', 'overflow:auto', 'padding:14px 13px',
+    'display:flex', 'flex-direction:column', 'gap:12px', 'background:var(--g2,#101416)',
   ].join(';');
 
-  const send = el('button', 'za-send', 'Ask');
+  const empty = el(
+    'div',
+    'za-empty',
+    'Ask about current Zeno state or describe work for Forge. Answers are checked against a fresh local snapshot.',
+  );
+  empty.style.cssText = [
+    'margin:auto', 'max-width:42ch', 'text-align:center',
+    'font-size:12.5px', 'color:var(--ink-2,#9AA1AC)',
+  ].join(';');
+  thread.appendChild(empty);
+
+  const realStatus = el('p', 'za-status');
+  realStatus.setAttribute('role', 'status');
+  realStatus.setAttribute('aria-live', 'polite');
+  realStatus.style.cssText = [
+    'margin:0', 'padding:7px 12px', 'min-height:18px',
+    'border-top:1px solid var(--rule,#242C31)',
+    'font-size:11.5px', 'color:var(--ink-2,#9AA1AC)', 'overflow-wrap:anywhere',
+  ].join(';');
+
+  const composer = el('div', 'za-composer');
+  composer.style.cssText = [
+    'flex:none', 'margin:10px', 'border:1px solid var(--rule-2,#2C353B)',
+    'border-radius:10px', 'background:var(--g1,#0B0F11)', 'overflow:hidden',
+  ].join(';');
+
+  const input = document.createElement('textarea');
+  input.className = 'za-input';
+  input.rows = 3;
+  input.maxLength = 4000;
+  input.placeholder = 'Message Zeno…';
+  input.setAttribute('aria-label', 'Message Ask Zeno');
+  input.style.cssText = [
+    'display:block', 'width:100%', 'box-sizing:border-box', 'min-height:68px', 'max-height:170px',
+    'resize:vertical', 'padding:10px 11px', 'border:0', 'outline:none',
+    'background:transparent', 'color:var(--ink,#ECEBE6)', 'font:13px/1.5 system-ui,sans-serif',
+  ].join(';');
+
+  const toolbar = el('div', 'za-tools');
+  toolbar.style.cssText = [
+    'display:flex', 'align-items:center', 'gap:7px', 'flex-wrap:wrap',
+    'padding:7px 8px', 'border-top:1px solid var(--rule,#242C31)',
+  ].join(';');
+
+  const voiceSelect = document.createElement('select');
+  voiceSelect.className = 'za-voice-select';
+  voiceSelect.setAttribute('aria-label', 'Assistant speaking voice');
+  voiceSelect.title = 'System voice used to read assistant replies';
+  voiceSelect.style.cssText = [
+    'min-width:0', 'max-width:230px', 'padding:5px 7px', 'border-radius:6px',
+    'border:1px solid var(--rule-2,#2C353B)', 'background:var(--g2,#101416)',
+    'color:var(--ink-2,#9AA1AC)', 'font:11.5px system-ui,sans-serif',
+  ].join(';');
+
+  const mic = el('button', 'za-mic', 'Start voice');
+  mic.type = 'button';
+  mic.setAttribute('aria-pressed', 'false');
+  mic.style.cssText = [
+    'padding:6px 9px', 'border-radius:6px', 'border:1px solid var(--cyan-dim,#1E6B76)',
+    'background:transparent', 'color:var(--ink-2,#9AA1AC)',
+    'font:600 11.5px system-ui,sans-serif', 'cursor:pointer',
+  ].join(';');
+
+  const send = el('button', 'za-send', 'Send');
   send.type = 'button';
   send.style.cssText = [
-    'padding:9px 18px', 'border-radius:999px', 'border:1px solid var(--cyan-dim,#1E6B76)',
-    'background:var(--g5,#222A2E)', 'color:var(--ink,#ECEBE6)',
-    'font:600 13px system-ui,sans-serif', 'cursor:pointer',
-  ].join(';');
-  row.append(input, send);
-
-  const status = el('p', 'za-status');
-  status.setAttribute('role', 'status');
-  status.setAttribute('aria-live', 'polite');
-  status.style.cssText = 'margin:0;font-size:12px;color:var(--ink-2,#9AA1AC);overflow-wrap:anywhere';
-
-  const answer = el('div', 'za-answer');
-  answer.hidden = true;
-  answer.style.cssText = [
-    'padding:9px 11px', 'border-radius:8px', 'border:1px solid var(--rule-2,#2C353B)',
-    'background:var(--g2,#101416)', 'white-space:pre-wrap', 'overflow-wrap:anywhere', 'font-size:12.5px',
+    'margin-left:auto', 'padding:7px 13px', 'border-radius:7px',
+    'border:1px solid var(--cyan-dim,#1E6B76)', 'background:var(--g5,#222A2E)',
+    'color:var(--ink,#ECEBE6)', 'font:700 12px system-ui,sans-serif', 'cursor:pointer',
   ].join(';');
 
-  const cited = el('p', 'za-cited');
-  cited.hidden = true;
-  cited.style.cssText = 'margin:0;font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink-3,#6C7480)';
+  toolbar.append(mic, voiceSelect, send);
+  composer.append(input, toolbar);
 
-  // The delegation block: what would run, what it costs, and what came back.
-  const delegate = el('div', 'za-delegate');
-  delegate.hidden = true;
-  delegate.setAttribute('role', 'group');
-  delegate.setAttribute('aria-label', 'Work Zeno was asked to delegate');
-  delegate.style.cssText = [
-    'display:flex', 'flex-direction:column', 'gap:7px',
-    'padding:10px 12px', 'border-radius:10px',
-    'border:1px solid var(--rule-2,#2C353B)', 'background:var(--g2,#101416)',
-  ].join(';');
-  const dTask = el('p', 'za-delegate-task');
-  dTask.style.cssText = 'margin:0;font-size:12.5px;overflow-wrap:anywhere';
-  const dAgent = el('p', 'za-delegate-agent');
-  dAgent.style.cssText = 'margin:0;font:700 11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;color:var(--ink-2,#9AA1AC)';
-  const dWhy = el('p', 'za-delegate-why');
-  dWhy.style.cssText = 'margin:0;font-size:12px;color:var(--ink-2,#9AA1AC);overflow-wrap:anywhere';
-  const dState = el('p', 'za-delegate-state');
-  dState.setAttribute('role', 'status');
-  dState.setAttribute('aria-live', 'polite');
-  dState.style.cssText = 'margin:0;font-size:12px;color:var(--ink-2,#9AA1AC);overflow-wrap:anywhere';
-  const dButtons = el('div', 'za-delegate-buttons');
-  dButtons.hidden = true;
-  dButtons.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
-  const dRun = el('button', 'za-delegate-run', 'Run it');
-  dRun.type = 'button';
-  dRun.style.cssText = [
-    'padding:8px 14px', 'border-radius:8px', 'border:1px solid var(--amber,#E0A128)',
-    'background:transparent', 'color:var(--ink,#ECEBE6)', 'font:600 12.5px system-ui,sans-serif', 'cursor:pointer',
-  ].join(';');
-  const dSkip = el('button', 'za-delegate-skip', 'Not now');
-  dSkip.type = 'button';
-  dSkip.style.cssText = [
-    'padding:8px 14px', 'border-radius:8px', 'border:1px solid var(--rule-2,#2C353B)',
-    'background:transparent', 'color:var(--ink-2,#9AA1AC)', 'font:600 12.5px system-ui,sans-serif', 'cursor:pointer',
-  ].join(';');
-  dButtons.append(dRun, dSkip);
-  const dLink = el('button', 'za-delegate-link', 'review what is waiting ›');
-  dLink.type = 'button';
-  dLink.hidden = true;
-  dLink.style.cssText = [
-    'align-self:flex-start', 'padding:0', 'border:0', 'background:none',
-    'color:var(--cyan,#2AA5B8)', 'font:600 12px system-ui,sans-serif', 'cursor:pointer', 'text-align:left',
-  ].join(';');
-  delegate.append(dTask, dAgent, dWhy, dState, dButtons, dLink);
-
-  // Never folded away: what this panel can and cannot do, in one sentence.
-  const plain = el(
+  const privacy = el(
     'p',
-    'za-plain',
-    'Answers come from a local model reading a snapshot of your own Zeno, and every claim is checked ' +
-      'against it before you see it. Asking can propose work and can start a local agent; it can never ' +
-      'approve anything, and nothing an agent writes is applied until you approve it yourself.',
+    'za-privacy',
+    localSpeech
+      ? 'Voice input uses local Whisper. Replies use the selected system voice. Voice can ask and delegate, but it can never confirm hosted work or approve a capsule.'
+      : 'Voice input falls back to the browser speech service, which may send microphone audio to the browser maker. Replies use the selected system/browser voice. Voice never confirms or approves.',
   );
-  plain.style.cssText = 'margin:0;font-size:11.5px;line-height:1.5;color:var(--ink-2,#9AA1AC)';
+  privacy.style.cssText = [
+    'margin:0', 'padding:0 12px 10px', 'font-size:11px', 'line-height:1.45',
+    'color:var(--ink-3,#6C7480)',
+  ].join(';');
 
-  panel.append(row, status, answer, cited, delegate, plain);
+  panel.append(header, thread, realStatus, composer, privacy);
   host.appendChild(panel);
   return {
-    panel, input, send, status, answer, cited,
-    delegate, dTask, dAgent, dWhy, dState, dButtons, dRun, dSkip, dLink,
+    panel,
+    typedMode,
+    voiceMode,
+    clear,
+    thread,
+    empty,
+    status: realStatus,
+    composer,
+    input,
+    voiceSelect,
+    mic,
+    send,
   };
 }
 
 const ui = mountPanel();
 
-/* ---- rendering ------------------------------------------------------------- */
+if (!ui) {
+  throw new Error('Ask Zeno mount is missing.');
+}
+
+const dispatchGate = createDispatchGate();
+const handledHostedRuns = new Set();
+let typedSerial = 0;
+let turnCount = 0;
+let recognition = null;
+let recognitionSerial = 0;
+let voiceModeOn = false;
+let voiceStarting = false;
+let speaking = false;
+let speechEpoch = 0;
+let voiceRestartTimer = 0;
+let installedVoices = [];
 
 function setStatus(text, tone) {
   ui.status.textContent = text || '';
-  ui.status.style.color = tone === 'ok' ? 'var(--green,#5BB98C)' : tone === 'warn' ? 'var(--amber,#E0A128)' : 'var(--ink-2,#9AA1AC)';
+  ui.status.style.color =
+    tone === 'ok'
+      ? 'var(--green,#5BB98C)'
+      : tone === 'warn'
+        ? 'var(--amber,#E0A128)'
+        : 'var(--ink-2,#9AA1AC)';
 }
 
-function clearAnswer() {
-  ui.answer.hidden = true;
-  ui.answer.textContent = '';
-  ui.answer.style.borderColor = 'var(--rule-2,#2C353B)';
-  ui.cited.hidden = true;
-  ui.cited.textContent = '';
-  ui.delegate.hidden = true;
-  ui.dButtons.hidden = true;
-  ui.dLink.hidden = true;
-  ui.dWhy.textContent = '';
-  ui.dState.textContent = '';
+function updateMode() {
+  ui.typedMode.setAttribute('aria-pressed', voiceModeOn ? 'false' : 'true');
+  ui.voiceMode.setAttribute('aria-pressed', voiceModeOn ? 'true' : 'false');
+  ui.mic.setAttribute('aria-pressed', voiceModeOn ? 'true' : 'false');
+  ui.typedMode.style.color = voiceModeOn ? 'var(--ink-2,#9AA1AC)' : 'var(--ink,#ECEBE6)';
+  ui.voiceMode.style.color = voiceModeOn ? 'var(--cyan,#4FD1DB)' : 'var(--ink-2,#9AA1AC)';
+  ui.mic.style.color = voiceModeOn ? 'var(--cyan,#4FD1DB)' : 'var(--ink-2,#9AA1AC)';
+  ui.mic.textContent = speaking
+    ? 'Interrupt'
+    : voiceStarting
+      ? 'Cancel voice start'
+      : voiceModeOn
+        ? 'Stop voice'
+        : 'Start voice';
+  ui.send.disabled = dispatchGate.busy();
+  ui.send.style.opacity = dispatchGate.busy() ? '0.55' : '1';
 }
 
-/**
- * The one sentence said after any run, in the only terms that are true.
- *
- * `ok` is read as well as the count, because the two are independent. The
- * daemon no longer discards what a FAILED agent wrote — an agent that edits
- * files and then exits non-zero used to have its work deleted and be reported
- * as "no changes", which is how real edits went missing. Now those files arrive
- * here, and a run that did not finish must not be announced in the same words
- * as one that did: the count is stated, and so is the failure, in that order.
- */
-function renderRunResult(proposedList, note, ok) {
-  const proposed = Array.isArray(proposedList) ? proposedList.length : 0;
+function trimThread() {
+  const turns = [...ui.thread.querySelectorAll('.za-turn')];
+  while (turns.length > MAX_TURNS) turns.shift()?.remove();
+}
+
+function appendTurn(role, text, options) {
+  ui.empty.hidden = true;
+  turnCount += 1;
+  const turn = el('article', 'za-turn za-' + role);
+  turn.dataset.turn = String(turnCount);
+  turn.style.cssText = [
+    'display:flex', 'flex-direction:column', 'gap:5px',
+    role === 'user' ? 'align-items:flex-end' : 'align-items:stretch',
+  ].join(';');
+
+  const who = el('span', 'za-who', role === 'user' ? (options?.voice ? 'YOU · VOICE' : 'YOU') : 'ZENO');
+  who.style.cssText = [
+    'font:700 9.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace',
+    'letter-spacing:.08em', 'color:var(--ink-3,#6C7480)',
+  ].join(';');
+
+  const body = el('div', 'za-body', text);
+  body.style.cssText = role === 'user'
+    ? [
+        'max-width:88%', 'padding:8px 10px', 'border-radius:10px 10px 2px 10px',
+        'background:var(--g5,#222A2E)', 'white-space:pre-wrap', 'overflow-wrap:anywhere',
+      ].join(';')
+    : [
+        'padding:1px 0 8px', 'border-bottom:1px solid var(--rule,#242C31)',
+        'white-space:pre-wrap', 'overflow-wrap:anywhere',
+      ].join(';');
+  if (options?.tone === 'warn') body.style.color = 'var(--amber,#E0A128)';
+
+  turn.append(who, body);
+  ui.thread.appendChild(turn);
+  trimThread();
+  ui.thread.scrollTop = ui.thread.scrollHeight;
+  return { turn, body };
+}
+
+function appendMeta(turn, text, tone) {
+  const meta = el('p', 'za-meta', text);
+  meta.style.cssText = [
+    'margin:0', 'font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
+    'color:' + (tone === 'warn' ? 'var(--amber,#E0A128)' : 'var(--ink-3,#6C7480)'),
+    'white-space:pre-wrap', 'overflow-wrap:anywhere',
+  ].join(';');
+  turn.appendChild(meta);
+  return meta;
+}
+
+function makeAction(label, tone) {
+  const button = el('button', 'za-action', label);
+  button.type = 'button';
+  button.style.cssText = [
+    'align-self:flex-start', 'padding:6px 9px', 'border-radius:6px',
+    'border:1px solid ' + (tone === 'warn' ? 'var(--amber,#E0A128)' : 'var(--rule-2,#2C353B)'),
+    'background:transparent', 'color:var(--ink,#ECEBE6)',
+    'font:600 11.5px system-ui,sans-serif', 'cursor:pointer',
+  ].join(';');
+  return button;
+}
+
+function openPending() {
+  const pending = document.getElementById('pending') || document.querySelector('[data-mount="pending"]');
+  if (pending && typeof pending.scrollIntoView === 'function') {
+    pending.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function runSummary(outcome) {
+  const proposed = Array.isArray(outcome?.proposed) ? outcome.proposed.length : 0;
+  const note = outcome?.note ? String(outcome.note) : '';
   if (proposed > 0) {
-    const many = proposed === 1 ? '' : 's';
-    const failed = ok === false;
-    ui.dState.textContent = failed
-      ? `The run did NOT finish — ${note ? String(note) : 'the agent stopped early'}. ` +
-        `It had already written ${proposed} file${many}, which ${proposed === 1 ? 'is' : 'are'} kept ` +
-        'and waiting for you in Command rather than thrown away. Read them before you approve: ' +
-        'a run that stopped early may have left them half-finished.'
-      : `${proposed} change${many} proposed — review them in Command. ` +
-        'None has been applied; each is waiting for your approval.';
-    ui.dState.style.color = failed ? 'var(--amber,#E0A128)' : 'var(--green,#5BB98C)';
-    ui.dLink.hidden = false;
+    const status = outcome?.ok === false ? 'The run stopped before finishing.' : 'The run finished.';
+    return (
+      status + ' ' + proposed + ' ' + (proposed === 1 ? 'change is' : 'changes are') +
+      ' waiting for review in Command. Nothing was applied.' +
+      (note ? ' ' + note : '')
+    );
+  }
+  return 'No changes were proposed. ' + (note || 'The agent finished without changing a file.');
+}
+
+function renderDelegation(parent, delegated) {
+  if (!delegated) return;
+
+  const card = el('section', 'za-delegation');
+  card.setAttribute('aria-label', 'Forge delegation');
+  card.style.cssText = [
+    'display:flex', 'flex-direction:column', 'gap:6px', 'padding:9px 10px',
+    'border:1px solid var(--rule-2,#2C353B)', 'border-radius:8px',
+    'background:var(--g1,#0B0F11)',
+  ].join(';');
+
+  appendMeta(
+    card,
+    'FORGE · ' + agentLabel(delegated.agentId) + (delegated.model ? ' · ' + delegated.model : ''),
+  );
+  const task = el('p', 'za-task', masked() ? 'Task withheld · masked' : '“' + String(delegated.task || '') + '”');
+  task.style.cssText = 'margin:0;font-size:12px;overflow-wrap:anywhere';
+  const state = el('p', 'za-delegate-state');
+  state.setAttribute('role', 'status');
+  state.style.cssText = 'margin:0;font-size:12px;color:var(--ink-2,#9AA1AC);overflow-wrap:anywhere';
+  card.append(task, state);
+
+  if (delegated.needsConfirm) {
+    state.textContent =
+      'Not started. ' + (delegated.because || 'This hosted provider uses network egress and may consume plan or API allowance.') +
+      ' Voice cannot confirm this. Use the explicit on-screen button.';
+    state.style.color = 'var(--amber,#E0A128)';
+    const row = el('div', 'za-delegate-actions');
+    row.style.cssText = 'display:flex;gap:7px;flex-wrap:wrap';
+    const run = makeAction('Run on ' + agentLabel(delegated.agentId), 'warn');
+    const skip = makeAction('Not now');
+    run.addEventListener('click', () => void confirmHosted(delegated, state, row));
+    skip.addEventListener('click', () => {
+      run.disabled = true;
+      skip.disabled = true;
+      state.textContent = 'Not run. Nothing was sent anywhere.';
+      state.style.color = 'var(--green,#5BB98C)';
+    });
+    row.append(run, skip);
+    card.appendChild(row);
+  } else if (delegated.started) {
+    state.textContent = runSummary(delegated);
+    state.style.color = delegated.ok === false ? 'var(--amber,#E0A128)' : 'var(--green,#5BB98C)';
+    if (Array.isArray(delegated.proposed) && delegated.proposed.length > 0) {
+      const review = makeAction('Review waiting changes');
+      review.addEventListener('click', openPending);
+      card.appendChild(review);
+    }
+  } else {
+    state.textContent = delegated.note || 'Nothing was started.';
+    state.style.color = 'var(--amber,#E0A128)';
+  }
+
+  parent.appendChild(card);
+}
+
+function renderResponse(data) {
+  const payload = data && typeof data === 'object' ? data : {};
+  let text;
+  let tone;
+  if (payload.answer) {
+    text = masked() ? 'Answer withheld · masked' : String(payload.answer);
+  } else if (payload.flagged) {
+    text = masked() ? 'Reply withheld · masked' : String(payload.flagged);
+    tone = 'warn';
+  } else {
+    text = payload.note ? String(payload.note) : 'No answer came back.';
+    tone = 'warn';
+  }
+
+  const rendered = appendTurn('assistant', text, { tone });
+  const ids = Array.isArray(payload.cited) ? payload.cited : [];
+  if (ids.length > 0) appendMeta(rendered.turn, 'cited: ' + ids.join(' '));
+
+  if (payload.flagged) {
+    const ungrounded = payload.ungrounded || {};
+    const details = [];
+    if (Array.isArray(ungrounded.unknownIds) && ungrounded.unknownIds.length) {
+      details.push('invented ids: ' + ungrounded.unknownIds.join(' '));
+    }
+    if (Array.isArray(ungrounded.claimsWithoutCitation) && ungrounded.claimsWithoutCitation.length) {
+      details.push(ungrounded.claimsWithoutCitation.length + ' claim(s) without a citation');
+    }
+    appendMeta(
+      rendered.turn,
+      'This reply failed the grounding check and is not presented as an answer.' +
+        (details.length ? ' ' + details.join(' · ') : ''),
+      'warn',
+    );
+  }
+
+  if (payload.proposal?.relPath) {
+    appendMeta(
+      rendered.turn,
+      'PROPOSED · ' + payload.proposal.relPath + ' · waiting for owner review; not applied',
+      payload.proposal.refused ? 'warn' : undefined,
+    );
+    const review = makeAction('Review approval capsule');
+    review.addEventListener('click', openPending);
+    rendered.turn.appendChild(review);
+  }
+
+  renderDelegation(rendered.turn, payload.delegated);
+  ui.thread.scrollTop = ui.thread.scrollHeight;
+}
+
+function readSavedVoice() {
+  try {
+    return window.localStorage.getItem(VOICE_PREF_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveVoice(value) {
+  try {
+    if (value) window.localStorage.setItem(VOICE_PREF_KEY, value);
+    else window.localStorage.removeItem(VOICE_PREF_KEY);
+  } catch {
+    // A voice preference is optional. Speech still works for this renderer.
+  }
+}
+
+function refreshVoices() {
+  const synthesis = window.speechSynthesis;
+  installedVoices = synthesis && typeof synthesis.getVoices === 'function'
+    ? synthesis.getVoices()
+    : [];
+  ui.voiceSelect.replaceChildren();
+
+  if (installedVoices.length === 0) {
+    const option = el('option', null, 'No system voice reported');
+    option.value = '';
+    ui.voiceSelect.appendChild(option);
+    ui.voiceSelect.disabled = true;
+    return;
+  }
+
+  const selected = chooseSystemVoice(installedVoices, readSavedVoice(), navigator.language || 'en-US');
+  for (const voice of installedVoices) {
+    const option = el(
+      'option',
+      null,
+      voice.name + ' · ' + (voice.lang || 'unknown language') + (voice.localService ? ' · local' : ''),
+    );
+    option.value = voice.voiceURI;
+    option.selected = voice === selected;
+    ui.voiceSelect.appendChild(option);
+  }
+  ui.voiceSelect.disabled = false;
+  if (selected) saveVoice(selected.voiceURI);
+}
+
+function stopSpeaking(message) {
+  speechEpoch += 1;
+  speaking = false;
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    // The platform owns synthesis. A missing or closing engine is already silent.
+  }
+  updateMode();
+  if (message) setStatus(message);
+}
+
+function speak(text) {
+  if (!voiceModeOn || !text || masked()) {
+    return Promise.resolve();
+  }
+  const synthesis = window.speechSynthesis;
+  const Utterance = window.SpeechSynthesisUtterance;
+  if (!synthesis || typeof synthesis.speak !== 'function' || typeof Utterance !== 'function') {
+    setStatus('The answer is on screen. This Electron runtime did not report a speaking voice.', 'warn');
+    return Promise.resolve();
+  }
+
+  const epoch = ++speechEpoch;
+  const clipped = text.length > MAX_SPOKEN_CHARS
+    ? text.slice(0, MAX_SPOKEN_CHARS).replace(/\s+\S*$/, '') + '. The rest is on screen.'
+    : text;
+  const utterance = new Utterance(clipped);
+  const selected = chooseSystemVoice(installedVoices, ui.voiceSelect.value, navigator.language || 'en-US');
+  if (selected) utterance.voice = selected;
+  utterance.lang = selected?.lang || navigator.language || 'en-US';
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  speaking = true;
+  updateMode();
+  setStatus('Speaking with ' + (selected?.name || 'the default system voice') + '…');
+
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (epoch === speechEpoch) {
+        speaking = false;
+        updateMode();
+      }
+      resolve();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    try {
+      synthesis.cancel();
+      synthesis.speak(utterance);
+    } catch {
+      finish();
+    }
+  });
+}
+
+async function releaseRecognition() {
+  window.clearTimeout(voiceRestartTimer);
+  voiceRestartTimer = 0;
+  const current = recognition;
+  recognition = null;
+  if (current) {
+    try {
+      current.abort();
+    } catch {
+      // It may already have emitted end.
+    }
+  }
+  await waitForSpeechIdle();
+}
+
+async function stopVoiceConversation(reason) {
+  voiceModeOn = false;
+  voiceStarting = false;
+  recognitionSerial += 1;
+  await releaseRecognition();
+  stopSpeaking();
+  if (document.body.dataset.zenoCapture === 'ask') {
+    delete document.body.dataset.zenoCapture;
+  }
+  updateMode();
+  setStatus(reason || 'Voice conversation stopped. The microphone is closed.', 'ok');
+}
+
+async function startVoiceConversation() {
+  if (voiceModeOn || voiceStarting) return;
+  if (!SpeechRecognition) {
+    setStatus('No speech-recognition engine is available. Typed Ask Zeno still works.', 'warn');
+    return;
+  }
+
+  const occupied = document.body.dataset.zenoCapture;
+  if (occupied && occupied !== 'ask') {
+    setStatus(captureOwnerLabel(occupied) + ' is using the microphone. End it before starting voice conversation.', 'warn');
+    return;
+  }
+
+  voiceStarting = true;
+  // Reserve before yielding to asynchronous teardown. Without this reservation a
+  // new Command PTT press could enter after the handoff event but before Whisper
+  // reports idle, leaving two recognizers alive.
+  document.body.dataset.zenoCapture = 'ask';
+  updateMode();
+  setStatus('Closing other Command listening before voice conversation starts…');
+
+  const handoff = { waiters: [], requestedBy: 'Ask Zeno voice conversation' };
+  window.dispatchEvent(new CustomEvent('zeno:release-command-voice', { detail: handoff }));
+  try {
+    await Promise.all(handoff.waiters);
+    await waitForSpeechIdle();
+  } catch {
+    voiceStarting = false;
+    if (document.body.dataset.zenoCapture === 'ask') delete document.body.dataset.zenoCapture;
+    updateMode();
+    setStatus('The previous microphone session did not close. Stop it and retry.', 'warn');
+    return;
+  }
+
+  // A typed-mode click or an external handoff may cancel while teardown awaits.
+  if (!voiceStarting) return;
+  const ownerAfterHandoff = document.body.dataset.zenoCapture;
+  if (ownerAfterHandoff !== 'ask') {
+    voiceStarting = false;
+    updateMode();
     setStatus(
-      failed ? `The run failed after writing ${proposed} file${many}.` : `${proposed} change${many} proposed.`,
-      failed ? 'warn' : 'ok',
+      ownerAfterHandoff
+        ? captureOwnerLabel(ownerAfterHandoff) + ' took the microphone. Voice conversation did not start.'
+        : 'The microphone reservation was released. Voice conversation did not start.',
+      'warn',
     );
     return;
   }
-  // A run that changed nothing is a real outcome, said as one, with the agent's
-  // own reason when it gave one — never dressed up as a success.
-  ui.dState.textContent = `No changes were proposed. ${note ? String(note) : 'The agent finished without changing any file.'}`;
-  ui.dState.style.color = 'var(--amber,#E0A128)';
-  setStatus('The agent proposed no changes.', 'warn');
+
+  voiceStarting = false;
+  voiceModeOn = true;
+  updateMode();
+  setStatus(
+    localSpeech
+      ? 'Voice conversation on. Local Whisper is listening for your next message.'
+      : 'Voice conversation on. The browser speech service may send microphone audio to its provider.',
+  );
+  startListening();
 }
 
-/**
- * Draw a delegation the daemon reported.
- *
- * Three shapes, and they must never be blurred: it RAN (local — on this machine,
- * already finished, here is what is waiting), it WANTS A CLICK (hosted — has not
- * run, and here is what it would cost), or NOTHING COULD RUN IT.
- */
-function renderDelegation(d) {
-  if (!d) return;
-  ui.delegate.hidden = false;
-  ui.dTask.textContent = masked() ? 'Work withheld · masked' : `Work: “${d.task || ''}”`;
-  ui.dAgent.textContent = d.agentId ? `AGENT: ${agentLabel(d.agentId)}${d.model ? ` · ${d.model}` : ''}` : 'NO AGENT CHOSEN';
+function scheduleListen() {
+  window.clearTimeout(voiceRestartTimer);
+  voiceRestartTimer = window.setTimeout(() => {
+    voiceRestartTimer = 0;
+    startListening();
+  }, 260);
+}
 
-  if (d.needsConfirm) {
-    // NOT STARTED, and it says so before it says anything else.
-    ui.dState.textContent = 'Not started. Nothing has been sent anywhere yet.';
-    ui.dState.style.color = 'var(--amber,#E0A128)';
-    ui.dWhy.textContent =
-      `Zeno did not start this, because ${d.because || 'it spends money and sends your code off this machine'}. ` +
-      'Starting it is your click, and even then every file it writes still waits for your approval.';
-    ui.dWhy.style.color = 'var(--amber,#E0A128)';
-    ui.dButtons.hidden = false;
-    ui.dRun.textContent = `Run it on ${agentLabel(d.agentId)}`;
-    ui.dRun.onclick = () => confirmHosted(d);
-    ui.dSkip.onclick = () => {
-      ui.delegate.hidden = true;
-      setStatus('Not run. Nothing was sent anywhere.', 'ok');
-    };
+function startListening() {
+  if (!voiceModeOn || voiceStarting || speaking || dispatchGate.busy() || recognition) return;
+  if (document.body.dataset.zenoCapture !== 'ask') {
+    void stopVoiceConversation('Another surface owns the microphone. Voice conversation stopped.');
     return;
   }
 
-  if (d.started) {
-    ui.dWhy.textContent =
-      'This ran on your machine. Your code did not leave it, and nothing it wrote has been applied.';
-    ui.dWhy.style.color = 'var(--ink-2,#9AA1AC)';
-    renderRunResult(d.proposed, d.note, d.ok);
-    return;
-  }
+  const rec = new SpeechRecognition();
+  const session = ++recognitionSerial;
+  let handled = false;
+  recognition = rec;
+  rec.lang = navigator.language || 'en-US';
+  rec.continuous = localSpeech;
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.initialPrompt = ASK_PROMPT;
 
-  // Nothing ran and nothing is offered. Say why, and never imply otherwise.
-  ui.dWhy.textContent = '';
-  ui.dState.textContent = d.note || 'Nothing was started, and nothing ran.';
-  ui.dState.style.color = 'var(--amber,#E0A128)';
-  setStatus('Nothing was started.', 'warn');
-}
+  rec.onstart = () => {
+    if (recognition === rec && voiceModeOn) {
+      setStatus(localSpeech ? 'Listening locally with Whisper…' : 'Listening through the browser speech service…');
+    }
+  };
 
-/** The owner clicked "run it" on a hosted agent. This is the ONLY way one starts. */
-async function confirmHosted(d) {
-  const confirm = d.confirm || { method: 'POST', path: '/forge/run', body: { task: d.task, agentId: d.agentId } };
-  ui.dButtons.hidden = true;
-  ui.dState.textContent = `Running on ${agentLabel(d.agentId)}… your code has been sent to run this.`;
-  ui.dState.style.color = 'var(--cyan,#2AA5B8)';
-  setStatus('Running…');
-  try {
-    const res = await fetch(confirm.path, {
-      method: confirm.method,
-      headers: authHeaders({ 'content-type': 'application/json' }),
-      cache: 'no-store',
-      body: JSON.stringify(confirm.body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = (data && data.error) || {};
-      ui.dState.textContent = `The run was refused: ${err.message || res.status}. ${err.resolve || ''}`.trim();
-      ui.dState.style.color = 'var(--amber,#E0A128)';
-      setStatus('The run was refused.', 'warn');
+  rec.onresult = event => {
+    if (!voiceModeOn || recognition !== rec || handled || session !== recognitionSerial) return;
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      if (!result?.isFinal) continue;
+      const text = String(result[0]?.transcript || '').trim();
+      if (!text) continue;
+      handled = true;
+      recognition = null;
+      try {
+        rec.abort();
+      } catch {
+        // The final result is already captured.
+      }
+      void submit(text, { voice: true, key: 'voice:' + session + ':' + index });
       return;
     }
-    renderRunResult(data.proposed, data.run && data.run.note, data.run ? data.run.ok : undefined);
-  } catch (e) {
-    ui.dState.textContent = `Network error during the run: ${e && e.message ? e.message : e}.`;
-    ui.dState.style.color = 'var(--amber,#E0A128)';
-    setStatus('The run failed.', 'warn');
+  };
+
+  rec.onerror = event => {
+    if (recognition !== rec || session !== recognitionSerial) return;
+    const error = String(event?.error || 'unknown');
+    if (error === 'no-speech' || error === 'aborted') return;
+    recognition = null;
+    void stopVoiceConversation(
+      error === 'not-allowed'
+        ? 'Microphone permission was refused. Voice conversation is off.'
+        : 'Speech recognition stopped (' + error + '). Voice conversation is off.',
+    );
+  };
+
+  rec.onend = () => {
+    if (recognition !== rec || session !== recognitionSerial) return;
+    recognition = null;
+    if (voiceModeOn && !handled && !speaking && !dispatchGate.busy()) scheduleListen();
+  };
+
+  try {
+    rec.start();
+  } catch (error) {
+    recognition = null;
+    void stopVoiceConversation('The microphone could not start: ' + (error?.message || error));
   }
 }
 
-/* ---- the one question --------------------------------------------------- */
+async function confirmHosted(delegated, state, actionRow) {
+  const runId = String(delegated?.runId || delegated?.confirm?.body?.runId || '');
+  if (!runId || handledHostedRuns.has(runId)) return;
+  handledHostedRuns.add(runId);
 
-let asking = false;
+  await releaseRecognition();
+  stopSpeaking();
+  for (const button of actionRow.querySelectorAll('button')) button.disabled = true;
+  state.textContent = 'Running on ' + agentLabel(delegated.agentId) + '…';
+  state.style.color = 'var(--cyan,#4FD1DB)';
 
-async function ask() {
-  const question = ui.input.value.trim();
-  if (question === '' || asking) return;
-  if (!OWNER_TOKEN) {
-    setStatus('This browser cannot ask (no token was injected). Open the window the daemon serves.', 'warn');
+  const confirmation = delegated.confirm || {
+    method: 'POST',
+    path: '/forge/run',
+    body: { task: delegated.task, agentId: delegated.agentId },
+  };
+
+  let spoken;
+  try {
+    const response = await fetch(confirmation.path, {
+      method: confirmation.method,
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      cache: 'no-store',
+      body: JSON.stringify(confirmation.body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = data.error || {};
+      state.textContent = 'The run was refused: ' + (error.message || response.status) + '. ' + (error.resolve || '');
+      state.style.color = 'var(--amber,#E0A128)';
+      spoken = 'The hosted run was refused. Read the reason on screen.';
+    } else {
+      const outcome = {
+        proposed: data.proposed,
+        note: data.run?.note,
+        ok: data.run?.ok,
+      };
+      state.textContent = runSummary(outcome);
+      state.style.color = outcome.ok === false ? 'var(--amber,#E0A128)' : 'var(--green,#5BB98C)';
+      if (Array.isArray(outcome.proposed) && outcome.proposed.length > 0) {
+        const review = makeAction('Review waiting changes');
+        review.addEventListener('click', openPending);
+        actionRow.replaceChildren(review);
+      }
+      spoken = runSummary(outcome) + ' Voice cannot approve any of those changes.';
+    }
+  } catch (error) {
+    state.textContent = 'Network error during the run: ' + (error?.message || error) + '. Nothing was applied.';
+    state.style.color = 'var(--amber,#E0A128)';
+    spoken = 'The hosted run failed. Nothing was applied.';
+  }
+
+  if (voiceModeOn) {
+    await speak(spoken);
+    if (voiceModeOn) scheduleListen();
+  }
+}
+
+async function submit(rawQuestion, options) {
+  const question = String(rawQuestion || '').trim();
+  if (!question || !OWNER_TOKEN) {
+    if (!OWNER_TOKEN) {
+      setStatus('This browser cannot ask because no owner token was injected. Open the daemon-served window.', 'warn');
+    }
     return;
   }
-  asking = true;
-  ui.send.disabled = true;
-  clearAnswer();
-  // Said in the present tense and hedged on purpose: an answer that asks for
-  // work may have started a LOCAL agent inside this same request, and the owner
-  // should not learn that only once it has finished.
-  setStatus('Thinking… if this asks for work, a local agent may be running it now.');
+
+  const key = options?.key || 'typed:' + (++typedSerial);
+  const token = dispatchGate.begin(key);
+  if (!token) return;
+
+  await releaseRecognition();
+  stopSpeaking();
+  appendTurn('user', question, { voice: options?.voice === true });
+  ui.input.value = '';
+  updateMode();
+  setStatus('Thinking… a local delegation may run, while hosted work still waits for a click.');
+
+  let payload;
   try {
-    const res = await fetch('/assistant/ask', {
+    const response = await fetch('/assistant/ask', {
       method: 'POST',
       headers: authHeaders({ 'content-type': 'application/json' }),
       cache: 'no-store',
       body: JSON.stringify({ question }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = (data && data.error) || {};
-      setStatus(`Could not ask: ${err.message || res.status}. ${err.resolve || ''}`.trim(), 'warn');
-      return;
-    }
-
-    if (data.answer) {
-      ui.answer.hidden = false;
-      ui.answer.textContent = masked() ? 'Answer withheld · masked' : data.answer;
-      const ids = Array.isArray(data.cited) ? data.cited : [];
-      if (ids.length) {
-        ui.cited.hidden = false;
-        ui.cited.textContent = `cited: ${ids.join(' ')}`;
-      }
-      setStatus(data.note ? String(data.note) : '');
-    } else if (data.flagged) {
-      // NOT an answer. The grounding check found an invented id or an uncited
-      // claim, so the prose is shown as what it is — text that failed the check.
-      ui.answer.hidden = false;
-      ui.answer.style.borderColor = 'var(--amber,#E0A128)';
-      ui.answer.textContent = masked() ? 'Reply withheld · masked' : data.flagged;
-      const u = data.ungrounded || {};
-      const bad = [
-        (u.unknownIds || []).length ? `invented ids: ${(u.unknownIds || []).join(' ')}` : null,
-        (u.claimsWithoutCitation || []).length ? `${(u.claimsWithoutCitation || []).length} claim(s) with no citation` : null,
-      ].filter(Boolean).join(' · ');
-      setStatus(`This did not pass the grounding check, so it is not being shown as an answer. ${bad}`.trim(), 'warn');
+    payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = payload.error || {};
+      const message =
+        'Could not ask: ' + (error.message || response.status) + (error.resolve ? '. ' + error.resolve : '');
+      appendTurn('assistant', message, { tone: 'warn' });
+      setStatus(message, 'warn');
+      payload = { note: message };
     } else {
-      setStatus(data.note ? String(data.note) : 'No answer came back.', 'warn');
+      renderResponse(payload);
+      setStatus(payload.note ? String(payload.note) : 'Answer received.', payload.answer ? 'ok' : 'warn');
     }
-
-    if (data.proposal && data.proposal.relPath) {
-      ui.cited.hidden = false;
-      ui.cited.textContent =
-        (ui.cited.textContent ? ui.cited.textContent + '\n' : '') +
-        `proposed ${data.proposal.relPath} — waiting for your approval, not applied`;
-    }
-    renderDelegation(data.delegated);
-  } catch (e) {
-    setStatus(`Network error: ${e && e.message ? e.message : e}. Your Zeno state is unaffected.`, 'warn');
+  } catch (error) {
+    const message = 'Network error: ' + (error?.message || error) + '. Your Zeno state is unaffected.';
+    appendTurn('assistant', message, { tone: 'warn' });
+    setStatus(message, 'warn');
+    payload = { note: message };
   } finally {
-    asking = false;
-    ui.send.disabled = false;
+    dispatchGate.finish(token);
+    updateMode();
+  }
+
+  if (voiceModeOn) {
+    const words = masked()
+      ? 'The answer is hidden while masking is on. Read it after you turn masking off.'
+      : spokenReply(payload);
+    await speak(words);
+    if (voiceModeOn) scheduleListen();
   }
 }
 
-/* ---- boot ------------------------------------------------------------------ */
+ui.send.addEventListener('click', () => void submit(ui.input.value));
+ui.input.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    void submit(ui.input.value);
+  }
+});
+ui.input.addEventListener('focus', () => {
+  if (recognition) {
+    void releaseRecognition();
+    setStatus('Listening paused while you type. Sending will continue the voice conversation.');
+  }
+  if (speaking) stopSpeaking('Speech stopped because you started typing.');
+});
+ui.input.addEventListener('input', () => {
+  if (speaking) stopSpeaking('Speech stopped because you interrupted with typed input.');
+});
 
-if (ui) {
-  ui.send.addEventListener('click', () => ask());
-  ui.input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') ask();
-  });
-  // The link under a finished run only ever MOVES the owner to the approvals
-  // section. It approves nothing: there is no call to /approvals in this file.
-  ui.dLink.addEventListener('click', () => {
-    const pending = document.getElementById('pending') || document.querySelector('[data-mount="pending"]');
-    if (pending && typeof pending.scrollIntoView === 'function') pending.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
-  setStatus('Not asked yet. Nothing here is a stored answer — every line comes from one live read.');
+ui.typedMode.addEventListener('click', () => {
+  if (voiceModeOn || voiceStarting || speaking) void stopVoiceConversation('Typed mode. The microphone and speech are stopped.');
+});
+ui.voiceMode.addEventListener('click', () => {
+  if (speaking) {
+    stopSpeaking('Speech interrupted. Listening for your next message…');
+    if (voiceModeOn) scheduleListen();
+  } else if (voiceModeOn || voiceStarting) {
+    void stopVoiceConversation();
+  } else {
+    void startVoiceConversation();
+  }
+});
+ui.mic.addEventListener('click', () => {
+  if (speaking) {
+    stopSpeaking('Speech interrupted. Listening for your next message…');
+    if (voiceModeOn) scheduleListen();
+  } else if (voiceModeOn || voiceStarting) {
+    void stopVoiceConversation();
+  } else {
+    void startVoiceConversation();
+  }
+});
+ui.clear.addEventListener('click', () => {
+  for (const turn of ui.thread.querySelectorAll('.za-turn')) turn.remove();
+  ui.empty.hidden = false;
+  setStatus('Conversation cleared from this renderer. Nothing was deleted from Vault because raw chat was never stored there.', 'ok');
+});
+
+ui.voiceSelect.addEventListener('change', () => {
+  saveVoice(ui.voiceSelect.value);
+  const selected = installedVoices.find(voice => voice.voiceURI === ui.voiceSelect.value);
+  setStatus('Assistant voice: ' + (selected?.name || 'system default') + '.', 'ok');
+});
+
+window.addEventListener('zeno:release-command-voice', event => {
+  if (event.detail?.requestedBy === 'Ask Zeno voice conversation') return;
+  if (!voiceModeOn && !voiceStarting && !speaking && !recognition) return;
+  const requestedBy = event.detail?.requestedBy || 'another voice surface';
+  event.detail?.waiters?.push(
+    stopVoiceConversation('Voice conversation paused for ' + requestedBy + '.'),
+  );
+});
+
+window.addEventListener('pagehide', () => {
+  voiceModeOn = false;
+  void releaseRecognition();
+  stopSpeaking();
+  if (document.body.dataset.zenoCapture === 'ask') delete document.body.dataset.zenoCapture;
+});
+
+if (!SpeechRecognition) {
+  ui.voiceMode.disabled = true;
+  ui.mic.disabled = true;
+  ui.voiceMode.title = 'No speech-recognition engine is available.';
+  ui.mic.title = 'No speech-recognition engine is available.';
 }
 
-export default { ask };
+refreshVoices();
+if (window.speechSynthesis) {
+  window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
+  window.speechSynthesis.onvoiceschanged = refreshVoices;
+}
+updateMode();
+setStatus('Ready. This thread stays in memory while this Zeno window is open; raw chat is not silently saved.');
+ui.input.focus({ preventScroll: true });
+
+export default {
+  submit,
+  startVoiceConversation,
+  stopVoiceConversation,
+};

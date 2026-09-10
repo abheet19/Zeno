@@ -202,7 +202,27 @@ export class Memory {
  */
 export function renderMemoryContext(entries: readonly MemoryEntry[]): string {
   if (entries.length === 0) return 'No memory entries are relevant to this task.';
+
+  const begin = '===== BEGIN VAULT MEMORY RECORD =====';
+  const end = '===== END VAULT MEMORY RECORD =====';
+  const markerLine = /^[^\n]*?=+[ \t]*(?:BEGIN|END)[ \t]+VAULT[ \t]+MEMORY[ \t]+RECORD[^\n]*$/gim;
+  const safeBody = (value: string): string => value.replace(markerLine, (line) => line.replace(/=/g, '≡'));
+  const header = (value: string): string => value
+    .replace(/[\n\r\u0085\u2028\u2029]+/g, ' ')
+    .replace(/=+[ \t]*(?:BEGIN|END)[ \t]+VAULT[ \t]+MEMORY[ \t]+RECORD/gi, (run) => run.replace(/=/g, '≡'))
+    .trim();
+
   return entries
-    .map((e) => `- [${e.kind}] ${e.description}\n  recorded by ${e.source} at ${e.createdAt}\n  ${e.body.replace(/\n/g, '\n  ')}`)
-    .join('\n');
+    .map((e) => [
+      begin,
+      `citation: vault-memory:${header(e.id)}`,
+      `kind: ${header(e.kind)}`,
+      `description: ${header(e.description)}`,
+      `source: ${header(e.source)}`,
+      `recorded-at: ${header(e.createdAt)}`,
+      '',
+      safeBody(e.body),
+      end,
+    ].join('\n'))
+    .join('\n\n');
 }

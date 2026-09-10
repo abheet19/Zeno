@@ -198,7 +198,7 @@ test('a run that FAILS after writing keeps what it wrote — the files are not s
     const res = await fetch(h.base + '/forge/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-zeno-token': h.owner },
-      body: JSON.stringify({ task: 'edit partial.txt', agentId: 'claude-code' }),
+      body: JSON.stringify({ task: 'edit partial.txt', agentId: 'claude-code', hostedConfirmed: true }),
     });
     assert.equal(res.status, 200);
     const body = (await res.json()) as {

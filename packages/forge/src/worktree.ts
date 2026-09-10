@@ -16,12 +16,12 @@
  * Pure over the kernel's injected `GitRunner`: git arrives as one function, so
  * the whole module is testable with an in-memory double and no repository. Every
  * path — the worktree's own location and each changed path it reports — is
- * jailed with the kernel's `jailPath`, the same containment the executors use,
+ * jailed with the kernel's filesystem-aware `jail`, the same containment the executors use,
  * rather than a second private copy of the rules.
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { jailPath, type GitRunner, type GitResult } from '@abheet19/zeno-kernel';
+import { jail, nodeSandboxFs, type GitRunner, type GitResult } from '@abheet19/zeno-kernel';
 import { STATUS_ARGS, parsePorcelainZ } from './status.js';
 
 /** The temp sub-namespace all Forge worktrees live under, so they are easy to find and sweep. */
@@ -92,9 +92,13 @@ export function createWorktree(
   opts: CreateWorktreeOptions = {},
 ): Worktree {
   const base = opts.tmpBase ?? tmpdir();
-  // Jail the worktree's OWN path: `name` is the only untrusted input to the
-  // location, and it must stay inside the namespace.
-  const path = jailPath(join(base, WORKTREE_NAMESPACE), name);
+  // Jail the worktree's OWN path before git creates anything. Canonicalising
+  // from `base` (rather than treating the namespace as a trusted root) also
+  // refuses a pre-existing `zeno-forge-worktrees` junction that redirects the
+  // checkout somewhere else on the host.
+  const fs = nodeSandboxFs();
+  const namespace = jail(fs, base, WORKTREE_NAMESPACE);
+  const path = jail(fs, namespace, name);
 
   // `--detach`: on no branch, so the throwaway can never be confused for, or
   // accidentally advance, one of the owner's branches.
@@ -127,6 +131,11 @@ export function diffFiles(worktree: string, git: GitRunner): string[] {
     throw new WorktreeUnavailableError(`git status failed in the worktree — ${detailOf(r)}`);
   }
   const paths = parsePorcelainZ(r.stdout);
-  for (const p of paths) jailPath(worktree, p);
+  // Lexical containment alone is insufficient. Changed paths are consumed as
+  // real files after the agent exits, so also resolve filesystem links here:
+  // a tracked symlink or NTFS junction must never make that read leave the
+  // disposable worktree.
+  const fs = nodeSandboxFs();
+  for (const p of paths) jail(fs, worktree, p);
   return paths;
 }

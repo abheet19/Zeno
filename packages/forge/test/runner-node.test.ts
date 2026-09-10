@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -67,6 +67,33 @@ test('extra environment reaches the child, layered over the parent\'s', async ()
   assert.equal(r.stdout, 'run-token-xyz/has-path', 'the child gets the extra value AND keeps the parent environment');
 });
 
+test('optional stdin reaches the child exactly and then closes', async () => {
+  const input = '--add-dir /; $(whoami)\nsecond line';
+  const r = await nodeSpawner().run(
+    process.execPath,
+    ['-e', 'let s=""; process.stdin.setEncoding("utf8"); process.stdin.on("data", c => s += c); process.stdin.on("end", () => process.stdout.write(s))'],
+    { cwd: tmpdir(), stdin: input },
+  );
+  assert.equal(r.code, 0);
+  assert.equal(r.failedToSpawn, false);
+  assert.equal(r.stdout, input, 'stdin is data, with no shell or option parsing');
+});
+
+test('Windows tree-kill mode preserves output from native commands launched by cmd.exe', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const shell = process.env['ComSpec'] ?? 'cmd.exe';
+  const r = await nodeSpawner({ timeoutMs: 30_000, killTreeOnTimeout: true }).run(
+    shell,
+    ['/d', '/s', '/c', 'where.exe cmd.exe'],
+    { cwd: tmpdir() },
+  );
+  assert.equal(r.code, 0);
+  assert.equal(r.failedToSpawn, false);
+  assert.match(r.stdout, /cmd\.exe/i, 'native child stdout reaches the owner terminal');
+  assert.equal(r.stderr, '');
+});
+
 test('a child that overruns its ceiling is stopped and reported as never having completed', async () => {
   const r = await nodeSpawner({ timeoutMs: 200 }).run(
     process.execPath,
@@ -75,6 +102,72 @@ test('a child that overruns its ceiling is stopped and reported as never having 
   );
   assert.equal(r.failedToSpawn, true, 'a run that had to be killed did not run to a real exit');
   assert.match(r.stderr, /still running after 200ms/, 'and the reason says which of the failures it was');
+});
+
+test('Windows shim fallback refuses cmd metacharacters instead of executing them', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zeno-cmd-safe-'));
+  const marker = join(dir, 'injected.txt');
+  const command = 'zeno-safe-shim-test';
+  writeFileSync(join(dir, command + '.cmd'), '@echo off\r\necho shim-ran\r\n', 'utf8');
+  try {
+    const inherited = process.env['PATH'] ?? '';
+    const r = await nodeSpawner().run(command, ['safe', '&', 'echo', 'injected>', marker], {
+      cwd: dir,
+      env: { PATH: dir + ';' + inherited, Path: dir + ';' + inherited },
+    });
+    assert.equal(r.failedToSpawn, true, 'unsafe argv is refused with the original spawn failure');
+    assert.equal(existsSync(marker), false, 'cmd.exe never saw the injected command');
+    assert.doesNotMatch(r.stdout, /shim-ran/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an owner cancellation stops the process tree promptly and is not reported as a spawn failure', async () => {
+  const controller = new AbortController();
+  const began = Date.now();
+  const pending = nodeSpawner({ timeoutMs: 30_000 }).run(
+    process.execPath,
+    ['-e', 'process.stdout.write("began\\n"); setTimeout(() => {}, 30000)'],
+    { cwd: tmpdir(), signal: controller.signal },
+  );
+  setTimeout(() => controller.abort(), 100);
+  const r = await pending;
+  assert.equal(r.cancelled, true);
+  assert.equal(r.failedToSpawn, false, 'the process did run; the owner stopped it');
+  assert.equal(r.code, 128);
+  assert.match(r.stdout, /began/);
+  assert.match(r.stderr, /cancelled/i);
+  assert.ok(Date.now() - began < 4_000, 'cancellation cannot leave a descendant holding the request open');
+});
+
+test('an already-cancelled signal does not start a process', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const r = await nodeSpawner().run(process.execPath, ['-e', 'process.stdout.write("should-not-run")'], {
+    cwd: tmpdir(), signal: controller.signal,
+  });
+  assert.equal(r.cancelled, true);
+  assert.equal(r.stdout, '');
+});
+
+test('an opted-in timeout stops descendants that retain the parent output pipes', async () => {
+  const script = [
+    "const { spawn } = require('node:child_process')",
+    "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: ['ignore', 'inherit', 'inherit'] })",
+    'setTimeout(() => {}, 5000)',
+  ].join(';');
+  const began = Date.now();
+  const r = await nodeSpawner({ timeoutMs: 200, killTreeOnTimeout: true }).run(
+    process.execPath,
+    ['-e', script],
+    { cwd: tmpdir() },
+  );
+  assert.equal(r.failedToSpawn, true);
+  assert.match(r.stderr, /still running after 200ms/);
+  assert.ok(Date.now() - began < 4_000, 'the descendant cannot keep the request open after its parent times out');
 });
 
 test('NON-BLOCKING — the event loop keeps turning while a child runs', async () => {

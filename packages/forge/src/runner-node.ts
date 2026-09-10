@@ -27,7 +27,7 @@
  */
 import { extname } from 'node:path';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { SPAWN_FAILED, type Spawner, type SpawnOptions, type SpawnResult } from './runner.js';
 
 /** 16 MiB: far past any agent transcript or `status` listing, and still bounded. */
@@ -42,6 +42,8 @@ const CLIPPED = '\n…[Zeno clipped this stream at 16 MiB]';
 export interface NodeSpawnerOptions {
   /** Default hard ceiling per invocation, in milliseconds. An agent run can be long. */
   readonly timeoutMs?: number;
+  /** On timeout, stop the launched process and descendants. Used by the owner terminal. */
+  readonly killTreeOnTimeout?: boolean;
 }
 
 /**
@@ -56,6 +58,7 @@ function isBatchLaunchFailure(err: NodeJS.ErrnoException | null): boolean {
 interface Ran {
   readonly error: NodeJS.ErrnoException | null;
   readonly timedOut: boolean;
+  readonly aborted: boolean;
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
@@ -75,31 +78,43 @@ function runOnce(
   args: readonly string[],
   opts: SpawnOptions,
   timeoutMs: number,
+  killTreeOnTimeout: boolean,
 ): Promise<Ran> {
+  if (opts.signal?.aborted === true) {
+    return Promise.resolve({ error: null, timedOut: false, aborted: true, status: null, stdout: '', stderr: '' });
+  }
   return new Promise<Ran>((resolve) => {
-    let child: ChildProcessByStdio<null, Readable, Readable>;
+    let child: ChildProcessByStdio<Writable, Readable, Readable>;
     try {
       child = spawn(command, [...args], {
         cwd: opts.cwd,
         // Layered OVER the parent's environment, never replacing it: the agent
         // still needs PATH, HOME and its own credentials to run at all.
         env: opts.env ? { ...process.env, ...opts.env } : process.env,
-        // stdin closed: a headless agent can never sit waiting for input nobody will type.
-        stdio: ['ignore', 'pipe', 'pipe'],
+        // A prompt may be written once, then stdin is always closed. A headless
+        // agent can never sit waiting for input nobody will type.
+        stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,
+        // POSIX needs a dedicated process group so a timeout can signal every
+        // descendant. Windows uses taskkill /T by pid instead. Detaching cmd.exe
+        // on Windows prevents native grandchildren (git, where.exe, etc.) from
+        // inheriting its piped stdout/stderr even though cmd built-ins still
+        // print, producing a false clean exit with empty output.
+        detached: (killTreeOnTimeout || opts.signal !== undefined) && process.platform !== 'win32',
       });
     } catch (err) {
       // `spawn` validates its own arguments and THROWS (not emits) for a NUL
       // byte in an argument or in cwd. Reported, like everything else.
       const e = err as NodeJS.ErrnoException;
-      resolve({ error: e, timedOut: false, status: null, stdout: '', stderr: '' });
+      resolve({ error: e, timedOut: false, aborted: false, status: null, stdout: '', stderr: '' });
       return;
     }
 
     let out = '';
     let err = '';
     let timedOut = false;
+    let aborted = false;
     let settled = false;
 
     const collect = (which: 'out' | 'err') => (chunk: Buffer | string) => {
@@ -116,21 +131,52 @@ function runOnce(
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', collect('out'));
     child.stderr.on('data', collect('err'));
+    // A short-lived child may exit before Node flushes stdin. That EPIPE belongs
+    // to the child's real exit and output, and must never crash Electron.
+    child.stdin.on('error', () => { /* close/error handlers below report the process */ });
+    child.stdin.end(opts.stdin ?? '');
 
-    // Our own timer rather than spawn's `timeout`, so a killed run is reported
-    // as a TIMEOUT and not as an ordinary signal death. The two mean different
-    // things to the owner and only one of them is Zeno's doing.
+    const stop = (tree: boolean): void => {
+      if (tree && child.pid) {
+        if (process.platform === 'win32') {
+          try {
+            const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
+              stdio: 'ignore', shell: false, windowsHide: true,
+            });
+            killer.unref();
+          } catch { child.kill('SIGKILL'); }
+        } else {
+          try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+        }
+      } else {
+        child.kill('SIGKILL');
+      }
+    };
+
+    // Our own timer rather than spawn's `timeout`, so timeout and an explicit
+    // owner cancellation remain distinct outcomes in the receipt and UI.
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGKILL');
+      stop(killTreeOnTimeout);
     }, timeoutMs);
     timer.unref?.();
+
+    const onAbort = (): void => {
+      if (settled || timedOut) return;
+      aborted = true;
+      // Cancellation always stops descendants. Leaving a child alive after the
+      // button returns would keep spending time or hosted usage invisibly.
+      stop(true);
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    if (opts.signal?.aborted === true) onAbort();
 
     const finish = (e: NodeJS.ErrnoException | null, status: number | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ error: e, timedOut, status, stdout: out, stderr: err });
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve({ error: e, timedOut, aborted, status, stdout: out, stderr: err });
     };
 
     child.on('error', (e) => finish(e as NodeJS.ErrnoException, null));
@@ -140,22 +186,23 @@ function runOnce(
 
 export function nodeSpawner(opts: NodeSpawnerOptions = {}): Spawner {
   const defaultTimeout = opts.timeoutMs ?? 600_000;
+  const killTreeOnTimeout = opts.killTreeOnTimeout ?? false;
   return {
     async run(command: string, args: readonly string[], o: SpawnOptions): Promise<SpawnResult> {
       const timeoutMs = o.timeoutMs ?? defaultTimeout;
-      let r = await runOnce(command, args, o, timeoutMs);
+      let r = await runOnce(command, args, o, timeoutMs, killTreeOnTimeout);
       let viaCmd = false;
 
-      // On Windows an npm-installed CLI is a .cmd shim: there is no extensionless
-      // file (ENOENT) and Node >=20 will not spawn a batch file without a shell
-      // (EINVAL, CVE-2024-27980). So retry through cmd.exe — but only after the
-      // direct spawn has actually failed, because most tools (git, node) ARE real
-      // executables and wrapping those unconditionally breaks them.
-      if (process.platform === 'win32' && extname(command) === '' && isBatchLaunchFailure(r.error)) {
+      // A Windows npm CLI may exist only as a .cmd shim. cmd.exe necessarily
+      // parses its command line even when Node itself uses shell:false, so refuse
+      // the fallback whenever the command name or any argv element contains a
+      // cmd metacharacter. Claude receives the owner task on stdin; this guard
+      // protects selectable model/config values and keeps a future caller safe.
+      const cmdSafe = /^[A-Za-z0-9._-]+$/.test(command)
+        && args.every((arg) => !/[&|<>^%!\r\n\u0000]/.test(arg));
+      if (process.platform === 'win32' && extname(command) === '' && isBatchLaunchFailure(r.error) && cmdSafe) {
         const comspec = process.env['ComSpec'] ?? 'cmd.exe';
-        // Each argument stays its OWN argv element — deliberately not shell:true,
-        // which would re-parse owner-supplied task text for metacharacters.
-        const viaShim = await runOnce(comspec, ['/d', '/s', '/c', `${command}.cmd`, ...args], o, timeoutMs);
+        const viaShim = await runOnce(comspec, ['/d', '/s', '/c', `${command}.cmd`, ...args], o, timeoutMs, killTreeOnTimeout);
         // Only ADOPT the retry if it got further than the first attempt did; a
         // second spawn error means cmd.exe itself is missing, and the original
         // failure is the more useful thing to report.
@@ -165,6 +212,15 @@ export function nodeSpawner(opts: NodeSpawnerOptions = {}): Spawner {
         }
       }
 
+      if (r.aborted) {
+        return {
+          code: KILLED,
+          failedToSpawn: false,
+          stdout: r.stdout,
+          stderr: [r.stderr, 'Zeno cancelled this run and stopped its process tree.'].filter(Boolean).join('\n'),
+          cancelled: true,
+        };
+      }
       if (r.timedOut) {
         return {
           code: SPAWN_FAILED,

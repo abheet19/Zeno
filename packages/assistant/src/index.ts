@@ -58,7 +58,7 @@ export {
   QUESTION_MAX,
 } from './prompt.js';
 
-export { groundReply, type Grounding, type GroundingFailure } from './ground.js';
+export { cleanGroundedReply, groundReply, type Grounding, type GroundingFailure } from './ground.js';
 
 export {
   parseIntent,

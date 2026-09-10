@@ -7,7 +7,15 @@
   "files": [
     "packages/desktop/main.cjs",
     "packages/desktop/package.json",
-    "package.json"
+    "package.json",
+    "packages/desktop/speech.cjs",
+    "packages/desktop/whisper.cjs",
+    "packages/desktop/project.cjs",
+    "packages/desktop/preload.cjs",
+    "packages/desktop/lifecycle.cjs",
+    "packages/desktop/zoom.cjs",
+    "packages/desktop/meeting-presence.cjs",
+    "packages/desktop/resources/icon.ico"
   ],
   "extraResources": [
     {
@@ -93,9 +101,14 @@
         "package.json",
         "dist/**/*"
       ]
+    },
+    {
+      "from": "packages/desktop/windows-speech.ps1",
+      "to": "speech/windows-speech.ps1"
     }
   ],
   "win": {
+    "icon": "packages/desktop/resources/icon.ico",
     "target": [
       "portable",
       "nsis"

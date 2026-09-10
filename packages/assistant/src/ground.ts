@@ -347,3 +347,21 @@ export function groundReply(answer: string, snapshot: Snapshot): Grounding {
     return hasWords(text) ? 'nothing-cited' : 'empty-answer';
   }
 }
+
+/**
+ * Remove a redundant refusal only when the rest of the reply is independently
+ * grounded.
+ *
+ * Small local models sometimes answer correctly with citations and then append
+ * the exact fallback sentence from the prompt. Rendering both is contradictory,
+ * while accepting arbitrary text beside a refusal would weaken the honesty
+ * check. This helper therefore removes the fallback, checks the remainder from
+ * scratch, and returns the original bytes unless that remainder passes every
+ * normal grounding rule on its own.
+ */
+export function cleanGroundedReply(answer: string, snapshot: Snapshot): string {
+  const text = answer.trim();
+  const cleaned = text.replace(refusalPattern(), ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned === text || !hasWords(cleaned)) return text;
+  return groundReply(cleaned, snapshot).ok ? cleaned : text;
+}

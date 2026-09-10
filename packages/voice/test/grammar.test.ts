@@ -74,11 +74,22 @@ test('add_task WINS over propose_write when both could match', () => {
 
 test('read — the three targets from natural phrasings', () => {
   assert.equal(expectKind(parseCommand('what is waiting'), 'read').what, 'pending');
+  assert.equal(expectKind(parseCommand('show pending approvals'), 'read').what, 'pending');
   assert.equal(expectKind(parseCommand("what's in my queue"), 'read').what, 'pending');
   assert.equal(expectKind(parseCommand('read my receipts'), 'read').what, 'receipts');
   assert.equal(expectKind(parseCommand('what have you done'), 'read').what, 'receipts');
   assert.equal(expectKind(parseCommand('verify the chain'), 'read').what, 'chain');
   assert.equal(expectKind(parseCommand('is the ledger intact'), 'read').what, 'chain');
+});
+
+test('navigate — opens a Zeno surface and accepts the selected-project phrasing', () => {
+  assert.equal(expectKind(parseCommand('open Forge'), 'navigate').target, 'forge');
+  assert.equal(expectKind(parseCommand('open porch'), 'navigate').target, 'forge');
+  assert.equal(expectKind(parseCommand('go to the Counsel tab'), 'navigate').target, 'counsel');
+  assert.equal(
+    expectKind(parseCommand('open Forge and show the selected repository'), 'navigate').target,
+    'forge',
+  );
 });
 
 test('cancel — the ways a person backs out', () => {

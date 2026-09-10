@@ -111,8 +111,7 @@ async function call(method, path, body) {
   };
 }
 
-const SpeechRecognition =
-  (typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition)) || null;
+import { SpeechRecognition, localSpeech, waitForSpeechIdle } from './whisper.js';
 
 /* ================================================================== *
  * 1 · DOM helpers. textContent only — a transcript line is speech and  *
@@ -154,6 +153,65 @@ function fmtElapsed(ms) {
   const s = Math.max(0, Math.floor(ms / 1000));
   const p = (n) => String(n).padStart(2, '0');
   return `${p(Math.floor(s / 60))}:${p(s % 60)}`;
+}
+
+/**
+ * A short Whisper vocabulary hint for Counsel only. This is deliberately a
+ * comma-separated word list rather than an instruction: it improves names and
+ * product terms without teaching silence to hallucinate a Command wake phrase.
+ */
+function counselSpeechPrompt(title, participants) {
+  const terms = [
+    'Zeno', 'Counsel', 'Forge', 'Ollama', 'Claude Code', 'Codex',
+    'TypeScript', 'FastAPI', 'PostgreSQL', 'Kubernetes',
+    title,
+    ...(Array.isArray(participants) ? participants : []),
+  ];
+  const seen = new Set();
+  const clean = [];
+  for (const value of terms) {
+    const term = String(value || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 96);
+    const key = term.toLocaleLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    clean.push(term);
+  }
+  return clean.join(', ').slice(0, 512);
+}
+
+/** Treat even the trusted preload response as bounded data at the renderer edge. */
+function normalizeMeetingPresence(value) {
+  const status = value && ['detected', 'none', 'unavailable'].includes(value.status)
+    ? value.status
+    : 'unavailable';
+  const candidates = [];
+  const seen = new Set();
+  const raw = value && Array.isArray(value.candidates) ? value.candidates : [];
+  for (const item of raw.slice(0, 8)) {
+    const key = String((item && item.key) || '');
+    const provider = String((item && item.provider) || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 48);
+    const title = String((item && item.title) || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160);
+    if (!/^[a-f0-9]{24}$/.test(key) || !provider || !title || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ key, provider, title });
+  }
+  return {
+    status: status === 'detected' && candidates.length === 0 ? 'unavailable' : status,
+    candidates,
+    checkedAt: value && typeof value.checkedAt === 'string' ? value.checkedAt : null,
+  };
 }
 
 /* ================================================================== *
@@ -392,6 +450,16 @@ const CSS = `
 .prefield input{ background:color-mix(in srgb,var(--g1) 30%,transparent); border:1px solid var(--gl-edge); border-radius:8px; padding:7px 9px; color:var(--ink); font:inherit; font-size:12px }
 .preconsent{ display:flex; gap:9px; align-items:flex-start; margin-top:11px; font-size:11.5px; line-height:1.5; color:var(--ink) }
 .preconsent input{ margin:2px 0 0; flex:none; width:15px; height:15px; accent-color:var(--cyan) }
+.pre-source-list{ display:grid; gap:6px; margin:7px 0 10px }
+.pre-source{
+  display:flex; align-items:flex-start; gap:8px; padding:7px 8px; border:1px solid var(--rule);
+  border-radius:8px; background:color-mix(in srgb,var(--g1) 26%,transparent); color:var(--ink-2);
+  font-size:11px; line-height:1.4;
+}
+.pre-source:has(input:checked){ border-color:color-mix(in srgb,var(--cyan) 45%,var(--rule)); color:var(--ink) }
+.pre-source input{ margin:2px 0 0; flex:none; accent-color:var(--cyan) }
+.pre-source b{ display:block; color:inherit; font-weight:600 }
+.pre-source small{ display:block; color:var(--ink-3); margin-top:2px }
 
 /* ================================================================== *
  *  THE OVERLAY — the prototype's .ov, and it exists ONLY during a call *
@@ -531,12 +599,34 @@ export function initCounsel(section) {
     renderCalls();
     const r = await call('GET', '/counsel/meetings');
     if (r.ok) {
-      const d = r.data || {};
-      // The daemon's order is newest-first and it is NOT re-sorted here: a
-      // re-sort would be this file inventing an order the archive did not give.
-      S.meetings = Array.isArray(d.meetings) ? d.meetings : [];
-      S.failed = Array.isArray(d.failed) ? d.failed : [];
-      S.archive = 'ok';
+      const d = r.data;
+      if (!d || !Array.isArray(d.meetings) || !Array.isArray(d.failed)) {
+        // A 2xx transport status does not prove the archive was read. If the
+        // response loses either list, rendering an empty shelf would turn a
+        // malformed response into a claim that the owner has no calls.
+        S.meetings = [];
+        S.failed = [];
+        S.archive = 'error';
+        S.archiveNote =
+          'The daemon answered, but its archive response did not contain both the meeting list and the unreadable-file list. ' +
+          'Treat the archive as unknown and try again.';
+      } else {
+        S.failed = d.failed;
+      if (d.archive && d.archive.readable === false) {
+        // An HTTP 200 means the daemon answered; it does not mean the folder
+        // answered. Never turn an unreadable archive into an empty-history UI
+        // or permit a recording whose save destination is unavailable.
+        S.meetings = [];
+        S.archive = 'error';
+        S.archiveNote = `${d.archive.reason || 'The meeting archive could not be read.'} ${d.archive.resolve || ''}`.trim();
+      } else {
+        // The daemon's order is newest-first and it is NOT re-sorted here: a
+        // re-sort would be this file inventing an order the archive did not give.
+        S.meetings = d.meetings;
+        S.archive = 'ok';
+        S.archiveNote = '';
+      }
+      }
     } else if (r.code === 'no-meetings') {
       S.archive = 'off';
       S.archiveNote = `${r.message} ${r.resolve}`.trim();
@@ -872,10 +962,12 @@ export function initCounsel(section) {
     }
     S.deleting = null;
     const r = await call('DELETE', `/counsel/meetings/${encodeURIComponent(id)}`);
-    if (!r.ok) {
+    if (!r.ok || !r.data || r.data.deleted !== id) {
       // Nothing leaves the list on a failure — the file is still on disk.
       S.detailState = 'error';
-      S.detailNote = `${r.message} ${r.resolve}`.trim();
+      S.detailNote = r.ok
+        ? 'The daemon answered, but did not prove that this exact call was deleted. The archive has not been changed in this window; reopen it before trying again.'
+        : `${r.message} ${r.resolve}`.trim();
       renderCall();
       return;
     }
@@ -893,7 +985,7 @@ export function initCounsel(section) {
   }
 
   /* =================================================================== *
-   * C · THE COPILOT — POST /counsel/ask                                 *
+   * C · SAVED-MEETING Q&A — POST /counsel/ask                            *
    * =================================================================== */
 
   function renderAsk() {
@@ -923,13 +1015,13 @@ export function initCounsel(section) {
     const ask = el('div', 'ask');
     const input = el('input');
     input.type = 'text';
-    input.placeholder = 'Ask about your calls…';
+    input.placeholder = CALL ? 'End and save the meeting before asking…' : 'Ask about your calls…';
     input.setAttribute('aria-label', 'Ask about your calls');
     input.value = S.askDraft;
-    input.disabled = S.asking || S.archive !== 'ok';
+    input.disabled = S.asking || S.archive !== 'ok' || CALL !== null;
     input.addEventListener('input', () => { S.askDraft = input.value; });
     const send = btn('btn sm p', S.asking ? 'Asking…' : 'Send', () => { ask1(input.value); });
-    send.disabled = S.asking || S.archive !== 'ok';
+    send.disabled = S.asking || S.archive !== 'ok' || CALL !== null;
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -938,6 +1030,17 @@ export function initCounsel(section) {
     });
     add(ask, input, send);
     add(panelAsk, ask);
+
+    if (CALL) {
+      add(
+        panelAsk,
+        el(
+          'p',
+          'hint',
+          'Questions are disabled while a meeting is active. Counsel records the meeting; it does not supply live answers. End and save first, then ask from the cited notes.',
+        ),
+      );
+    }
 
     add(
       panelAsk,
@@ -958,7 +1061,7 @@ export function initCounsel(section) {
 
   async function ask1(qRaw) {
     const question = String(qRaw || '').trim();
-    if (!question || S.asking || S.archive !== 'ok') return;
+    if (!question || S.asking || S.archive !== 'ok' || CALL !== null) return;
     S.asking = true;
     S.askDraft = '';
     const entry = { question, node: el('div', 'a', 'Asking the local model…') };
@@ -1153,9 +1256,14 @@ export function initCounsel(section) {
       participants: '',
       consent: false,
       focused: false,
+      meetingCandidates: [],
+      selectedMeetingKey: '',
+      meetingCheckPending: false,
+      beginPending: false,
       checks: {
         mic: { state: 'checking', text: 'checking…' },
         sys: { state: 'no', text: 'not captured' },
+        meeting: { state: 'checking', text: 'checking local meeting windows…' },
         model: { state: 'checking', text: 'checking…' },
         retention: { state: 'ok', text: 'transcript text only ✓' },
         consent: { state: 'no', text: 'not confirmed' },
@@ -1189,6 +1297,7 @@ export function initCounsel(section) {
        all, and was permission ACTUALLY granted? */
     (async () => {
       if (!SpeechRecognition) return set('mic', 'no', 'no speech engine in this browser');
+      if (localSpeech) return set('mic', 'unverified', 'Local Whisper — microphone checked when capture starts');
       let hasInput = null;
       try {
         const devs = await navigator.mediaDevices.enumerateDevices();
@@ -1214,6 +1323,8 @@ export function initCounsel(section) {
       return undefined;
     })();
 
+    void refreshMeetingPresence(p);
+
     /* MODEL — is a local model actually there? The daemon probes Ollama on the
        loopback and reports what it found. An empty list does not stop a
        recording, only the chat, and the row says exactly that. */
@@ -1227,8 +1338,48 @@ export function initCounsel(section) {
     })();
   }
 
+  async function readMeetingPresence() {
+    const detector = window.zenoMeeting;
+    if (!detector || typeof detector.detect !== 'function') {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
+    }
+    try {
+      return normalizeMeetingPresence(await detector.detect());
+    } catch {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
+    }
+  }
+
+  async function refreshMeetingPresence(p) {
+    if (!PRE || PRE !== p || p.meetingCheckPending) return null;
+    p.meetingCheckPending = true;
+    const presence = await readMeetingPresence();
+    if (!PRE || PRE !== p) return presence;
+    p.meetingCheckPending = false;
+    p.meetingCandidates = presence.candidates;
+    if (p.selectedMeetingKey && !presence.candidates.some((candidate) => candidate.key === p.selectedMeetingKey)) {
+      p.selectedMeetingKey = '';
+    }
+    if (presence.status === 'detected') {
+      p.checks.meeting = {
+        state: 'ok',
+        text: `${presence.candidates.length} supported meeting window${presence.candidates.length === 1 ? '' : 's'} found`,
+      };
+    } else if (presence.status === 'none') {
+      p.checks.meeting = { state: 'unverified', text: 'no supported meeting window found · manual mode available' };
+    } else {
+      p.checks.meeting = { state: 'unverified', text: 'window detection unavailable · manual mode available' };
+    }
+    renderPreflight();
+    return presence;
+  }
+
   function renderPreflight() {
     if (!PRE) return;
+    const active = document.activeElement;
+    const activeId = active && PRE.card.contains(active) ? active.id : '';
+    const caretStart = activeId && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+    const caretEnd = activeId && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
     const card = clear(PRE.card);
     card.setAttribute('role', 'dialog');
     card.setAttribute('aria-modal', 'true');
@@ -1271,12 +1422,61 @@ export function initCounsel(section) {
       PRE.checks.sys,
       'the browser speech engine hears this microphone only — Zeno does not capture what your speakers play, and does not claim to',
     );
+    prow(
+      card,
+      'meeting window',
+      PRE.checks.meeting,
+      'the desktop checks only the names of capturable windows, without screenshots or icons. A match proves that a supported meeting window exists, not that you joined it or that its audio is captured',
+    );
+
+    const sources = el('div', 'pre-source-list');
+    const manual = el('label', 'pre-source');
+    const manualRadio = el('input');
+    manualRadio.type = 'radio';
+    manualRadio.name = 'zc-call-source';
+    manualRadio.id = 'zc-source-manual';
+    manualRadio.checked = PRE.selectedMeetingKey === '';
+    manualRadio.addEventListener('change', () => {
+      if (!manualRadio.checked) return;
+      PRE.selectedMeetingKey = '';
+      renderPreflight();
+    });
+    const manualText = el('span');
+    add(
+      manualText,
+      el('b', null, 'Manual microphone capture'),
+      el('small', null, 'No external application is attached. You can still record a named, consented call.'),
+    );
+    add(manual, manualRadio, manualText);
+    add(sources, manual);
+    for (const candidate of PRE.meetingCandidates) {
+      const option = el('label', 'pre-source');
+      const radio = el('input');
+      radio.type = 'radio';
+      radio.name = 'zc-call-source';
+      radio.id = `zc-source-${candidate.key}`;
+      radio.checked = PRE.selectedMeetingKey === candidate.key;
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        PRE.selectedMeetingKey = candidate.key;
+        renderPreflight();
+      });
+      const copy = el('span');
+      add(
+        copy,
+        el('b', null, `Attach to ${candidate.provider}`),
+        el('small', null, candidate.title),
+      );
+      add(option, radio, copy);
+      add(sources, option);
+    }
+    add(card, sources);
     prow(card, 'model', PRE.checks.model);
     prow(
       card,
       'retention',
       PRE.checks.retention,
-      'no audio is recorded, kept or sent: this page creates no MediaRecorder and uploads no sound. Only the words the engine returns are saved, as Markdown on this machine',
+      localSpeech ? 'Speech is recognized on this PC with local Whisper. Zeno saves transcript text as local Markdown, never an audio file or cloud upload.' : 'This page saves transcript text, not audio files. The browser speech service may send microphone audio to the browser maker for transcription.',
     );
     prow(card, 'consent', PRE.checks.consent);
     prow(
@@ -1289,6 +1489,7 @@ export function initCounsel(section) {
     const consent = el('label', 'preconsent');
     const cb = el('input');
     cb.type = 'checkbox';
+    cb.id = 'zc-pre-consent';
     cb.checked = PRE.consent;
     cb.addEventListener('change', () => {
       PRE.consent = cb.checked;
@@ -1310,14 +1511,18 @@ export function initCounsel(section) {
     add(card, consent);
 
     const acts = el('div', 'acts');
-    const beginBtn = btn('btn p', 'Begin capture', beginCall);
+    const beginBtn = btn(
+      'btn p',
+      PRE.selectedMeetingKey ? 'Attach & begin capture' : 'Begin manual capture',
+      beginCall,
+    );
     const beginWhy = el('p', 'hint one');
     const syncBeginReason = () => {
       const why = whyNotBegin();
       beginWhy.textContent = why === null ? '' : why;
       beginWhy.hidden = why === null;
     };
-    beginBtn.disabled = !canBegin();
+    beginBtn.disabled = !canBegin() || PRE.beginPending;
     add(acts, beginBtn, btn('btn g', 'Cancel', closePreflight));
     add(acts, beginWhy);
     syncBeginReason();
@@ -1343,7 +1548,14 @@ export function initCounsel(section) {
       ),
     );
 
-    if (!PRE.focused) {
+    const restored = activeId ? document.getElementById(activeId) : null;
+    if (restored && card.contains(restored)) {
+      restored.focus();
+      if (caretStart !== null && typeof restored.setSelectionRange === 'function') {
+        const end = caretEnd === null ? caretStart : caretEnd;
+        try { restored.setSelectionRange(caretStart, end); } catch { /* checkbox or unsupported input */ }
+      }
+    } else if (!PRE.focused) {
       PRE.focused = true;
       i1.focus();
     }
@@ -1371,6 +1583,7 @@ export function initCounsel(section) {
    */
   function whyNotBegin() {
     if (!PRE) return 'The preflight is not open.';
+    if (PRE.beginPending) return 'Checking that the selected meeting window is still present…';
     if (String(PRE.title || '').trim().length === 0) return 'Name the call first, in the box above.';
     if (!PRE.consent) return 'Tick the consent box — everyone in the room needs to know they are being recorded.';
     if (PRE.checks.mic.state === 'no') return 'This page has no microphone permission, so there would be nothing to record. Grant it in the browser, then reopen this.';
@@ -1383,10 +1596,32 @@ export function initCounsel(section) {
    *     There is no Assist here, and there will not be one.              *
    * =================================================================== */
 
-  function beginCall() {
+  async function beginCall() {
     if (!PRE || !canBegin() || CALL) return;
-    const title = PRE.title.trim();
-    const participants = PRE.participants
+    const preflight = PRE;
+    let attachedMeeting = null;
+    if (preflight.selectedMeetingKey) {
+      preflight.beginPending = true;
+      preflight.checks.meeting = { state: 'checking', text: 'confirming selected meeting window…' };
+      renderPreflight();
+      const presence = await readMeetingPresence();
+      if (!PRE || PRE !== preflight || CALL) return;
+      preflight.beginPending = false;
+      attachedMeeting = presence.candidates.find((candidate) => candidate.key === preflight.selectedMeetingKey) || null;
+      if (!attachedMeeting) {
+        preflight.selectedMeetingKey = '';
+        preflight.meetingCandidates = presence.candidates;
+        preflight.checks.meeting = {
+          state: 'unverified',
+          text: 'the selected meeting window is no longer present · capture did not start',
+        };
+        renderPreflight();
+        return;
+      }
+    }
+    if (!canBegin()) return;
+    const title = preflight.title.trim();
+    const participants = preflight.participants
       .split(/[,;]/)
       .map((s) => s.trim())
       .filter(Boolean);
@@ -1406,13 +1641,16 @@ export function initCounsel(section) {
       saving: false,
       note: null,
       noteTone: 'warn',
-      thread: [],
-      asking: false,
-      askDraft: '',
+      attachedMeeting: attachedMeeting
+        ? { ...attachedMeeting, state: 'present', checkedAt: new Date().toISOString() }
+        : null,
       ov: el('div', 'ov'),
       tick: 0,
+      meetingTick: 0,
     };
+    document.body.dataset.zenoCapture = 'counsel';
     document.body.appendChild(CALL.ov);
+    renderAsk();
     renderOverlay();
     startEngine();
     CALL.tick = window.setInterval(() => {
@@ -1420,24 +1658,78 @@ export function initCounsel(section) {
       const t = CALL.ov.querySelector('[data-el="elapsed"]');
       if (t) t.textContent = fmtElapsed(Date.now() - CALL.startedAt);
     }, 1000);
-    announce('Recording started.');
+    if (attachedMeeting) {
+      const session = CALL;
+      CALL.meetingTick = window.setInterval(() => { void refreshAttachedMeeting(session); }, 15_000);
+    }
+    announce('Preparing microphone.');
   }
 
-  function startEngine() {
+  async function refreshAttachedMeeting(session) {
+    if (!session || CALL !== session || !session.attachedMeeting) return;
+    const presence = await readMeetingPresence();
+    if (CALL !== session || !session.attachedMeeting) return;
+    const found = presence.candidates.some((candidate) => candidate.key === session.attachedMeeting.key);
+    const next = presence.status === 'unavailable' ? 'unknown' : found ? 'present' : 'missing';
+    const changed = session.attachedMeeting.state !== next;
+    session.attachedMeeting.state = next;
+    session.attachedMeeting.checkedAt = new Date().toISOString();
+    if (changed && next === 'missing') {
+      session.note = 'The attached meeting window is no longer detected. Microphone capture continues until you end or discard it.';
+      session.noteTone = 'warn';
+    } else if (changed && next === 'unknown') {
+      session.note = 'Zeno could not re-check the attached meeting window. Microphone capture continues; attachment state is unknown.';
+      session.noteTone = 'warn';
+    }
+    if (changed) renderOverlay();
+  }
+
+  async function startEngine() {
     if (!CALL || !SpeechRecognition) return;
+    const session = CALL;
+    session.want = true;
+    session.note = 'Preparing microphone. Command listening is paused while this call records.';
+    const handoff = { waiters: [], requestedBy: 'Counsel' };
+    window.dispatchEvent(new CustomEvent('zeno:release-command-voice', { detail: handoff }));
+    try {
+      await Promise.all(handoff.waiters);
+      await waitForSpeechIdle();
+    } catch {
+      if (CALL === session) {
+        session.want = false;
+        session.note = 'The previous microphone session did not close. Stop Command listening, then discard and retry this call.';
+        session.noteTone = 'error';
+        renderOverlay();
+      }
+      return;
+    }
+    if (CALL !== session || !session.want) return;
     const rec = new SpeechRecognition();
     rec.lang = 'en-US';
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
+    rec.initialPrompt = counselSpeechPrompt(session.title, session.participants);
+    rec.onsegmentstart = () => session.speaker;
+
+    rec.onstart = () => {
+      if (CALL !== session || session.recognition !== rec || !session.want) {
+        try { rec.abort(); } catch { /* already stopped */ }
+        return;
+      }
+      session.running = true;
+      session.note = null;
+      announce('Recording started.');
+      renderOverlay();
+    };
 
     rec.onresult = (event) => {
-      if (!CALL) return;
+      if (CALL !== session || session.recognition !== rec) return;
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const res = event.results[i];
         if (!res || !res[0]) continue;
-        if (res.isFinal) commit(res[0].transcript);
+        if (res.isFinal) commit(res[0].transcript, event.segmentMeta);
         else interim += res[0].transcript;
       }
       CALL.interim = interim;
@@ -1445,7 +1737,7 @@ export function initCounsel(section) {
     };
 
     rec.onerror = (event) => {
-      if (!CALL) return;
+      if (CALL !== session || session.recognition !== rec) return;
       const err = (event && event.error) || 'unknown';
       if (err === 'not-allowed' || err === 'service-not-allowed') {
         // A hard denial. Stop rather than thrash the permission prompt, and say
@@ -1461,20 +1753,26 @@ export function initCounsel(section) {
         return;
       }
       if (err === 'no-speech' || err === 'aborted') return; // ordinary silence
-      CALL.note =
-        err === 'network'
-          ? 'The speech engine reported a network hiccup. Capture resumes on its own; if lines stop appearing, end the call and start another.'
-          : `The speech engine reported “${err}”. Capture will try to continue.`;
-      CALL.noteTone = 'warn';
+      CALL.want = false;
+      CALL.running = false;
+      CALL.note = err === 'network'
+        ? 'The browser speech service is unavailable. Capture stopped; no automatic retries. End this call and retry when the service is reachable.'
+        : `Speech recognition failed (${err}). Capture stopped. Check the microphone and installed speech language before retrying.`;
+      CALL.noteTone = 'error';
+      try { rec.abort(); } catch { /* already stopped */ }
       renderOverlay();
     };
 
     rec.onend = () => {
-      if (!CALL) return;
+      if (CALL !== session || session.recognition !== rec) return;
+      session.enginePending = false;
+      session.endResolve?.(true);
+      session.endResolve = null;
       // The engine stops itself periodically. While the owner still wants to
       // record, restart it; otherwise settle honestly into "not recording".
       if (CALL.want) {
-        try { rec.start(); } catch { /* mid-start; the next onend retries */ }
+        session.enginePending = true;
+        try { rec.start(); } catch { session.enginePending = false; session.want = false; session.running = false; renderOverlay(); }
         return;
       }
       CALL.running = false;
@@ -1483,32 +1781,33 @@ export function initCounsel(section) {
 
     CALL.recognition = rec;
     CALL.want = true;
-    CALL.running = true;
+    CALL.running = false;
+    CALL.enginePending = true;
     try {
       rec.start();
     } catch {
-      /* already started */
+      session.enginePending = false; session.want = false;
+      session.note = 'Microphone could not start. Stop other listening and retry.';
+      session.noteTone = 'error'; renderOverlay();
     }
   }
 
-  function commit(text) {
+  function commit(text, capturedSpeaker) {
     const t = String(text || '').trim();
     if (!CALL || !t) return;
+    const speaker = capturedSpeaker === 'owner' || capturedSpeaker === 'other' || capturedSpeaker === 'unknown'
+      ? capturedSpeaker
+      : CALL.speaker;
     CALL.utterances.push({
       id: `u${CALL.seq++}`,
       at: new Date().toISOString(),
-      speaker: CALL.speaker,
+      speaker,
       text: t,
     });
   }
 
   function renderOverlay() {
     if (!CALL) return;
-    // The overlay re-renders on every finalised line, so the owner must not lose
-    // a half-typed private question (or the caret) to a sentence someone said.
-    const active = document.activeElement;
-    const hadAsk = !!(active && CALL.ov.contains(active) && active.tagName === 'INPUT');
-    const caret = hadAsk ? active.selectionStart : null;
     const ov = clear(CALL.ov);
     ov.classList.toggle('paused', !CALL.running);
     ov.setAttribute('role', 'region');
@@ -1524,7 +1823,16 @@ export function initCounsel(section) {
     add(hd, el('span', 'sp'));
     const elapsed = el('span', 'tm', fmtElapsed(Date.now() - CALL.startedAt));
     elapsed.dataset.el = 'elapsed';
-    add(hd, elapsed, el('span', 'chip', `${CALL.utterances.length} lines`));
+    add(hd, elapsed);
+    if (CALL.attachedMeeting) {
+      const state = CALL.attachedMeeting.state;
+      const tone = state === 'present' ? 'gr' : state === 'missing' ? 'am' : '';
+      const suffix = state === 'present' ? 'window present' : state === 'missing' ? 'window missing' : 'state unknown';
+      add(hd, el('span', `chip ${tone}`.trim(), `${CALL.attachedMeeting.provider} · ${suffix}`));
+    } else {
+      add(hd, el('span', 'chip', 'manual · microphone only'));
+    }
+    add(hd, el('span', 'chip', `${CALL.utterances.length} lines`));
     add(ov, hd);
 
     const bd = el('div', 'bd');
@@ -1573,33 +1881,14 @@ export function initCounsel(section) {
       add(bd, n);
     }
 
-    /* --- the private ask. It answers from SAVED calls, and says so. ------ */
-    if (CALL.thread.length) {
-      const th = el('div', 'thread');
-      for (const t of CALL.thread) add(th, el('div', 'q', t.question), t.node);
-      add(bd, th);
-    }
-    const ask = el('div', 'ask');
-    const input = el('input');
-    input.type = 'text';
-    input.placeholder = 'Ask Counsel privately…';
-    input.setAttribute('aria-label', 'Ask Counsel privately');
-    input.value = CALL.askDraft;
-    input.disabled = CALL.asking;
-    input.addEventListener('input', () => { CALL.askDraft = input.value; });
-    const send = btn('btn sm p', CALL.asking ? '…' : 'Send', () => { askPrivately(input.value); });
-    send.disabled = CALL.asking;
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        askPrivately(input.value);
-      }
-    });
-    add(ask, input, send);
-    add(bd, ask);
+    /* Counsel is an ethical meeting record, never a live answer assistant. */
     add(
       bd,
-      el('p', 'hint one', 'Answered from your SAVED calls — this one is not in the archive until you end it.'),
+      el(
+        'p',
+        'hint one',
+        'Live Q&A is off while this meeting is active. End and save the transcript first; then ask from the cited notes in Counsel chat.',
+      ),
     );
 
     /* --- ending the call: the only write this surface makes -------------- */
@@ -1610,6 +1899,18 @@ export function initCounsel(section) {
     discard.disabled = CALL.saving;
     add(acts, end, discard);
     add(bd, acts);
+    if (CALL.attachedMeeting) {
+      add(
+        bd,
+        el(
+          'p',
+          'hint',
+          `Attached to ${CALL.attachedMeeting.provider} from the local window title “${CALL.attachedMeeting.title}”. ` +
+            'Attachment does not route system audio: Counsel is still transcribing this microphone only.',
+        ),
+      );
+    }
+
     add(
       bd,
       el(
@@ -1622,49 +1923,54 @@ export function initCounsel(section) {
 
     add(ov, bd);
 
-    if (hadAsk && !CALL.asking) {
-      input.focus();
-      const at = caret == null ? input.value.length : Math.min(caret, input.value.length);
-      try { input.setSelectionRange(at, at); } catch { /* not a text input */ }
-    }
   }
 
-  async function askPrivately(qRaw) {
-    const question = String(qRaw || '').trim();
-    if (!CALL || !question || CALL.asking) return;
-    CALL.asking = true;
-    CALL.askDraft = '';
-    const entry = { question, node: el('div', 'a', 'Asking the local model…') };
-    CALL.thread.push(entry);
-    renderOverlay();
-    const r = await call('POST', '/counsel/ask', { question });
-    if (!CALL) return;
-    CALL.asking = false;
-    if (!r.ok) {
-      entry.node = answerBlock({ transportError: `${r.message} ${r.resolve}`.trim() }, question);
-    } else {
-      await warmCache(((r.data && r.data.hits) || []).map((h) => h.id));
-      if (!CALL) return;
-      entry.node = answerBlock(r.data || {}, question);
+  function stopEngine(discard = false, session = CALL) {
+    if (!session) return Promise.resolve(true);
+    session.want = false;
+    const rec = session.recognition;
+    if (discard) {
+      session.endResolve?.(false);
+      session.endResolve = null;
+      session.running = false;
+      session.enginePending = false;
+      try { rec?.abort(); } catch { /* already stopped */ }
+      return Promise.resolve(false);
     }
-    renderOverlay();
-  }
-
-  function stopEngine() {
-    if (!CALL) return;
-    CALL.want = false;
-    CALL.running = false;
-    if (CALL.recognition) {
-      try { CALL.recognition.stop(); } catch { /* already stopped */ }
-    }
+    if (!rec || (!session.running && !session.enginePending)) return Promise.resolve(true);
+    if (session.endPromise) return session.endPromise;
+    session.endPromise = new Promise(resolve => {
+      let settled = false;
+      let timer;
+      const done = complete => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        session.running = false;
+        session.enginePending = false;
+        session.endResolve = null;
+        if (!complete) {
+          session.captureIncomplete = true;
+          try { rec.abort(); } catch { /* already stopped */ }
+        }
+        resolve(complete);
+      };
+      session.endResolve = done;
+      timer = window.setTimeout(() => done(false), 2500);
+      try { rec.stop(); } catch { done(false); }
+    });
+    return session.endPromise;
   }
 
   function teardownCall() {
     if (!CALL) return;
-    stopEngine();
+    void stopEngine(true);
     if (CALL.tick) window.clearInterval(CALL.tick);
+    if (CALL.meetingTick) window.clearInterval(CALL.meetingTick);
     CALL.ov.remove();
     CALL = null;
+    delete document.body.dataset.zenoCapture;
+    renderAsk();
   }
 
   function discardCall() {
@@ -1680,8 +1986,13 @@ export function initCounsel(section) {
    */
   async function endCall() {
     if (!CALL || CALL.saving) return;
-    stopEngine();
+    const session = CALL;
+    session.saving = true;
+    renderOverlay();
+    await stopEngine(false, session);
+    if (CALL !== session) return;
     if (CALL.utterances.length === 0) {
+      CALL.saving = false;
       CALL.note = 'Nothing was transcribed, so there is nothing to save. Discard the call, or start it again.';
       CALL.noteTone = 'warn';
       renderOverlay();
@@ -1696,7 +2007,7 @@ export function initCounsel(section) {
       utterances: CALL.utterances.map((u) => ({ id: u.id, at: u.at, speaker: u.speaker, text: u.text })),
     });
 
-    if (!CALL) return;
+    if (CALL !== session) return;
     if (!r.ok) {
       // The transcript is still in hand and still recoverable, and nothing is
       // claimed to be on disk that is not.
@@ -1708,9 +2019,26 @@ export function initCounsel(section) {
     }
 
     const saved = r.data && r.data.meeting;
+    if (
+      !saved ||
+      typeof saved.id !== 'string' ||
+      saved.id.trim() === '' ||
+      !Array.isArray(saved.utterances) ||
+      saved.utterances.length !== session.utterances.length
+    ) {
+      // HTTP success is only transport success. Without the stored meeting —
+      // including every line the owner just captured — this window cannot say
+      // the write completed. Keep the transcript in hand and freeze no state.
+      CALL.saving = false;
+      CALL.note =
+        'Save outcome unknown: the daemon answered without a complete saved-meeting record. Your transcript is still in this window. Check the archive before trying again.';
+      CALL.noteTone = 'error';
+      renderOverlay();
+      return;
+    }
     const redacted = (r.data && r.data.redacted) || 0;
     teardownCall();
-    announce('Call saved.');
+    announce(session.captureIncomplete ? 'Call saved. The final microphone result did not settle before timeout; the final phrase may be incomplete.' : 'Call saved.');
     await loadArchive();
     if (saved && saved.id) {
       cache.set(saved.id, saved);

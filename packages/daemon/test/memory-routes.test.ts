@@ -127,6 +127,31 @@ test('an agent proposal writes nothing until the owner approves it', async () =>
   assert.equal(h.memory.list()[0]?.source, 'agent:forge', 'the entry names who asked for it');
 });
 
+test('an agent memory proposal is sanitized before preview and durable storage', async () => {
+  const h = harness();
+  const secret = 'ghp_' + 'b'.repeat(36);
+  const proposed = await h.routes.handle(
+    'POST',
+    '/memory/propose',
+    Q,
+    'proposer',
+    h.body({
+      kind: 'fact',
+      description: `Receipt token ${secret}`,
+      body: `Observed ${secret} during the run.`,
+      requestedBy: 'owner', // a proposer cannot forge owner provenance
+      tags: [`credential-${secret}`],
+    }),
+  );
+  assert.equal(proposed?.status, 200);
+  const preview = proposed?.body['preview'] as { actionHash: string; summary: string };
+  assert.doesNotMatch(JSON.stringify(proposed?.body), new RegExp(secret), 'the raw value never enters the approval capsule');
+  assert.match(preview.summary, /REDACTED/);
+  await h.routes.handle('POST', '/memory/approvals', Q, 'owner', h.body({ actionHash: preview.actionHash }));
+  assert.doesNotMatch([...h.files.values()].join('\n'), new RegExp(secret), 'the raw value never reaches Vault Markdown');
+  assert.equal(h.memory.list()[0]?.source, 'agent', 'proposer provenance cannot impersonate the owner');
+});
+
 test('an approval can be spent exactly once', async () => {
   const h = harness();
   const proposed = await h.routes.handle(

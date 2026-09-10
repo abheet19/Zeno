@@ -7,7 +7,7 @@
  * preview → approval → the kernel's jailed git executor. Nothing exported here
  * can commit; the most a run produces is a list of files for the gate.
  *
- *   agents.ts     — the two rungs (claude-code, local) and the effort model; what
+ *   agents.ts     — the three rungs (Claude Code, Codex, local) and the effort model; what
  *                   the picker reads.
  *   tools.ts      — what a tool call can reach: routine inside the worktree,
  *                   governed when it can escape it, refused when nobody has
@@ -50,6 +50,11 @@ export {
   type AgentId,
   type Effort,
 } from './agents.js';
+export {
+  routeAgentTask,
+  type TaskRoute,
+  type TaskRouteOptions,
+} from './routing.js';
 export { STATUS_ARGS, parsePorcelainZ } from './status.js';
 export {
   BOOKKEEPING_TOOLS,
@@ -134,10 +139,12 @@ export {
 } from './permission-gate.js';
 export {
   CLAUDE_BINARY,
+  CODEX_BINARY,
   LOCAL_NOT_CONFIGURED,
   SPAWN_FAILED,
   agentArgv,
   claudeToolFlags,
+  codexArgv,
   runAgent,
   type GateWiring,
   type RunResult,

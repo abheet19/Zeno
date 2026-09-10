@@ -1,9 +1,9 @@
 /**
  * The agent registry and the effort model — the pure catalogue the model/effort
- * picker reads, and the one place the two agent RUNGS are named.
+ * picker reads, and the one place the three agent RUNGS are named.
  *
  * A "rung" is a way of turning a TASK into file edits inside the isolated
- * worktree. There are two, and the picker chooses between them:
+ * worktree. There are three, and the picker chooses between them:
  *
  *   claude-code — the real Claude Code CLI, run headless. It is an external
  *     BINARY dependency, exactly like git: named honestly here, spawned through
@@ -11,23 +11,32 @@
  *     — when it is not on PATH — reported as missing with the local rung offered,
  *     never faked.
  *
- *   local — a placeholder for a local model runtime (Ollama). A documented seam
- *     and nothing more: it returns "not configured" until a runtime lands, and
- *     it never fabricates model output to look busy.
+ *   codex — the installed Codex CLI in ephemeral, non-interactive mode. Forge
+ *     gives it only the throwaway worktree through Codex's auto-reviewed
+ *     workspace-write mode and ignores ambient Codex configuration. The CLI may still discover global Agent Skills and reports that discovery in its run log. Commands inside
+ *     that disposable worktree are reviewed by Codex; the files still reach
+ *     the selected repository only through Zeno's ordinary proposal gate.
+ *
+ *   local — the daemon-backed Ollama runtime. The registry deliberately keeps
+ *     its model list empty because `/forge/agents` discovers the models Ollama
+ *     has installed at request time. The daemon executes the selected model on
+ *     loopback, parses its bounded answer/file envelope, and never fabricates
+ *     output when the runtime or model is unavailable.
  *
  * Pure and dependency-free on purpose: no spawn, no fs, no PATH lookup. Deciding
  * *what could run* is separate from *running it*; this file only describes the
- * choices, and `runner.ts` carries one out.
+ * choices. `runner.ts` carries out the hosted CLI rungs; the daemon carries out
+ * the loopback Ollama rung.
  */
 
-/** The two rungs. A closed union so the runner's dispatch is exhaustively checked. */
-export type AgentId = 'claude-code' | 'local';
+/** The three rungs. A closed union so the runner's dispatch is exhaustively checked. */
+export type AgentId = 'claude-code' | 'codex' | 'local';
 
 /**
  * How hard the agent is asked to think. Recorded on every run for the receipt;
  * whether it also reaches the agent's argv is the agent's own business — see
- * `supportsEffort`, which is honest about the fact that no rung has a real effort
- * flag yet.
+ * `supportsEffort`, which is honest about whether the selected runtime has a
+ * real effort control.
  */
 export type Effort = 'low' | 'medium' | 'high';
 
@@ -62,20 +71,26 @@ export interface Agent {
  * use its own configured default", which is why the runner omits `--model`
  * rather than guessing one.
  *
- * `supportsEffort` is `false` for Claude Code and `true` for the local rung, and
- * both are truthful about today: the Claude Code CLI exposes no effort flag in
- * headless (`-p`) mode, while a local Qwen3 model has a real thinking budget the
- * daemon drives through Ollama's `think`. Effort is recorded on the run either
- * way. The field is the SEAM — when a rung gains a real effort
- * control, flipping this to `true` is what both offers it in the picker and lets
- * the runner pass it through (`runner.ts`, `agentArgv`).
+ * All three current rungs support effort. Claude Code accepts `--effort` in
+ * headless (`-p`) mode, Codex accepts `model_reasoning_effort`, and the local
+ * Qwen3 rung maps low to no extended thinking and higher levels to its Ollama
+ * thinking path. The field remains the capability seam so a future agent cannot
+ * accidentally receive an option it does not implement.
  */
 export const AGENTS: readonly Agent[] = [
   {
     id: 'claude-code',
     label: 'Claude Code',
     models: ['opus', 'sonnet', 'haiku'],
-    supportsEffort: false,
+    supportsEffort: true,
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    // Current aliases exposed by the installed Codex host. Leaving the picker
+    // on its blank default still lets a newer CLI choose its configured model.
+    models: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    supportsEffort: true,
   },
   {
     id: 'local',

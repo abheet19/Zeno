@@ -37,7 +37,7 @@ test('leading filler AFTER the wake word is stripped from the command', () => {
 });
 
 test('common mis-hearings of the wake word still trigger', () => {
-  for (const heard of ['zeeno', 'xeno', 'zino', 'zenno', 'Zee-No', 'ZEENO']) {
+  for (const heard of ['zeeno', 'zeenoth', 'xeno', 'zino', 'zenno', 'Zee-No', 'Z-Note', 'C-Note', 'ZEENO']) {
     const wake = detectWake(`${heard}, add a card component`);
     assert.notEqual(wake, null, `"${heard}" should wake`);
     assert.equal(wake!.command, 'add a card component');
@@ -62,6 +62,7 @@ test('FALSE TRIGGER — a mid-sentence mention of zeno is NOT a wake', () => {
   assert.equal(detectWake('tell zeno I said hi'), null);
   assert.equal(detectWake('the zeno project is local first'), null);
   assert.equal(detectWake('we should approve the zeno budget'), null);
+  assert.equal(detectWake('play a C-note on the piano'), null);
 });
 
 test('FALSE TRIGGER — a content word before the wake blocks it even mid-filler', () => {

@@ -21,16 +21,44 @@
  *     owner clicked, handed to the system browser instead.
  *   - No remote content is ever loaded into this window.
  */
-const { app, BrowserWindow, shell, dialog } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain, desktopCapturer } = require('electron');
+const { createWhisperEngine, installWhisperSpeech, resolveWhisperRuntime } = require('./whisper.cjs');
+const { clearProjectPreference, inspectProject, readProjectPreference, writeProjectPreference } = require('./project.cjs');
+const {
+  claimDesktopInstance,
+  createDaemonEnvironment,
+  isTrustedMainFrame,
+  protectDiagnosticStream,
+  registerGracefulQuit,
+  registerSecondInstanceFocus,
+  resolveDaemonProject,
+  stopDaemonChild,
+} = require('./lifecycle.cjs');
 const { spawn } = require('node:child_process');
 const { join, dirname } = require('node:path');
 const { existsSync } = require('node:fs');
+const { installWorkbenchZoom } = require('./zoom.cjs');
+const { createMeetingPresenceHandler } = require('./meeting-presence.cjs');
+
+// A packaged GUI can outlive the terminal or automation pipe that launched it.
+// Logging is diagnostic only, so a closed parent pipe must never crash the app
+// with an unhandled EPIPE while Whisper is reporting readiness or latency.
+protectDiagnosticStream(process.stdout);
+protectDiagnosticStream(process.stderr);
 
 // Electron names its per-user data directory after the packaged app's
 // package.json `name`, which here is the npm workspace root — so it would
 // write to AppData\Roaming\@abheet19\zeno-workspace\. Say the product's name
 // once, before anything asks for a path, and it becomes AppData\Roaming\Zeno.
 app.setName('Zeno');
+app.setAppUserModelId('dev.abheet.zeno');
+
+// A second launcher should focus the Zeno the owner already has instead of
+// spawning another daemon, losing the workspace lock, and showing a technical
+// PID/port error. This lock belongs to the desktop shell only; the daemon's
+// workspace lock remains the final protection against two different hosts
+// writing the same receipt ledger.
+const ownsDesktopInstance = claimDesktopInstance(app);
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.ZENO_PORT || 7317);
@@ -41,6 +69,23 @@ let daemon = null;
 /** @type {BrowserWindow | null} */
 let win = null;
 let launchUrl = ORIGIN;
+let sessionProject = null;
+let projectSwitching = false;
+const speechEngine = createWhisperEngine(resolveWhisperRuntime());
+const stopSpeech = installWhisperSpeech(ipcMain, () => win, ORIGIN, speechEngine);
+
+/**
+ * Give the local recognizer a short head start before the owner can press a
+ * voice control. The two-second ceiling keeps a missing/broken runtime from
+ * delaying the desktop; the ordinary capture path still reports that failure.
+ */
+async function warmSpeech(maxMs = 2_000) {
+  if (!speechEngine.available()) return;
+  await Promise.race([
+    speechEngine.ready().catch(() => {}),
+    new Promise(resolve => setTimeout(resolve, maxMs)),
+  ]);
+}
 
 /**
  * Find the daemon entry point. Packaged, it sits beside the app resources;
@@ -72,17 +117,30 @@ function startDaemon() {
     // Program Files it is not writable at all. So the packaged app names a
     // per-user location instead. A checkout keeps the old behaviour, and an
     // explicit ZENO_DIR still wins over both.
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', ZENO_NO_OPEN: '1' };
-    if (app.isPackaged && !env.ZENO_DIR) {
-      env.ZENO_DIR = join(app.getPath('userData'), 'workspace');
-    }
+    const userDataPath = app.getPath('userData');
+    const project = resolveDaemonProject({
+      sessionProject,
+      environmentProject: process.env.ZENO_PROJECT_DIR,
+      preferencePath: join(userDataPath, 'forge-project.json'),
+    }, {
+      readPreference: readProjectPreference,
+      clearPreference: clearProjectPreference,
+    });
+    const env = createDaemonEnvironment(process.env, {
+      isPackaged: app.isPackaged,
+      workspacePath: join(userDataPath, 'workspace'),
+      project: project.path,
+    });
 
-    daemon = spawn(process.execPath, [entry], {
+    const child = spawn(process.execPath, [entry], {
       // ELECTRON_RUN_AS_NODE makes Electron's bundled binary behave as plain
       // Node, so the daemon runs without needing Node installed on the machine.
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      windowsHide: true,
+      shell: false,
     });
+    daemon = child;
 
     let settled = false;
     const done = (u) => { if (!settled) { settled = true; resolve(u); } };
@@ -95,21 +153,19 @@ function startDaemon() {
     let said = '';
     const remember = (text) => { if (said.length < 4000) said += text; };
 
-    daemon.stdout.on('data', (b) => {
+    child.stdout.on('data', (b) => {
       const text = String(b);
-      process.stdout.write(text);
       remember(text);
       const m = text.match(/http:\/\/127\.0\.0\.1:\d+\/\?k=[a-f0-9]+/);
       if (m) done(m[0]);
     });
-    daemon.stderr.on('data', (b) => {
+    child.stderr.on('data', (b) => {
       const text = String(b);
-      process.stderr.write(text);
       remember(text);
     });
-    daemon.on('error', reject);
-    daemon.on('exit', (code) => {
-      daemon = null;
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (daemon === child) daemon = null;
       if (settled) return;
       const explained = said.trim();
       reject(new Error(explained !== ''
@@ -123,6 +179,62 @@ function startDaemon() {
   });
 }
 
+function stopDaemon() {
+  const child = daemon;
+  if (!child) return Promise.resolve();
+  daemon = null;
+  return stopDaemonChild(child);
+}
+
+function trustedFrame(event) {
+  return isTrustedMainFrame(event, win, ORIGIN);
+}
+
+// Counsel receives only recognized meeting-window names. The handler requests
+// no thumbnail and exposes neither source ids nor the rest of the user's window
+// inventory; the same main-frame origin check protects every desktop bridge.
+ipcMain.handle('zeno:meeting:detect', createMeetingPresenceHandler({ desktopCapturer, trustedFrame }));
+
+ipcMain.handle('zeno:project:choose', async (event) => {
+  if (!trustedFrame(event) || projectSwitching) return { ok: false, error: 'The project picker is not available in this window.' };
+  const answer = await dialog.showOpenDialog(win, {
+    title: 'Choose the Git repository Forge should work in',
+    buttonLabel: 'Open in Forge',
+    properties: ['openDirectory'],
+  });
+  if (answer.canceled || answer.filePaths.length !== 1) return { ok: false, canceled: true };
+  const inspected = inspectProject(answer.filePaths[0]);
+  if (!inspected.ok) return inspected;
+  const preference = join(app.getPath('userData'), 'forge-project.json');
+  const previous = readProjectPreference(preference);
+  writeProjectPreference(preference, inspected.path);
+  sessionProject = inspected.path;
+  projectSwitching = true;
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await stopSpeech();
+        await stopDaemon();
+        launchUrl = await startDaemon();
+        await warmSpeech();
+        if (win && !win.isDestroyed()) await win.loadURL(launchUrl);
+      } catch (error) {
+        sessionProject = previous.ok ? previous.path : null;
+        if (previous.ok) writeProjectPreference(preference, previous.path);
+        else clearProjectPreference(preference);
+        try {
+          launchUrl = await startDaemon();
+          if (win && !win.isDestroyed()) await win.loadURL(launchUrl);
+        } catch { /* the error box below is the useful diagnosis */ }
+        dialog.showErrorBox('Forge could not open that project', String(error && error.message ? error.message : error));
+      } finally {
+        projectSwitching = false;
+      }
+    })();
+  }, 100);
+  return { ok: true, path: inspected.path };
+});
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -132,8 +244,10 @@ function createWindow() {
     show: false,
     backgroundColor: '#0A0C0E', // the graphite ground, so there is no white flash
     title: 'Zeno',
+    icon: join(__dirname, 'resources', 'icon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
+      preload: join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -142,7 +256,12 @@ function createWindow() {
   });
 
   win.once('ready-to-show', () => win && win.show());
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => { stopSpeech(); win = null; });
+
+  // The menu bar is intentionally hidden, so own the normal IDE zoom contract
+  // here: Ctrl/Cmd +, Ctrl/Cmd -, and Ctrl/Cmd 0. This scales every Forge pane
+  // together and keeps the factor bounded by zoom.cjs.
+  installWorkbenchZoom(win.webContents);
 
   // Pin the window to loopback. Anything else is either an attack or a real
   // outbound link; neither belongs inside the application window.
@@ -156,7 +275,13 @@ function createWindow() {
   void win.loadURL(launchUrl);
 }
 
-app.whenReady().then(async () => {
+if (ownsDesktopInstance) registerSecondInstanceFocus(app, () => win);
+
+if (ownsDesktopInstance) app.whenReady().then(async () => {
+  // Load the local model alongside the daemon so the first press does not lose
+  // the beginning of a sentence while Whisper boots. `ready()` is idempotent;
+  // a missing runtime remains a visible, handled capture failure in the UI.
+  const speechWarm = warmSpeech();
   try {
     launchUrl = await startDaemon();
   } catch (err) {
@@ -164,11 +289,12 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  await speechWarm;
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
 /** Closing the window closes Zeno — and takes the daemon with it. */
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { if (daemon) { daemon.kill(); daemon = null; } });
-process.on('exit', () => { if (daemon) daemon.kill(); });
+registerGracefulQuit(app, async () => { await stopSpeech(); await stopDaemon(); });
+process.on('exit', () => { stopSpeech(); if (daemon) daemon.kill(); });

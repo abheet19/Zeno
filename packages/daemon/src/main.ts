@@ -5,7 +5,7 @@
  * Everything it needs lives in one directory (default `./.zeno`): the receipt
  * ledger, an optional `policy.json`, and the sandbox the executor is jailed to.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -20,6 +20,7 @@ import {
   readPolicyFile,
 } from '@abheet19/zeno-kernel';
 import { createServer } from './server.js';
+import { createDaemonShutdown, removeWorkspaceLockIfOwned } from './lifecycle.js';
 import { Stream } from './stream.js';
 import { nodeHeldStore } from './held-store.js';
 import { mintTokens } from './tokens.js';
@@ -68,7 +69,7 @@ function resolvePublicDir(): string {
  */
 function acquireWorkspace(dir: string, port: number): () => void {
   const lockPath = join(dir, 'zeno.lock');
-  const mine = JSON.stringify({ pid: process.pid, port, since: new Date().toISOString() });
+  const mine = JSON.stringify({ owner: randomBytes(16).toString('hex'), pid: process.pid, port, since: new Date().toISOString() });
 
   const claim = (): boolean => {
     try {
@@ -82,11 +83,13 @@ function acquireWorkspace(dir: string, port: number): () => void {
   };
 
   if (!claim()) {
-    let held: { pid?: number; port?: number; since?: string } = {};
+    let held: { owner?: string; pid?: number; port?: number; since?: string } = {};
+    let observedClaim: string | null = null;
     try {
-      held = JSON.parse(readFileSync(lockPath, 'utf8')) as typeof held;
+      observedClaim = readFileSync(lockPath, 'utf8');
+      held = JSON.parse(observedClaim) as typeof held;
     } catch {
-      /* an unreadable lock is treated as stale below */
+      /* a missing lock is retried below; an unreadable one fails closed */
     }
     let alive = false;
     if (typeof held.pid === 'number') {
@@ -120,12 +123,9 @@ function acquireWorkspace(dir: string, port: number): () => void {
       process.exitCode = 1;
       return () => {};
     }
-    // Stale: the holder is gone. Take it over rather than stranding the owner.
-    try {
-      unlinkSync(lockPath);
-    } catch {
-      /* someone else won the race; the claim below will fail honestly */
-    }
+    // Stale: remove only the exact claim we inspected. If another daemon won
+    // between the read and this comparison, its nonce differs and stays intact.
+    if (observedClaim !== null) removeWorkspaceLockIfOwned(lockPath, observedClaim);
     if (!claim()) {
       process.stderr.write(`
   Could not take the workspace lock at ${lockPath}.
@@ -140,29 +140,37 @@ function acquireWorkspace(dir: string, port: number): () => void {
   const release = (): void => {
     if (released) return;
     released = true;
-    try {
-      unlinkSync(lockPath);
-    } catch {
-      /* already gone */
-    }
+    removeWorkspaceLockIfOwned(lockPath, mine);
   };
   process.on('exit', release);
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
-    process.on(sig, () => {
-      release();
-      process.exit(0);
-    });
-  }
   return release;
 }
 
 function main(): void {
   const dir = resolve(process.env['ZENO_DIR'] ?? '.zeno');
   mkdirSync(dir, { recursive: true });
-  acquireWorkspace(dir, PORT);
+  const releaseWorkspace = acquireWorkspace(dir, PORT);
   if (process.exitCode === 1) return; // another Zeno owns this workspace
 
-  const sandbox = join(dir, 'sandbox');
+  const requestedProject = (process.env['ZENO_PROJECT_DIR'] ?? '').trim();
+  let sandbox = join(dir, 'sandbox');
+  if (requestedProject !== '') {
+    const runner = nodeGitRunner();
+    let selected: string;
+    try { selected = realpathSync.native(resolve(requestedProject)); }
+    catch { throw new Error(`The selected Forge project cannot be read: ${requestedProject}`); }
+    const root = runner.run(['rev-parse', '--show-toplevel'], selected);
+    if (root.status !== 0 || root.stdout.trim() === '') {
+      throw new Error(`The selected Forge folder is not inside an existing Git repository: ${selected}`);
+    }
+    let canonicalRoot: string;
+    try { canonicalRoot = realpathSync.native(resolve(root.stdout.trim())); }
+    catch { throw new Error(`Git reported a repository root that cannot be read: ${root.stdout.trim()}`); }
+    if (process.platform === 'win32' ? canonicalRoot.toLowerCase() !== selected.toLowerCase() : canonicalRoot !== selected) {
+      throw new Error(`Select the repository root itself: ${canonicalRoot}`);
+    }
+    sandbox = canonicalRoot;
+  }
   // forge init: the sandbox is a git repository so Forge can commit through the
   // gate. Idempotent — a repo that already exists is left alone.
   mkdirSync(sandbox, { recursive: true });
@@ -170,7 +178,7 @@ function main(): void {
   // rev-parse would find a PARENT repo (the sandbox lives under the project) and
   // skip init, leaving Forge pointed at the wrong repository — the git executor
   // would then refuse on its repo-root check anyway, so make it a real own repo.
-  if (!existsSync(join(sandbox, '.git'))) {
+  if (requestedProject === '' && !existsSync(join(sandbox, '.git'))) {
     const g = nodeGitRunner();
     g.run(['init'], sandbox);
     g.run(['config', 'user.email', 'owner@zeno.local'], sandbox);
@@ -244,7 +252,22 @@ function main(): void {
   // carry an answer back from the browser and it can approve nothing.
   const chromeToken = randomBytes(24).toString('hex');
 
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser, forgeChrome, chromeToken });
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser, forgeChrome, chromeToken, ollamaAutoStart: true });
+  const shutdown = createDaemonShutdown({
+    server,
+    release: releaseWorkspace,
+    exit: (code) => process.exit(code),
+  });
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    process.once(signal, shutdown);
+  }
+  // Windows cannot deliver POSIX termination signals to a child gracefully;
+  // the Electron parent uses this private IPC channel instead. A vanished parent
+  // is equivalent to closing Zeno, so disconnect takes the same bounded path.
+  process.on('message', (message: unknown) => {
+    if (message === 'zeno:shutdown') shutdown();
+  });
+  if (process.connected) process.once('disconnect', shutdown);
 
   // The proposer token is a LIVE credential. Printing it to stdout put it in
   // shell scrollback and — when stdout is redirected to a file — on disk in
@@ -309,6 +332,7 @@ function main(): void {
     out(`     window     http://${HOST}:${PORT}/?k=${launchNonce}`);
     out('                (open THIS url — the ?k= is what authorises approvals; a plain visit is read-only)');
     out(`     workspace  ${dir}`);
+    out(`     project    ${sandbox}${requestedProject === '' ? ' (Zeno scratch repository)' : ''}`);
     out(`     policy     ${policy === DEFAULT_POLICY ? 'built-in default' : 'policy.json'} · ${policyHash(policy).slice(0, 12)}`);
     out(`     receipts   ${kernel.receipts().length} on record · chain ${kernel.verifyChain().ok ? 'verified' : 'BROKEN'} · signed (Ed25519)`);
     out(

@@ -62,7 +62,7 @@
  * `prefers-reduced-motion` is honoured by having nothing to reduce.
  */
 
-import { renderCapsule } from './capsule.js';
+import { pendingCapsuleNeedsRefresh, renderCapsule } from './capsule.js';
 import { renderTimeline } from './timeline.js';
 
 /* ================================================================== *
@@ -575,7 +575,7 @@ function updateRow(entry) {
   );
 }
 
-/** The capsule's home. Built once and kept, so the node inside it is never remade. */
+/** The capsule's stable home. Its node changes only when the daemon refreshes its bound review. */
 function detailFor(entry) {
   if (!entry.detail) {
     entry.detail = el('div', 'ndetail');
@@ -586,10 +586,10 @@ function detailFor(entry) {
 
 /**
  * Awaiting first (newest first), then the divider, then settled (most recently
- * settled first). Nodes are MOVED, never rebuilt: a capsule owns its own state
- * — a spent Approve control, a running countdown, a rendered seal — and
- * re-rendering it would be a lie about which of those the owner has already
- * seen. The same is now true of the rows above them.
+ * settled first). Nodes are MOVED, not rebuilt during layout: a capsule owns its
+ * own state — a spent Approve control, a running countdown, a rendered seal.
+ * `addPreview` replaces one only when the daemon sends fresher bound payload or
+ * review evidence for that still-pending action. The rows remain stable.
  */
 function layoutPending() {
   if (!mount.pending) return;
@@ -653,15 +653,6 @@ function layoutPending() {
 function addPreview(preview) {
   if (!preview || typeof preview.actionHash !== 'string' || !mount.pending) return;
 
-  const existing = capsules.get(preview.actionHash);
-  if (existing && !existing.settled) return; // same hash = the same action; nothing changed
-  if (existing) {
-    // The same identity previewed again after settling. It is awaiting once
-    // more, so it is rebuilt from the new preview rather than resurrected.
-    existing.node.destroy?.();
-    capsules.delete(preview.actionHash);
-  }
-
   // `onApprove` is deliberately NOT overridden. capsule.js already owns the
   // POST /approvals call, and it owns it correctly: it latches the single-use
   // control spent BEFORE the await, sends `x-zeno-token`, and on a non-200
@@ -693,9 +684,34 @@ function addPreview(preview) {
   } else if (Object.prototype.hasOwnProperty.call(preview, 'payload')) {
     opts.payload = preview.payload;
   }
+  if (Object.prototype.hasOwnProperty.call(preview, 'review')) opts.review = preview.review;
   if (typeof preview.expiresAt === 'string') opts.expiresAt = preview.expiresAt;
 
+  const existing = capsules.get(preview.actionHash);
+  if (existing && !existing.settled && !pendingCapsuleNeedsRefresh(existing.preview, preview)) return;
+
   const node = renderCapsule(preview, opts);
+  if (existing && !existing.settled) {
+    // `/state` deliberately refreshes a held write's observed review. Replace
+    // the capsule in its existing row so a ready review that became drifted can
+    // never leave an old Approve control on screen. The map remains the receipt
+    // target; only its current node changes.
+    existing.node.destroy?.();
+    existing.preview = preview;
+    existing.node = node;
+    if (existing.detail) existing.detail.replaceChildren(node);
+    layoutPending();
+    paintSummary();
+    announce(`Approval review refreshed for: ${preview.summary ?? '(no summary)'}`);
+    return;
+  }
+  if (existing) {
+    // The same identity previewed again after settling. It is awaiting once
+    // more, so it is rebuilt from the new preview rather than resurrected.
+    existing.node.destroy?.();
+    capsules.delete(preview.actionHash);
+  }
+
   capsules.set(preview.actionHash, {
     preview,
     node,

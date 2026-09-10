@@ -142,6 +142,8 @@ export function buildAssistantPrompt(question: string, snapshot: Snapshot, maxQu
       'say the facts do not show it instead of confirming it.',
   );
   out.push(`5. If the facts do not support an answer, reply with exactly this and nothing else: ${CANNOT_ANSWER}`);
+  out.push('   Use that refusal only when NO fact answers ANY part of the question.');
+  out.push('   If you cite an answer, do not include the refusal before or after it.');
   out.push('   Those words must then be your WHOLE answer. Never refuse and then guess anyway.');
   out.push('6. You CANNOT approve anything and you CANNOT change anything. You have no ability to act.');
   out.push(

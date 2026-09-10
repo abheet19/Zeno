@@ -14,8 +14,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc",
-    "test": "tsc && node --test --experimental-test-coverage --test-coverage-exclude=\"dist/test/**\" --test-coverage-exclude=\"**/public/**\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=95 \"dist/test/*.test.js\"",
+    "build": "tsc && node scripts/sync-public.mjs",
+    "test": "tsc && node scripts/sync-public.mjs && node --test --experimental-test-coverage --test-coverage-exclude=\"dist/test/**\" --test-coverage-exclude=\"**/public/**\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=95 \"dist/test/*.test.js\"",
     "check": "npm run typecheck && npm run test"
   },
   "devDependencies": {

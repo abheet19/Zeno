@@ -136,7 +136,13 @@ function isApprovalAttempt(cmd) {
  */
 const GREETING = /^(?:wake(?:\s+up)?|hi|hey|hello|yo|you\s+there|are\s+you\s+(?:there|awake|listening|up)|listen(?:ing)?\??|status)\s*[.!?]*$/i;
 const CANCEL = /^(?:never\s?mind|nevermind|forget it|scratch that|cancel|abort|stop)(?:\s+(?:that|it|this|please))?[.!]?$/i;
-const READ_PENDING = /^(?:what(?:'s| is| are)?\s+waiting|what(?:'s| is)?\s+pending|what(?:'s| is)?\s+(?:in\s+the\s+)?queue|what(?:'s| is)?\s+in\s+my\s+queue|what\s+needs\s+approval|what\s+is\s+awaiting(?:\s+approval)?|anything\s+waiting|show(?:\s+me)?\s+(?:the\s+)?queue)[.!?]?$/i;
+// Navigation changes only the visible Zeno surface. It has no filesystem,
+// process or approval power, but it lets the wake flow finish the ordinary
+// sentence "Zeno, open Forge" instead of reporting a false grammar failure.
+// Local Whisper has also produced "open porch" for that exact sentence, so the
+// measured homophone is accepted only inside this explicit navigation shape.
+const NAVIGATE = /^(?:open|go to|show|switch to)\s+(?:the\s+)?(command|forge|porch|counsel)(?:\s+(?:tab|workspace|screen|view))?(?:\s+and\s+(?:show|focus)(?:\s+me)?\s+(?:the\s+)?selected\s+(?:repository|project))?[.!?]?$/i;
+const READ_PENDING = /^(?:what(?:'s| is| are)?\s+waiting|what(?:'s| is)?\s+pending|what(?:'s| is)?\s+(?:in\s+the\s+)?queue|what(?:'s| is)?\s+in\s+my\s+queue|what\s+needs\s+approval|what\s+is\s+awaiting(?:\s+approval)?|anything\s+waiting|show(?:\s+me)?\s+(?:the\s+)?(?:pending\s+)?approvals?|show(?:\s+me)?\s+(?:the\s+)?queue)[.!?]?$/i;
 const READ_RECEIPTS = /^(?:read\s+(?:my\s+|the\s+)?receipts|show(?:\s+me)?\s+(?:the\s+|my\s+)?receipts|list\s+(?:the\s+|my\s+)?receipts|show\s+receipts|what\s+have\s+you\s+done)[.!?]?$/i;
 const READ_CHAIN = /^(?:verify(?:\s+the)?\s+(?:chain|ledger)|check(?:\s+the)?\s+(?:chain|ledger)|audit(?:\s+the)?\s+(?:chain|ledger)|is\s+the\s+(?:chain|ledger)\s+(?:intact|ok|okay|valid|good))[.!?]?$/i;
 const ADD_TASK = /^(?:remind me(?:\s+to)?|remember to|note to self(?:\s+to)?|add(?:\s+a)?\s+task(?:\s+to)?|new task(?:\s+to)?|create a task(?:\s+to)?|make a task(?:\s+to)?|add a reminder(?:\s+to)?|add a to-?do(?:\s+to)?)\s+(.+?)[.!]?$/i;
@@ -250,6 +256,12 @@ export function parseCommand(command) {
     // else can interpret it as an action.
     if (isApprovalAttempt(cmd))
         return unrecognized(cmd, APPROVAL_BY_HAND);
+    const navigation = NAVIGATE.exec(cmd);
+    const spokenTarget = navigation?.[1]?.toLowerCase();
+    const target = spokenTarget === 'porch' ? 'forge' : spokenTarget;
+    if (target === 'command' || target === 'forge' || target === 'counsel') {
+        return { kind: 'navigate', target };
+    }
     if (READ_PENDING.test(cmd))
         return { kind: 'read', what: 'pending' };
     if (READ_RECEIPTS.test(cmd))

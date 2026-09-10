@@ -38,7 +38,13 @@ export {
   type Library,
 } from './library.js';
 export { buildSkillPrompt, MAX_SKILL_BODY_CHARS } from './prompt.js';
-export { nodeSkillReader, SKILL_FILE } from './skills-node.js';
+export {
+  nodeSkillReader,
+  SKILL_FILE,
+  MAX_SKILL_SOURCE_BYTES,
+  MAX_SKILL_DIRECTORY_ENTRIES,
+  MAX_SKILL_LIBRARY_ENTRIES,
+} from './skills-node.js';
 export {
   selectSkills,
   partitionSelection,

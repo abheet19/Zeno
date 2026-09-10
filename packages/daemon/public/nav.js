@@ -118,6 +118,10 @@ function show(name, opts) {
     else item.removeAttribute('aria-current');
   }
 
+  // Expose the active product to the shell so Forge can use a compact IDE
+  // frame while Command and Counsel retain their editorial layout.
+  document.documentElement.setAttribute('data-zeno-surface', name);
+
   current = name;
   if (persist) remember(name);
   firstShow(name);

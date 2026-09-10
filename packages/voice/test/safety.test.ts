@@ -19,6 +19,8 @@ import { parseCommand, interpret, APPROVAL_BY_HAND, type Intent } from '../src/i
 const ALLOWED_KINDS: ReadonlyArray<Intent['kind']> = [
   'propose_write',
   'add_task',
+  // Navigation only selects a Zeno surface; it cannot name or apply an effect.
+  'navigate',
   // `delegate` starts an agent, which is a process and not an effect: everything
   // that agent writes still arrives as a capsule the owner approves by hand. It
   // is in this list because it carries TEXT and nothing else — no agent id, no

@@ -13,9 +13,9 @@
  *   retrieval actually returned.
  *
  *   `groundedAnswer` checks the answer afterwards. Instructions are a request; a
- *   check is a guarantee. An id the model cited that exists nowhere in `hits` is
- *   a FABRICATION — a plausible-looking `[m-014/u7]` for a meeting that does not
- *   exist — and it is reported so the caller can refuse to render it. This is
+ *   check is a guarantee. An id the model cited must name exactly one source in
+ *   `hits`. Missing ids and ambiguous duplicates are unsafe, and are reported so
+ *   the caller can refuse to render them. This is
  *   the same rule `summarize` already lives under: every claim cites a real
  *   line, or it does not ship.
  *
@@ -47,7 +47,7 @@ export interface Grounding {
   readonly ok: boolean;
   /** The real ids the answer cited, deduped, in first-appearance order. */
   readonly citedIds: readonly string[];
-  /** Ids the answer cited that exist NOWHERE in `hits`. Each one is a fabrication. */
+  /** Missing or ambiguous ids the answer cited. Both make the answer unsafe. */
   readonly fabricated: readonly string[];
   /** Claim sentences that carry no valid citation at all. */
   readonly uncited: readonly string[];
@@ -91,22 +91,40 @@ function excerptBlock(hit: Hit): string {
  * last, immediately before generation, so the evidence is what it is holding.
  */
 export function buildAnswerPrompt(question: string, hits: readonly Hit[], opts: PromptOptions = {}): string {
-  const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
+  const requestedMaxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
+  // Treat a caller mistake as an empty context budget rather than letting a
+  // negative or fractional value weaken the boundary below.
+  const maxChars = Number.isFinite(requestedMaxChars) ? Math.max(0, Math.floor(requestedMaxChars)) : DEFAULT_MAX_CHARS;
 
   const kept: string[] = [];
   let used = 0;
   let dropped = 0;
+  let shortened = false;
   for (const hit of hits) {
     const block = excerptBlock(hit);
-    // Always keep the first block, even if it alone exceeds the cap: an answer
-    // built on one truncated meeting is still grounded, while an answer built on
-    // nothing is a hallucination waiting to happen.
-    if (kept.length > 0 && used + block.length > maxChars) {
+    const separatorChars = kept.length === 0 ? 0 : 2;
+    const available = maxChars - used - separatorChars;
+    if (available <= 0) {
       dropped++;
       continue;
     }
+
+    // Preserve whole later meetings: a half excerpt can separate a claim from
+    // its citation. The first hit is the sole exception because an empty prompt
+    // is less useful; even then, slice it strictly at the configured boundary.
+    if (block.length > available) {
+      if (kept.length > 0) {
+        dropped++;
+        continue;
+      }
+      kept.push(block.slice(0, available));
+      used += available;
+      shortened = true;
+      continue;
+    }
+
     kept.push(block);
-    used += block.length;
+    used += separatorChars + block.length;
   }
 
   const out: string[] = [];
@@ -121,13 +139,16 @@ export function buildAnswerPrompt(question: string, hits: readonly Hit[], opts: 
     out.push(kept.join('\n\n'));
   }
   out.push('');
-  if (dropped > 0) {
+  if (dropped > 0 || shortened) {
     // Said out loud, in the prompt, because a silently truncated context is how a
     // grounded answer quietly becomes a confident wrong one.
     out.push(
       `(TRUNCATED: ${kept.length} of ${hits.length} matching meetings are shown above; ${dropped} more were cut to fit. ` +
         'If the answer might depend on a meeting not shown, say so.)',
     );
+    if (shortened) {
+      out.push(`(The shown excerpt itself was shortened to fit the ${maxChars}-character context cap.)`);
+    }
     out.push('');
   }
   out.push('RULES');
@@ -150,15 +171,18 @@ export function buildAnswerPrompt(question: string, hits: readonly Hit[], opts: 
   return out.join('\n');
 }
 
-/** Every id an answer could legitimately cite: the meetings retrieved, and their lines. */
-function knownIds(hits: readonly Hit[]): Set<string> {
-  const ids = new Set<string>();
+/** Count every citation id so an ambiguous id can never masquerade as evidence. */
+function idOccurrences(hits: readonly Hit[]): Map<string, number> {
+  const ids = new Map<string, number>();
+  const add = (id: string): void => {
+    ids.set(id, (ids.get(id) ?? 0) + 1);
+  };
   for (const hit of hits) {
-    ids.add(hit.meeting.id);
+    add(hit.meeting.id);
     // Every line of a retrieved meeting counts, not only the ones the prompt had
-    // room for. The id is real and it belongs to a meeting the owner really had;
-    // the fabrication we are hunting is an id from NOWHERE.
-    for (const u of hit.meeting.utterances) ids.add(u.id);
+    // room for. Counting rather than collecting into a Set also exposes legacy
+    // archives where multiple meetings reused ids such as `u0`.
+    for (const u of hit.meeting.utterances) add(u.id);
   }
   return ids;
 }
@@ -214,12 +238,16 @@ function refusalPattern(): RegExp {
  */
 export function groundedAnswer(answerText: string, hits: readonly Hit[]): Grounding {
   const text = answerText.trim();
-  const known = knownIds(hits);
+  const occurrences = idOccurrences(hits);
+  const isUnique = (id: string): boolean => occurrences.get(id) === 1;
 
   const cited: string[] = [];
   const fabricated: string[] = [];
   for (const id of citationsIn(text)) {
-    const bucket = known.has(id) ? cited : fabricated;
+    // A duplicate id is not a usable pointer: it names more than one possible
+    // source. Report it through the existing unsafe-citation channel so callers
+    // that already reject fabrications also reject ambiguous archive evidence.
+    const bucket = isUnique(id) ? cited : fabricated;
     if (!bucket.includes(id)) bucket.push(id);
   }
 
@@ -231,7 +259,7 @@ export function groundedAnswer(answerText: string, hits: readonly Hit[]): Ground
     return { ok: true, citedIds: [], fabricated: [], uncited: [] };
   }
 
-  const uncited = claimsIn(besideTheRefusal).filter((claim) => !citationsIn(claim).some((id) => known.has(id)));
+  const uncited = claimsIn(besideTheRefusal).filter((claim) => !citationsIn(claim).some(isUnique));
 
   return {
     ok: fabricated.length === 0 && uncited.length === 0 && cited.length > 0,

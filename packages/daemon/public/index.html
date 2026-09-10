@@ -187,7 +187,7 @@ body{
   cursor:pointer; transition:background .18s ease;
 }
 .brand:hover{ background:var(--wash-2); }
-.brand-mark{ color:var(--cyan); font-size:13px; line-height:1; }
+.brand-mark{ width:22px; height:22px; display:block; flex:none; border-radius:7px; filter:drop-shadow(0 4px 8px color-mix(in oklch,var(--cyan) 24%,transparent)); }
 .brand-word{ white-space:nowrap; }
 .brand-sub{ font-family:var(--font-mono); font-size:9px; color:var(--ink-3); letter-spacing:.14em; text-transform:uppercase; margin-left:5px; }
 
@@ -783,24 +783,61 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 
 .forge{
   display:grid;
-  grid-template-columns:186px minmax(0,1fr) 300px;
-  grid-template-rows:minmax(0,1fr) var(--fdrawer,150px) 26px;
+  grid-template-columns:280px minmax(0,1fr) 352px;
+  grid-template-rows:36px minmax(0,1fr) var(--fdrawer,166px) 22px;
   height:calc(100vh - 47px); min-height:520px;
   position:relative;
 }
-.forge>.rgA{ grid-column:1; grid-row:1/3; }
-.forge>.rgB{ grid-column:2; grid-row:1; }
-.forge>.rgD{ grid-column:2; grid-row:2; }
-.forge>.rgC{ grid-column:3; grid-row:1/3; }
-.forge>.rgE{ grid-column:1/-1; grid-row:3; }
-@media (max-width:1000px) and (min-width:901px){ .forge{ grid-template-columns:160px minmax(0,1fr) 250px; } }
+.forge>.rgTop{ grid-column:1/-1; grid-row:1; }
+.forge>.rgA{ grid-column:1; grid-row:2/4; }
+.forge>.rgB{ grid-column:2; grid-row:2; }
+.forge>.rgD{ grid-column:2; grid-row:3; }
+.forge>.rgC{ grid-column:3; grid-row:2/4; }
+.forge>.rgE{ grid-column:1/-1; grid-row:4; }
+@media (max-width:1360px) and (min-width:901px){ .forge{ grid-template-columns:248px minmax(0,1fr) 314px; } }
+@media (max-width:1100px) and (min-width:901px){ .forge{ grid-template-columns:218px minmax(0,1fr) 278px; } }
+
+/* A dense, honest workbench bar. Every item acts on a live Forge surface; it is
+   not a decorative imitation of an IDE menu. */
+.forge .rgTop{
+  display:flex; align-items:center; gap:10px; min-width:0; padding:0 9px;
+  background:var(--g1); border-bottom:1px solid var(--rule); color:var(--ink-2);
+  font-size:11px; user-select:none;
+}
+.forge .fgmode{ display:flex; gap:2px; padding:2px; border-radius:8px; background:var(--g4); border:1px solid var(--rule); }
+.forge .fgmode button{
+  border:0; background:none; color:var(--ink-2); font:inherit; font-weight:600;
+  padding:4px 11px; border-radius:6px; cursor:pointer;
+}
+.forge .fgmode button[aria-selected="true"]{ color:var(--ink); background:var(--g6); box-shadow:0 1px 4px rgba(0,0,0,.18); }
+.forge .fgmenu{ display:flex; align-items:center; gap:2px; }
+.forge .fgmenu button{ border:0; background:none; color:var(--ink-2); font:inherit; padding:5px 7px; border-radius:5px; cursor:pointer; }
+.forge .fgmenu button:hover{ color:var(--ink); background:var(--g4); }
+.forge .fgworkspace{ flex:1; min-width:0; display:flex; justify-content:center; align-items:center; gap:7px; font-family:var(--font-mono); }
+.forge .fgworkspace span:last-child{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .fgworkspace-mark{ color:var(--cyan); }
+.forge .fgtop-right{ display:flex; align-items:center; justify-content:flex-end; gap:7px; min-width:max-content; }
+.forge .fgnew{ white-space:nowrap; }
 
 .forge .rgA{
   background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.012));
   backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
-  border-right:1px solid var(--gl-edge); overflow:hidden; padding:10px 8px;
-  display:flex; flex-direction:column; min-height:0;
+  border-right:1px solid var(--gl-edge); overflow:hidden; padding:0;
+  display:flex; flex-direction:row; min-height:0;
 }
+.forge .fgactivity{
+  width:42px; flex:0 0 42px; display:flex; flex-direction:column; align-items:center;
+  padding:5px 0; gap:2px; border-right:1px solid var(--rule); background:var(--g1);
+}
+.forge .fgactivity button{
+  width:34px; height:34px; border:0; border-radius:7px; background:none; color:var(--ink-3);
+  font:600 17px/1 var(--font-mono); cursor:pointer; position:relative;
+}
+.forge .fgactivity button:hover{ color:var(--ink); background:var(--g4); }
+.forge .fgactivity button[aria-current="true"]{ color:var(--cyan); background:var(--g4); }
+.forge .fgactivity button[aria-current="true"]::before{ content:""; position:absolute; left:-4px; top:6px; bottom:6px; width:2px; border-radius:2px; background:var(--cyan); }
+.forge .fgside{ min-width:0; flex:1; display:flex; flex-direction:column; padding:8px 8px 9px; }
+.forge .fgside-title{ padding:2px 5px 8px; font:600 10px/1.2 var(--font-mono); color:var(--ink-2); text-transform:uppercase; letter-spacing:.08em; }
 .forge .panbody{ flex:1; overflow:auto; min-height:0; margin:0 -2px; padding:0 2px; }
 .forge .panbar{ flex:none; border-top:1px solid var(--rule); margin-top:8px; padding-top:7px; }
 .forge .panbar .tree{ display:grid; grid-template-columns:1fr 1fr; gap:1px; }
@@ -837,7 +874,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    anything else reading it. */
 :root[data-drawer="min"] .forge{
   --fdrawer:34px !important;
-  grid-template-rows:minmax(0,1fr) 34px 26px;
+  grid-template-rows:36px minmax(0,1fr) 34px 22px;
 }
 :root[data-drawer="min"] .forge .rgD .drawbody{ display:none; }
 /* At 34px the drawer is exactly its own tab strip, so the open-state padding
@@ -850,12 +887,20 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   background:linear-gradient(180deg,rgba(127,140,160,.06),rgba(127,140,160,.02));
   backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
   border-top:1px solid var(--gl-edge); display:flex; align-items:center; gap:12px; padding:0 12px;
-  font-family:var(--font-mono); font-size:10px; color:var(--ink-2); overflow-x:auto; white-space:nowrap;
+  font-family:var(--font-mono); font-size:10px; color:var(--ink-2); overflow:hidden; white-space:nowrap;
 }
 .forge .rgE b{ color:var(--ink); font-weight:600; }
 .forge .rgE .sp{ flex:1; }
 .forge .rgE .chip{ font-size:9.5px; padding:3px 7px; gap:5px; }
 .forge .rgE .state{ font-size:10px; padding:3px 8px; }
+/* A laptop status bar should shorten its evidence before it grows a horizontal
+   scrollbar. The branch, worktree, file, agent, egress and view switch remain;
+   the commit hash and explanatory safety sentence are already visible in the
+   Explorer and as the neighbouring control's tooltip. */
+@media (max-width:1500px) and (min-width:901px){
+  .forge .rgE .fgst-head,
+  .forge .rgE .fgst-safety{ display:none; }
+}
 /* The drawer's tabs are chips that are also buttons: they must inherit the type
    ramp rather than the browser's default control font. */
 .forge .drawhd .chip{ font:inherit; font-size:11px; cursor:pointer; }
@@ -874,17 +919,27 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .crumbs .sp{ flex:1; }
 .forge .crumbs .chip{ font-size:9.5px; padding:2px 7px; gap:5px; }
 .forge .tabs{
-  display:flex; gap:1px; padding:6px 8px 0; border-bottom:1px solid var(--rule); flex-shrink:0;
-  align-items:center; background:var(--wash-2); overflow-x:auto;
+  display:flex; gap:1px; padding:3px 5px 0; border-bottom:1px solid var(--rule); flex-shrink:0;
+  align-items:center; background:var(--wash-2); overflow-x:auto; min-width:0;
 }
 .forge .tabs .tb{
-  font-family:var(--font-mono); font-size:11px; color:var(--ink-2); padding:6px 11px;
-  border-radius:7px 7px 0 0; cursor:pointer; background:none; border:0;
-  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-2);
+  border-radius:5px 5px 0 0; background:none; border:0;
+  display:inline-flex; align-items:center; white-space:nowrap; min-width:0;
 }
 .forge .tabs .tb[aria-selected="true"]{ background:var(--g3); color:var(--ink); box-shadow:inset 0 -2px 0 var(--cyan); }
+.forge .tabs .tb.empty{ padding:6px 11px; color:var(--ink-3); }
+.forge .tabs .tb-main,.forge .tabs .tb-close{
+  border:0; background:none; color:inherit; font:inherit; cursor:pointer;
+}
+.forge .tabs .tb-main{ display:flex; align-items:center; gap:6px; padding:6px 4px 6px 10px; min-width:0; }
+.forge .tabs .tb-name{ max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+.forge .tabs .tb-close{ padding:4px 7px; border-radius:4px; opacity:.48; font-size:15px; line-height:1; }
+.forge .tabs .tb:hover .tb-close,.forge .tabs .tb-close:focus-visible{ opacity:1; }
+.forge .tabs .tb-close:hover{ background:var(--g5); }
 .forge .fdot{ width:6px; height:6px; border-radius:50%; background:var(--green); flex:none; }
 .forge .fdot.clean{ background:var(--ink-3); }
+.forge .fdot.changed{ background:var(--cyan); }
 .forge .edwrap{ display:flex; flex:1; min-height:0; }
 .forge .code{
   font-family:var(--font-mono); font-size:12px; line-height:1.8; padding:12px 0;
@@ -921,8 +976,26 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    `.edaux` sets `display:flex`, which outranks the UA's `[hidden]` rule, so
    the hidden case is stated explicitly — the same footnote the masked-mode
    pill carries a few rules further down, for the same reason. */
-.forge .edhost{ display:flex; flex:1; min-height:0; min-width:0; }
+.forge .edtools{ display:flex; justify-content:flex-end; align-items:center; padding:3px 7px; border-bottom:1px solid var(--rule); background:var(--g2); }
+.forge .edtools button{ border:0; border-radius:4px; background:transparent; color:var(--ink-2); padding:4px 8px; font:inherit; font-size:10.5px; cursor:pointer; }
+.forge .edtools button:hover,.forge .edtools button[aria-pressed="true"]{ background:var(--g4); color:var(--ink); }
+.forge .edhost{ display:flex; flex:1; min-height:0; min-width:0; --editor-split:50%; }
 .forge .edhost > [hidden]{ display:none !important; }
+.forge .edpane{ display:flex; flex-direction:column; flex:1 1 0; min-width:0; min-height:0; background:var(--g3); }
+.forge .edhost[data-split="true"] .edpane:first-child{ flex:0 0 var(--editor-split); }
+.forge .edhost[data-split="true"] .edpane:last-child{ flex:1 1 auto; }
+.forge .edpane[data-focused="true"]{ box-shadow:inset 0 1px 0 color-mix(in srgb,var(--cyan) 42%,transparent); }
+.forge .edchrome{ display:flex; flex-direction:column; flex:none; min-width:0; }
+.forge .edbody{ display:flex; flex:1; min-width:0; min-height:0; }
+.forge .edsplit-drag{ width:5px; flex:0 0 5px; cursor:col-resize; background:var(--rule); position:relative; z-index:2; }
+.forge .edsplit-drag:hover,.forge .edsplit-drag:focus-visible{ background:var(--cyan); outline:none; }
+.forge .edtab-menu{ position:relative; flex:none; }
+.forge .edtab-menu summary{ list-style:none; cursor:pointer; padding:5px 8px; color:var(--ink-2); }
+.forge .edtab-menu summary::-webkit-details-marker{ display:none; }
+.forge .edtab-actions{ position:absolute; top:100%; right:0; z-index:80; min-width:180px; padding:5px; border:1px solid var(--gl-edge); border-radius:7px; background:var(--g2); box-shadow:0 12px 32px rgba(0,0,0,.32); }
+.forge .edtab-actions button{ display:block; width:100%; padding:7px 9px; border:0; border-radius:4px; background:none; color:var(--ink-2); font:inherit; font-size:11px; text-align:left; cursor:pointer; }
+.forge .edtab-actions button:hover{ background:var(--g4); color:var(--ink); }
+.forge .edtab-actions button:disabled{ opacity:.4; cursor:default; }
 .forge .edmon{ flex:1; min-width:0; min-height:0; }
 .forge .edaux{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
 
@@ -962,6 +1035,11 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .tree button:hover{ background:var(--g4); color:var(--ink); }
 .forge .tree button[aria-current="true"]{ background:var(--g4); color:var(--ink); box-shadow:inset 2px 0 0 var(--cyan); }
 .forge .tree button .nm{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .fgtree button{ padding-left:calc(5px + var(--depth,0) * 13px); border-radius:4px; }
+.forge .fgtree .fgchev{ width:10px; flex:0 0 10px; color:var(--ink-2); text-align:center; font:12px/1 var(--font-mono); }
+.forge .fgtree .fgfolder{ color:var(--cyan); opacity:.76; font-size:10px; }
+.forge .fgtree .fgfile-mark{ font-size:8px; }
+.forge .fgtree-folder{ font-weight:520; color:var(--ink) !important; }
 /* ---- rgA: the search box, and one matching line ------------------------- *
    The result row reuses `.tree button`, so a hit looks and behaves exactly like
    a file in the Explorer — same hover, same focus ring, same click target. Only
@@ -1013,6 +1091,25 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 /* ---- rgC: the session row, the inspector tabs, the agent chat ------------- */
 .forge .sesrow{ display:flex; align-items:center; gap:8px; padding:7px 10px 0; font-size:10px; color:var(--ink-2); font-family:var(--font-mono); }
 .forge .sesname{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .fgsessions{ display:flex; align-items:center; gap:3px; padding:7px 8px 0; overflow-x:auto; flex:none; }
+.forge .fgsessions button{
+  display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:150px; white-space:nowrap;
+  border:1px solid transparent; background:none; color:var(--ink-2); border-radius:6px;
+  padding:5px 8px; font:10px/1.2 var(--font-mono); cursor:pointer;
+}
+.forge .fgsessions .fgsession-name{ overflow:hidden; text-overflow:ellipsis; }
+.forge .fgsessions button[aria-selected="true"]{ color:var(--ink); background:var(--g4); border-color:var(--rule); }
+.forge .fgsessions .fgsession-add{ flex:0 0 auto; width:27px; justify-content:center; font-size:15px; padding:3px; }
+.forge .fgsession-dot{ color:var(--ink-3); font-size:8px; }
+.forge .fgsession-dot.running{ color:var(--cyan); }
+.forge .fgsession-dot.done{ color:var(--green); }
+.forge .fgsession-dot.cancelled{ color:var(--amber); }
+.forge .fgsession-dot.failed{ color:var(--red); }
+.forge .fgsession-progress{
+  flex:none; padding:1px 4px; border:1px solid var(--rule); border-radius:999px;
+  color:var(--cyan); font-size:8px; font-variant-numeric:tabular-nums;
+}
+.forge .fgsession-progress.stale{ color:var(--amber); border-color:color-mix(in srgb,var(--amber) 48%,var(--rule)); }
 .forge .insp-tabs{ display:flex; gap:1px; padding:8px 8px 0; border-bottom:1px solid var(--rule); flex:none; overflow-x:auto; }
 .forge .insp-tabs button{
   font:inherit; font-size:11px; padding:5px 9px; border-radius:6px 6px 0 0; color:var(--ink-2);
@@ -1047,7 +1144,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .cite{ font-family:var(--font-mono); font-size:10px; color:var(--cyan); margin-top:5px; display:inline-block; background:none; border:0; padding:0; cursor:pointer; }
 .forge .cite:hover{ text-decoration:underline; }
 .forge .compose{ border-top:1px solid var(--rule); padding:9px; display:flex; gap:6px; flex:none; }
-.forge .compose input{
+.forge .compose input, .forge .compose textarea{
   flex:1; min-width:0; background:var(--g1); border:1px solid var(--rule-2); border-radius:8px;
   padding:8px 10px; color:var(--ink); font:inherit; font-size:12px;
 }
@@ -1057,6 +1154,24 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   border:1px solid var(--rule); border-radius:6px; padding:3px 6px; max-width:150px;
 }
 .forge .crow .sp{ flex:1; }
+.forge .fgprovider-note{ flex-basis:100%; color:var(--red); line-height:1.4; }
+.forge .fgauto{ display:inline-flex; align-items:center; gap:4px; color:var(--ink); white-space:nowrap; cursor:pointer; }
+.forge .fgauto input, .forge .fgcheck input{ accent-color:var(--cyan); }
+.forge .fgroute{
+  flex:none; display:flex; gap:7px; align-items:flex-start; padding:0 10px 8px;
+  color:var(--ink-2); font:9.5px/1.45 var(--font-mono);
+}
+.forge .fgroute-mark{ color:var(--cyan); flex:none; }
+.forge .fgroute[data-auto="0"] .fgroute-mark{ color:var(--amber); }
+.forge .fghosted{
+  flex:none; margin:8px 9px 0; padding:10px 11px; border:1px solid color-mix(in srgb, var(--amber) 55%, var(--rule));
+  border-radius:9px; background:var(--g3); color:var(--ink-2); font-size:11px; line-height:1.5;
+}
+.forge .fghosted b{ display:block; color:var(--ink); font-size:11.5px; }
+.forge .fghosted p{ margin:4px 0 0; }
+.forge .fghosted .acts{ margin-top:8px; }
+.forge .fgcheck{ display:flex; align-items:center; gap:5px; color:var(--ink); font-weight:600; margin-bottom:5px; cursor:pointer; }
+.forge .fgthemes .btn[aria-pressed="true"]{ border-color:var(--cyan); color:var(--cyan); }
 .forge .ev{ display:flex; gap:9px; font-size:11.5px; margin-bottom:8px; }
 .forge .ev .tm{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2); width:40px; flex:none; padding-top:2px; }
 .forge .ev .tx{ color:var(--ink-2); min-width:0; overflow-wrap:anywhere; }
@@ -1150,15 +1265,16 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    ========================================================================== */
 :root[data-forge-view="agent"] .forge{
   grid-template-columns:minmax(0,1fr);
-  grid-template-rows:minmax(0,1fr) 26px;
+  grid-template-rows:36px minmax(0,1fr) 22px;
 }
+:root[data-forge-view="agent"] .forge>.rgTop{ grid-column:1; grid-row:1; }
 :root[data-forge-view="agent"] .forge>.rgA,
 :root[data-forge-view="agent"] .forge>.rgB,
 :root[data-forge-view="agent"] .forge>.rgD{ display:none; }
 :root[data-forge-view="agent"] .forge>.rgC{
-  grid-column:1; grid-row:1; border-left:0; background:var(--g2);
+  grid-column:1; grid-row:2; border-left:0; background:var(--g2);
 }
-:root[data-forge-view="agent"] .forge>.rgE{ grid-column:1; grid-row:2; }
+:root[data-forge-view="agent"] .forge>.rgE{ grid-column:1; grid-row:3; }
 
 /* ONE MEASURE, shared by the header, the tabs, the thread and the composer, so
    nothing in the column is off-axis with anything else.
@@ -1169,10 +1285,19 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    card, and a card is the one thing this view is not. `max()` keeps the gutter
    at 18px on a narrow window, where 84ch is wider than the pane. */
 :root[data-forge-view="agent"] .forge .sesrow,
+:root[data-forge-view="agent"] .forge .fgsessions,
 :root[data-forge-view="agent"] .forge .insp-tabs,
 :root[data-forge-view="agent"] .forge .insp-bd,
 :root[data-forge-view="agent"] .forge .compose,
-:root[data-forge-view="agent"] .forge .crow{
+:root[data-forge-view="agent"] .forge .crow,
+:root[data-forge-view="agent"] .forge .fghosted{
+  padding-left:max(18px, calc((100% - 84ch) / 2));
+  padding-right:max(18px, calc((100% - 84ch) / 2));
+}
+:root[data-forge-view="agent"] .forge .fghosted{
+  margin-left:0; margin-right:0; border-left:0; border-right:0; border-radius:0;
+}
+:root[data-forge-view="agent"] .forge .fgroute{
   padding-left:max(18px, calc((100% - 84ch) / 2));
   padding-right:max(18px, calc((100% - 84ch) / 2));
 }
@@ -1180,7 +1305,8 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 :root[data-forge-view="agent"] .forge .insp-tabs{ padding-top:11px; border-bottom:0; }
 :root[data-forge-view="agent"] .forge .insp-bd{ padding-top:6px; padding-bottom:30px; font-size:13.5px; }
 :root[data-forge-view="agent"] .forge .compose{ padding-top:12px; padding-bottom:12px; }
-:root[data-forge-view="agent"] .forge .compose input{ font-size:13.5px; padding:11px 13px; }
+:root[data-forge-view="agent"] .forge .compose input,
+:root[data-forge-view="agent"] .forge .compose textarea{ font-size:13.5px; padding:11px 13px; }
 :root[data-forge-view="agent"] .forge .crow{ padding-bottom:12px; font-size:10.5px; }
 :root[data-forge-view="agent"] .forge .crow select{ font-size:11px; max-width:220px; }
 
@@ -1225,23 +1351,41 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 :root[data-forge-view="agent"] .forge .fghead{ font-size:10.5px; }
 
 /* ---- a run in flight -----------------------------------------------------
-   The clock is the only real number this window has while a POST is open, so
-   it is the only number shown. The mark beside it turns; it does NOT fill,
-   because a progress bar with nothing behind it is a lie told slowly. */
+   The bar is backed by five daemon orchestration milestones. Its label keeps
+   that boundary visible: it never claims provider-generation completion. */
 .forge .fgrun{
   display:flex; align-items:center; gap:9px; font-family:var(--font-mono);
   font-size:11px; color:var(--ink-2); margin-bottom:8px;
 }
 .forge .fgrun .sp{ flex:1; }
 .forge .fgrun-el{ color:var(--ink); }
+.forge .fgrun-phase{
+  color:var(--ink); font:600 11px/1.45 var(--font-mono); margin:2px 0 6px;
+}
+.forge .fgrun-track{
+  width:100%; height:4px; overflow:hidden; border-radius:999px;
+  background:var(--g3); box-shadow:inset 0 0 0 1px var(--rule);
+}
+.forge .fgrun-fill{
+  display:block; height:100%; border-radius:inherit; background:var(--cyan);
+  transition:width 180ms ease-out;
+}
+.forge .fgrun-facts,.forge .fgrun-tokens{
+  margin-top:6px; color:var(--ink-2); font:10px/1.5 var(--font-mono);
+}
+.forge .fgrun-tokens{ margin-top:2px; }
 .forge .fgspin{
   width:9px; height:9px; border-radius:50%; flex:none;
   border:1.5px solid var(--rule-2); border-top-color:var(--cyan);
   animation:fgspin 900ms linear infinite;
 }
+.forge .fgspin.terminal{ animation:none; border-color:var(--green); }
+.forge .fgspin.terminal.failed{ border-color:var(--red); }
+.forge .fgspin.terminal.cancelled{ border-color:var(--amber); }
 @keyframes fgspin{ to{ transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce){
   .forge .fgspin{ animation:none; border-top-color:var(--cyan); border-right-color:var(--cyan); }
+  .forge .fgrun-fill{ transition:none; }
 }
 
 /* ---- code inside the conversation, coloured by monaco -------------------- */
@@ -1270,6 +1414,188 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .rgE .fgview{ font:inherit; font-size:9.5px; cursor:pointer; }
 .forge .rgE .fgview:hover{ color:var(--ink); }
 
+/* Forge follows a readable desktop IDE rhythm while keeping Zeno's Glass
+   material, cyan/amber state language, approval capsules, and product nav. */
+:root[data-zeno-surface="forge"] .bar{
+  flex-wrap:nowrap; gap:7px; min-height:42px; padding:5px 9px;
+  background:color-mix(in srgb,var(--g1) 94%,transparent);
+}
+:root[data-zeno-surface="forge"] .brand{ font-size:16px; padding:3px 8px; gap:7px; }
+:root[data-zeno-surface="forge"] .brand-sub{ font-size:9px; margin-left:3px; }
+:root[data-zeno-surface="forge"] .nav{ padding:2px; border-radius:7px; }
+:root[data-zeno-surface="forge"] .nav-item{ min-height:29px; padding:5px 11px; border-radius:5px; font-size:12px; gap:7px; }
+:root[data-zeno-surface="forge"] .step{ padding:2px; border-radius:7px; }
+:root[data-zeno-surface="forge"] .step .stp{ padding:4px 8px; border-radius:5px; font-size:10px; }
+:root[data-zeno-surface="forge"] .bar-ctl{ gap:3px; }
+:root[data-zeno-surface="forge"] .ctl{ padding:5px 8px; border-radius:6px; font-size:10px; }
+
+:root[data-zeno-surface="forge"] .forge{
+  grid-template-columns:var(--fexplorer,318px) minmax(0,1fr) var(--fsession,440px);
+  /* The reference workbench gives its terminal roughly two fifths of the
+     frame. A viewport-relative default keeps that useful split on laptops
+     without letting the drawer consume an ultrawide or short window. */
+  grid-template-rows:36px minmax(0,1fr) var(--fdrawer,clamp(260px, 40vh, 540px)) 23px;
+  height:calc(100vh - 42px);
+}
+:root[data-zeno-surface="forge"] .foot{ display:none; }
+:root[data-zeno-surface="forge"] .forge .rgTop{ gap:9px; padding:0 9px; font-size:11.5px; }
+:root[data-zeno-surface="forge"] .forge .fgmode{ padding:1px; border-radius:6px; background:var(--g3); }
+:root[data-zeno-surface="forge"] .forge .fgmode button{ padding:4px 10px; border-radius:4px; font-size:11.5px; }
+:root[data-zeno-surface="forge"] .forge .fgmenu button{ padding:5px 7px; border-radius:3px; font-size:11.5px; }
+:root[data-zeno-surface="forge"] .forge .fgworkspace{
+  max-width:500px; min-height:27px; padding:3px 11px; justify-content:flex-start; font-size:11.5px;
+  border:1px solid var(--rule); border-radius:6px; background:var(--g2);
+  color:var(--ink-2); cursor:pointer;
+}
+:root[data-zeno-surface="forge"] .forge .fgworkspace:hover{ border-color:var(--rule-2); color:var(--ink); }
+:root[data-zeno-surface="forge"] .forge .fgnew{ padding:4px 8px; border-radius:5px; }
+:root[data-zeno-surface="forge"] .forge .fgpane-toggle{
+  width:27px; height:27px; border:0; border-radius:4px; background:none; color:var(--ink-2);
+  font:13px/1 var(--font-mono); cursor:pointer;
+}
+:root[data-zeno-surface="forge"] .forge .fgpane-toggle:hover{ background:var(--g4); color:var(--ink); }
+:root[data-zeno-surface="forge"] .forge .fgpane-toggle[aria-pressed="true"]{ color:var(--cyan); }
+:root[data-zeno-surface="forge"] .forge .fg-vdrag{
+  position:absolute; z-index:12; top:36px; bottom:23px; width:7px; padding:0; border:0;
+  background:transparent; cursor:ew-resize; touch-action:none;
+}
+:root[data-zeno-surface="forge"] .forge .fg-vdrag::after{
+  content:""; position:absolute; top:0; bottom:0; left:3px; width:1px; background:transparent;
+}
+:root[data-zeno-surface="forge"] .forge .fg-vdrag:hover::after,
+:root[data-zeno-surface="forge"] .forge .fg-vdrag.grab::after,
+:root[data-zeno-surface="forge"] .forge .fg-vdrag:focus-visible::after{ background:var(--cyan); }
+:root[data-zeno-surface="forge"] .forge .fg-vdrag-left{ left:calc(var(--fexplorer,318px) - 3px); }
+:root[data-zeno-surface="forge"] .forge .fg-vdrag-right{ right:calc(var(--fsession,440px) - 3px); }
+:root[data-forge-explorer="closed"] .forge>.rgA,
+:root[data-forge-session="closed"] .forge>.rgC{ display:none; }
+:root[data-forge-explorer="closed"] .forge{ grid-template-columns:0 minmax(0,1fr) var(--fsession,440px) !important; }
+:root[data-forge-session="closed"] .forge{ grid-template-columns:var(--fexplorer,318px) minmax(0,1fr) 0 !important; }
+:root[data-forge-explorer="closed"][data-forge-session="closed"] .forge{ grid-template-columns:0 minmax(0,1fr) 0 !important; }
+
+:root[data-zeno-surface="forge"] .forge .fgactivity{ width:41px; flex-basis:41px; padding-top:4px; gap:1px; background:var(--g1); }
+:root[data-zeno-surface="forge"] .forge .fgactivity button{ width:37px; height:35px; border-radius:3px; font-size:17px; }
+:root[data-zeno-surface="forge"] .forge .fgactivity button[aria-current="true"]{ background:none; color:var(--ink); }
+:root[data-zeno-surface="forge"] .forge .fgactivity button[aria-current="true"]::before{ left:-2px; top:4px; bottom:4px; width:2px; }
+:root[data-zeno-surface="forge"] .forge .fgside{ padding:8px 7px 9px; }
+:root[data-zeno-surface="forge"] .forge .fgside-title{ padding:4px 7px 9px; font:600 11px/1.2 var(--font-ui); letter-spacing:.035em; }
+:root[data-zeno-surface="forge"] .forge .rgA .mdl{
+  margin:0 2px 5px; padding:3px 4px 7px; border:0; border-bottom:1px solid var(--rule);
+  border-radius:0; background:none;
+}
+:root[data-zeno-surface="forge"] .forge .rgA .mdl b{ flex-basis:100%; font-size:12px; }
+:root[data-zeno-surface="forge"] .forge .rgA .mdl .btn{ padding:4px 7px; border-radius:4px; font-size:10.5px; }
+:root[data-zeno-surface="forge"] .forge .panbar{ display:none; }
+:root[data-zeno-surface="forge"] .forge .tree{ font-size:12.5px; }
+:root[data-zeno-surface="forge"] .forge .tree button{ border-radius:3px; padding-top:4px; padding-bottom:4px; font-size:12.5px; }
+:root[data-zeno-surface="forge"] .forge .fgtree button{ padding-left:calc(3px + var(--depth,0) * 12px); }
+
+:root[data-zeno-surface="forge"] .forge .crumbs{ min-height:31px; padding:5px 11px; font-size:11px; }
+:root[data-zeno-surface="forge"] .forge .tabs{ min-height:34px; }
+:root[data-zeno-surface="forge"] .forge .tabs .tb{ border-radius:0; font-size:11.5px; }
+:root[data-zeno-surface="forge"] .forge .tabs .tb-main{ padding-block:7px; }
+:root[data-zeno-surface="forge"] .forge .edbar{ min-height:30px; padding:4px 11px; font-size:11px; }
+:root[data-zeno-surface="forge"] .forge .rgD{ padding:8px 12px 9px; }
+:root[data-zeno-surface="forge"] .forge .drawhd{
+  gap:2px; margin:0 -12px 8px; padding:0 8px 7px;
+  border-bottom:1px solid var(--rule); flex-wrap:nowrap; overflow-x:auto;
+}
+:root[data-zeno-surface="forge"] .forge .drawhd .chip{
+  border:0; border-radius:3px 3px 0 0; padding:5px 9px;
+  background:transparent; box-shadow:none; font-size:11.5px;
+}
+:root[data-zeno-surface="forge"] .forge .drawhd .chip[data-state="listening"]{
+  color:var(--ink); background:var(--g3); box-shadow:inset 0 -2px 0 var(--cyan);
+}
+:root[data-zeno-surface="forge"][data-drawer="min"] .forge .rgD{ padding:4px 12px; }
+:root[data-zeno-surface="forge"][data-drawer="min"] .forge .drawhd{
+  margin:0 -12px; padding:0 8px; border-bottom:0;
+}
+:root[data-zeno-surface="forge"] .forge .drawbody{ font-size:12px; line-height:1.65; }
+:root[data-zeno-surface="forge"] .forge .fgterm-tabs{
+  gap:2px; margin:0 -4px 8px; padding:0 4px 6px; border-bottom:1px solid var(--rule);
+}
+:root[data-zeno-surface="forge"] .forge .fgterm-tabs .chip{
+  border:0; border-radius:3px 3px 0 0; padding:5px 8px; background:transparent; box-shadow:none;
+}
+:root[data-zeno-surface="forge"] .forge .fgterm-tabs .chip[data-state="listening"]{
+  color:var(--ink); background:var(--g3); box-shadow:inset 0 -2px 0 var(--cyan);
+}
+:root[data-zeno-surface="forge"] .forge .fgterm-history{ min-height:52px; padding:0 2px 4px; }
+:root[data-zeno-surface="forge"] .forge .fgterm-entry{
+  margin:0; padding:7px 4px; border:0; border-radius:0; background:transparent;
+}
+:root[data-zeno-surface="forge"] .forge .fgterm-entry + .fgterm-entry{ border-top:1px solid var(--rule); }
+:root[data-zeno-surface="forge"] .forge .fgterm-entry > .hint{ margin-top:0; }
+:root[data-zeno-surface="forge"] .forge .fgterm-entry > pre.code{
+  display:block; min-height:0; max-height:220px; margin:4px 0 0; padding:2px 0;
+  border:0; background:transparent; font-size:11.5px; line-height:1.55; flex:none;
+}
+
+:root[data-zeno-surface="forge"] .forge .rgC{ background:var(--g2); }
+:root[data-zeno-surface="forge"] .forge .sesrow{
+  min-height:34px; padding:0 11px; border-bottom:1px solid var(--rule); color:var(--ink);
+  font-family:var(--font-ui); font-size:11.5px; text-transform:none;
+}
+:root[data-zeno-surface="forge"] .forge .fgsessions{ min-height:34px; padding:4px 8px 0; border-bottom:1px solid var(--rule); }
+:root[data-zeno-surface="forge"] .forge .fgsessions button{ border-radius:4px 4px 0 0; padding:5px 8px; font-size:11px; }
+:root[data-zeno-surface="forge"] .forge .insp-tabs{ padding:4px 8px 0; }
+:root[data-zeno-surface="forge"] .forge .insp-tabs button{ padding:7px 8px; font-size:11.5px; }
+:root[data-zeno-surface="forge"] .forge .insp-bd{ padding:12px; font-size:12.5px; }
+:root[data-zeno-surface="forge"] .forge .msg .bub{ font-size:12.5px; line-height:1.55; }
+:root[data-zeno-surface="forge"] .forge .msg .who{ font-size:9.5px; }
+:root[data-zeno-surface="forge"] .forge .insp-bd:has(> .unwired:only-child){ display:flex; align-items:center; justify-content:center; }
+:root[data-zeno-surface="forge"] .forge .insp-bd:has(> .unwired:only-child) .unwired{
+  width:min(100%,520px); margin:0; border:0; background:none; text-align:center;
+}
+:root[data-zeno-surface="forge"] .forge .composer-shell{
+  flex:none; margin:8px 10px; border:1px solid var(--rule-2); border-radius:7px; background:var(--g1); overflow:hidden;
+}
+:root[data-zeno-surface="forge"] .forge .composer-shell .compose{ border:0; padding:6px 7px; align-items:flex-end; }
+:root[data-zeno-surface="forge"] .forge .composer-shell .compose textarea{
+  min-height:52px; max-height:140px; resize:vertical; border:0; border-radius:3px; padding:7px 8px; background:transparent; font-size:12.5px;
+}
+:root[data-zeno-surface="forge"] .forge .composer-shell .compose textarea:focus-visible{ outline-offset:-1px; }
+:root[data-zeno-surface="forge"] .forge .composer-shell .crow{ padding:0 7px 6px; gap:5px; font-size:10px; }
+:root[data-zeno-surface="forge"] .forge .composer-shell .crow select{ border-radius:3px; padding:2px 5px; font-size:10.5px; }
+:root[data-zeno-surface="forge"] .forge .composer-shell .fgroute{ padding:5px 7px 6px; border-top:1px solid var(--rule); font-size:10px; line-height:1.35; }
+:root[data-zeno-surface="forge"] .forge .rgE{ min-height:23px; font-size:10.5px; }
+:root[data-zeno-surface="forge"] .forge .rgE .chip,
+:root[data-zeno-surface="forge"] .forge .rgE .fgview{ font-size:10px; }
+
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge{
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:36px minmax(0,1fr) 23px; height:calc(100vh - 42px);
+}
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge>.rgC{
+  width:min(100%,920px); justify-self:center; border-right:1px solid var(--rule); border-left:1px solid var(--rule);
+}
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .sesrow,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .fgsessions,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .insp-tabs,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .insp-bd,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .compose,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .crow,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .fghosted,
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .fgroute{ padding-left:12px; padding-right:12px; }
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .composer-shell{ margin:10px 12px; border-radius:9px; }
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .composer-shell .compose{ padding:10px; }
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .composer-shell .compose textarea{
+  min-height:84px; max-height:220px; padding:10px 11px; font-size:13.5px;
+}
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .composer-shell .crow{ padding:0 10px 10px; font-size:10.5px; }
+:root[data-zeno-surface="forge"][data-forge-view="agent"] .forge .composer-shell .fgroute{ padding:7px 10px 10px; font-size:10.5px; }
+
+@media (max-width:1360px) and (min-width:901px){
+  :root[data-zeno-surface="forge"] .forge{ grid-template-columns:var(--fexplorer,244px) minmax(0,1fr) var(--fsession,328px); }
+  :root[data-zeno-surface="forge"] .step .stp{ padding-inline:5px; }
+}
+@media (max-width:1120px) and (min-width:901px){
+  :root[data-zeno-surface="forge"] .forge{ grid-template-columns:var(--fexplorer,220px) minmax(0,1fr) var(--fsession,296px); }
+  :root[data-zeno-surface="forge"] .step{ display:none; }
+  :root[data-zeno-surface="forge"] .bar-ctl .ctl:not(#ctl-theme){ display:none; }
+}
+
 /* One column below 900px: every region stacked, none hidden. The prototype's
    own small-screen rule, kept — a narrow window loses the grid, not the IDE. */
 @media (max-width:900px){
@@ -1285,10 +1611,9 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
      switcher off the bottom, and the switcher is how you reach the other panels. */
   .forge .rgA{
     border-right:0; border-bottom:1px solid var(--rule); max-height:none;
-    /* Not a clipped flex column here. As a column in an auto grid row the rail
-       collapsed to the height of its head and `overflow:hidden` then ate the
-       tree AND the panel switcher — the two things the rail is for. */
-    display:block; overflow:visible;
+    /* Keep the activity rail and its selected panel together. A bounded height
+       gives the stacked editor room below while the file list scrolls inside. */
+    display:flex; overflow:hidden; min-height:280px;
   }
   .forge .rgA .panbody{ max-height:210px; overflow:auto; }
   .forge .rgB{ min-height:300px; }
@@ -1297,6 +1622,31 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   .forge .rgC{ border-left:0; border-top:1px solid var(--rule); min-height:340px; max-height:70vh; }
   .forge .rgD{ max-height:220px; }
   .forge .rgE{ white-space:normal; flex-wrap:wrap; gap:8px; padding:8px 12px; height:auto; }
+}
+
+@media (max-width:760px){
+  .forge .fgmenu{ display:none; }
+  .forge .fgworkspace{ justify-content:flex-start; }
+  .forge .fgtop-right .chip{ display:none; }
+  .forge .edhost[data-split="true"] .edsplit-drag,
+  .forge .edhost[data-split="true"] .edpane:last-child{ display:none !important; }
+  .forge .edhost[data-split="true"] .edpane:first-child{ flex:1 1 auto; }
+  .forge .edtools:has(+ .edhost[data-split="true"])::before{
+    content:'group 2 hidden at this width'; margin-right:auto; color:var(--ink-3); font:10px var(--font-mono);
+  }
+}
+
+@media (max-width:480px){
+  :root[data-zeno-surface="forge"] .bar{ gap:4px; padding:5px 6px; }
+  :root[data-zeno-surface="forge"] .brand{ padding-inline:5px; }
+  :root[data-zeno-surface="forge"] .brand-sub{ display:none; }
+  :root[data-zeno-surface="forge"] .nav-item{ padding-inline:7px; gap:4px; font-size:11px; }
+  :root[data-zeno-surface="forge"] .ctl{ padding-inline:6px; }
+  .forge .rgTop{ gap:6px; }
+  .forge .fgworkspace{ display:none; }
+  .forge .fgtop-right{ margin-left:auto; }
+  .forge .fgnew{ font-size:0; padding:5px 8px; }
+  .forge .fgnew::after{ content:"+"; font-size:12px; }
 }
 
 @media (max-width:560px){
@@ -1313,8 +1663,8 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 <!-- ============================ the top nav (glass) ====================== -->
 <header class="bar">
   <button type="button" class="brand" id="home" title="Home — Command · Today">
-    <span class="brand-mark" aria-hidden="true">◉</span>
-    <span class="brand-word">Zeno</span>
+    <img class="brand-mark" src="/brand/mark.svg" alt="" aria-hidden="true">
+  <span class="brand-word">Zeno Command</span>
     <span class="brand-sub" aria-hidden="true">local</span>
   </button>
 
@@ -1386,7 +1736,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
         <button type="button" class="rail-n" aria-current="true" data-jump="cmd-hero">Today &amp; Attention <span class="n" data-mount="rail-today"></span></button>
         <button type="button" class="rail-n" data-jump="voice">Ask Zeno</button>
         <button type="button" class="rail-n" data-jump="pending">Approvals <span class="n" data-mount="rail-approvals"></span></button>
-        <button type="button" class="rail-n" data-jump="timeline">Agents &amp; runs</button>
+        <button type="button" class="rail-n" data-jump="timeline">Receipts</button>
         <button type="button" class="rail-n" data-jump="sec-workstation">Workstation <span class="n" data-mount="rail-workstation"></span></button>
         <button type="button" class="rail-n" data-jump="sec-vault">Vault <span class="n" data-mount="rail-vault"></span></button>
         <button type="button" class="rail-n" data-jump="devices">Devices <span class="n" data-mount="rail-devices"></span></button>

@@ -31,16 +31,16 @@
  */
 import type { Kernel } from '@abheet19/zeno-kernel';
 import type { ActionRequest, Preview, Receipt } from '@abheet19/zeno-kernel';
+import { sanitize } from '@abheet19/zeno-sanitizer';
 import {
   applyMemoryWrite,
-  buildRunContext,
   proposeMemoryWrite,
-  readProjectContext,
   validateMemoryInput,
   type Memory,
   type MemoryInput,
   type MemoryWritePayload,
 } from '@abheet19/zeno-vault';
+import { assembleMemoryContext } from './memory-context.js';
 import type { Role } from './tokens.js';
 
 export interface RouteReply {
@@ -85,6 +85,17 @@ function ownerOnly(what: string): RouteReply {
 function str(body: Record<string, unknown>, key: string): string | null {
   const v = body[key];
   return typeof v === 'string' ? v : null;
+}
+
+/** Secrets never enter a memory preview, Vault note, or model-facing context. */
+function scrub(value: string): string {
+  return sanitize(value).clean;
+}
+
+function scrubTags(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((tag): tag is string => typeof tag === 'string').map(scrub)
+    : [];
 }
 
 export function createMemoryRoutes(deps: MemoryRouteDeps): {
@@ -155,24 +166,39 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
     if (method === 'GET' && path === '/memory/context') {
       const task = query.get('task') ?? '';
       if (task.trim() === '') return bad('Context needs a task.', 'GET /memory/context?task=what+the+agent+will+do');
-      let project = null;
-      let note: string | null = null;
+      let context;
       try {
-        project = readProjectContext(deps.projectRoot);
+        context = assembleMemoryContext({ memory: deps.memory, projectRoot: deps.projectRoot, task });
       } catch (err) {
         // A ZENO.md that exists and cannot be read is worth saying out loud: silently
         // running without the owner's standing instructions is the failure that looks
         // like success.
-        note = `${deps.projectRoot} has a context file that could not be read: ${(err as Error).message}`;
+        return {
+          status: 409,
+          body: {
+            error: {
+              code: 'context-unavailable',
+              message: `${deps.projectRoot} has a context file that could not be read: ${(err as Error).message}`,
+              resolve: 'Repair or remove ZENO.md, then ask for context again.',
+            },
+          },
+        };
       }
-      const memories = deps.memory.recall(task).map((h) => h.entry);
       return {
         status: 200,
         body: {
-          contextFile: project === null ? null : { path: project.path, bytes: project.bytes, truncated: project.truncated },
-          memories: memories.map(wire),
-          prompt: buildRunContext({ project, memories, task }),
-          note,
+          contextFile: context.project === null
+            ? null
+            : { path: context.project.path, bytes: context.project.bytes, truncated: context.project.truncated },
+          memories: context.recalled.map((hit) => ({
+            ...wire(hit.entry),
+            score: hit.score,
+            matched: hit.matched,
+            citation: hit.citation,
+          })),
+          prompt: context.prompt,
+          redacted: context.redacted,
+          note: null,
         },
       };
     }
@@ -186,10 +212,10 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
       const body = await readBody();
       const checked = validateMemoryInput({
         kind: (str(body, 'kind') ?? 'fact') as MemoryInput['kind'],
-        description: str(body, 'description') ?? '',
-        body: str(body, 'body') ?? '',
-        source: str(body, 'source') ?? 'owner',
-        tags: Array.isArray(body['tags']) ? (body['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [],
+        description: scrub(str(body, 'description') ?? ''),
+        body: scrub(str(body, 'body') ?? ''),
+        source: scrub(str(body, 'source') ?? 'owner'),
+        tags: scrubTags(body['tags']),
       });
       if (!checked.ok) return bad(checked.reason, 'Fix that field and post it again.');
       return { status: 200, body: { entry: wire(applyMemoryWrite(deps.memory, checked.payload)) } };
@@ -200,13 +226,19 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
      */
     if (method === 'POST' && path === '/memory/propose') {
       const body = await readBody();
-      const requestedBy = str(body, 'requestedBy') ?? (role === 'owner' ? 'window' : 'agent');
+      const suppliedSource = str(body, 'requestedBy')?.trim() ?? '';
+      // A proposer token may name an agent, but it can never cite the owner as
+      // its source. The prompt treats every record as non-authoritative anyway;
+      // this keeps the provenance label factual as well.
+      const requestedBy = role === 'owner'
+        ? scrub(suppliedSource || 'window')
+        : scrub(/^agent(?::[A-Za-z0-9._-]{1,64})?$/.test(suppliedSource) ? suppliedSource : 'agent');
       const checked = validateMemoryInput({
         kind: (str(body, 'kind') ?? 'fact') as MemoryInput['kind'],
-        description: str(body, 'description') ?? '',
-        body: str(body, 'body') ?? '',
+        description: scrub(str(body, 'description') ?? ''),
+        body: scrub(str(body, 'body') ?? ''),
         source: requestedBy,
-        tags: Array.isArray(body['tags']) ? (body['tags'] as unknown[]).filter((t): t is string => typeof t === 'string') : [],
+        tags: scrubTags(body['tags']),
       });
       if (!checked.ok) return bad(checked.reason, 'Fix that field and propose it again.');
       const req = proposeMemoryWrite(checked.payload, {

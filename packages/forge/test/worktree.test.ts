@@ -12,7 +12,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { nodeGitRunner, type GitRunner, type GitResult } from '@abheet19/zeno-kernel';
@@ -103,6 +103,53 @@ test('diffFiles parses the changeset, and a failed status refuses', () => {
 
   const bad = fakeGit(() => G(128, '', 'fatal: not a git repository'));
   assert.throws(() => diffFiles('/wt', bad.git), WorktreeUnavailableError);
+});
+
+test('diffFiles refuses a changed path that escapes through a symlink or junction', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-jail-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'forge-jail-outside-'));
+  const linked = join(root, 'linked');
+  writeFileSync(join(outside, 'secret.txt'), 'must stay outside\n');
+  try {
+    try {
+      symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      t.skip('this machine does not allow creating a directory link');
+      return;
+    }
+    const escaped = fakeGit(() => G(0, z('?? linked/secret.txt')));
+    assert.throws(
+      () => diffFiles(root, escaped.git),
+      /escapes the sandbox via a symlink/,
+      'a git-reported path is canonicalised before a caller may read it',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('createWorktree refuses a temporary namespace redirected through a symlink or junction', (t) => {
+  const base = mkdtempSync(join(tmpdir(), 'forge-worktree-base-'));
+  const outside = mkdtempSync(join(tmpdir(), 'forge-worktree-outside-'));
+  const namespace = join(base, WORKTREE_NAMESPACE);
+  try {
+    try {
+      symlinkSync(outside, namespace, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      t.skip('this machine does not allow creating a directory link');
+      return;
+    }
+    const { git, calls } = fakeGit(() => G(0));
+    assert.throws(
+      () => createWorktree('/repo', 'escaped-run', git, { tmpBase: base }),
+      /escapes the sandbox via a symlink/,
+    );
+    assert.equal(calls.length, 0, 'the redirected checkout is refused before git can write into it');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 /** git subcommands that would LAND history locally or PUBLISH it to a remote. */

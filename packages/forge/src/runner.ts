@@ -48,11 +48,17 @@ export interface SpawnResult {
   readonly failedToSpawn: boolean;
   readonly stdout: string;
   readonly stderr: string;
+  /** True only when the owner explicitly cancelled this invocation. */
+  readonly cancelled?: boolean;
 }
 
 /** Options for one spawn. `cwd` is the worktree the process runs inside. */
 export interface SpawnOptions {
   readonly cwd: string;
+  /** Optional text written to the child once and then closed. Never shell-parsed. */
+  readonly stdin?: string;
+  /** Cancels this invocation and its descendants without cancelling later status reads. */
+  readonly signal?: AbortSignal;
   /** Hard ceiling for this one invocation, in milliseconds. Adapter default otherwise. */
   readonly timeoutMs?: number;
   /**
@@ -94,6 +100,8 @@ export const SPAWN_FAILED = 127;
 
 /** The program name for the claude-code rung. An external dependency, named honestly. */
 export const CLAUDE_BINARY = 'claude';
+/** The program name for the Codex rung. An external dependency, named honestly. */
+export const CODEX_BINARY = 'codex';
 
 /** What the local rung reports until a model runtime is wired in. */
 export const LOCAL_NOT_CONFIGURED = 'local model runtime not configured';
@@ -157,8 +165,11 @@ export interface RunSpec {
   readonly agentId: string;
   readonly model?: string;
   readonly effort?: Effort;
-  /** The instruction for the agent. Passed as a SINGLE argv element behind an
-   * end-of-options `--`, so it is neither a shell string nor a CLI flag. */
+  /**
+   * The instruction for the agent. Codex receives one guarded argv element;
+   * Claude reads it from stdin because its CLI currently ignores a prompt after
+   * `--`. Both paths keep task text out of the option namespace and the shell.
+   */
   readonly task: string;
   /** Absolute path to the isolated worktree the agent runs inside. */
   readonly worktree: string;
@@ -166,6 +177,8 @@ export interface RunSpec {
   readonly gate?: GateWiring;
   /** Environment handed to the agent process — the run-scoped gate credential. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Owner cancellation for the agent process. Post-flight git inspection still runs. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -187,42 +200,76 @@ export interface RunResult {
   readonly changedFiles: readonly string[];
   /** The agent's combined stdout/stderr — the observable log of what it did. */
   readonly log: string;
+  /** True only when the owner stopped this run. Partial files still reach review. */
+  readonly cancelled?: boolean;
   /** Present only when `ok` is false: the one plain reason, and what to do about it. */
   readonly note?: string;
 }
 
 /**
- * Build the agent's argv. The task is ALWAYS the LAST element and always sits
- * behind an end-of-options `--`, so it is inert data to the agent on two fronts:
+ * Build the hosted agent's argv. Both providers read the task from stdin. Codex
+ * receives `-` behind an end-of-options `--`, its documented stdin sentinel;
+ * Claude receives no task argument. In both cases task text is inert data on two
+ * fronts, and a prompt near the daemon's context ceiling cannot exceed Windows'
+ * much smaller process command-line limit:
  *
  *   SHELL — a task containing `;`, `|`, `$(…)`, backticks or a newline is one
  *     argv element, never spliced into a shell string; the node adapter runs
  *     `shell: false` on top of that.
  *
- *   OPTIONS — the CLI takes the prompt as a POSITIONAL argument (`-p` is a bare
- *     print flag, not an option that swallows a value), so a task that begins
- *     with a dash — `--add-dir /`, `--allow-dangerously-skip-permissions`,
- *     `--mcp-config …` — would otherwise be parsed as REAL OPTIONS: reaching
- *     outside the worktree, or switching off the permission gate this product
- *     exists to be. The `--` marks end-of-options, so everything after it is the
- *     prompt and can inject no flag. This is the argv analogue of `shell: false`.
+ *   OPTIONS — a task that begins with `--add-dir /`, a permission bypass flag,
+ *     or `--mcp-config …` never enters either argv at all. It therefore cannot
+ *     reach outside the worktree or switch off the permission gate through
+ *     argument injection.
  *
- * `--model`/`--effort` are placed BEFORE the `--`: they are option-valued flags
+ * `--model`/`--effort` are ordinary option-valued flags
  * that bind their own following token, so a dash-shaped value is consumed as the
  * value (a bogus model or effort the CLI rejects) and can never become a flag of
  * its own. `--model` is added only for a non-empty model — an empty one means
  * "the CLI's own default". `--effort` is added only for an agent that DECLARES
- * `supportsEffort` — no real rung does yet, so it is never sent to the live CLI;
- * the branch is the seam a future effort-capable rung switches on.
+ * `supportsEffort`. Claude Code currently declares support and receives the
+ * option; the branch remains the seam for a future rung without one.
  */
+export function codexArgv(agent: Agent, spec: RunSpec): string[] {
+  // `-a never -s workspace-write` is not sufficient on managed Codex hosts:
+  // the host may correctly lower the session to read-only, leaving the picker
+  // looking functional while every edit is refused. `--approve-for-me` is the
+  // CLI's supported non-interactive path: tool calls are auto-reviewed inside
+  // its workspace-write sandbox. The workspace is Forge's throwaway worktree;
+  // landing any resulting file still goes through Zeno's proposal gate.
+  const argv = ['--approve-for-me'];
+  const model = spec.model?.trim();
+  if (model !== undefined && model !== '') argv.push('-m', model);
+  if (agent.supportsEffort && spec.effort !== undefined) {
+    // The installed CLI validates this key under --strict-config. Quoting the
+    // value makes it an explicit TOML string instead of relying on coercion.
+    argv.push('-c', `model_reasoning_effort="${spec.effort}"`);
+  }
+  argv.push(
+    'exec',
+    '--ephemeral',
+    '--ignore-user-config',
+    '--strict-config',
+    '--color',
+    'never',
+    '--',
+    '-',
+  );
+  return argv;
+}
+
 export function agentArgv(agent: Agent, spec: RunSpec): string[] {
+  if (agent.id === 'codex') return codexArgv(agent, spec);
+  if (agent.id === 'local') return [];
   const argv = ['-p'];
   const model = spec.model?.trim();
   if (model !== undefined && model !== '') argv.push('--model', model);
   if (agent.supportsEffort && spec.effort !== undefined) argv.push('--effort', spec.effort);
   if (agent.id === 'claude-code') argv.push(...claudeToolFlags(spec.gate));
-  // End-of-options: the task is a positional PROMPT after this, never a flag.
-  argv.push('--', spec.task);
+  // Claude reads the task from stdin. Its current CLI ignores a positional prompt
+  // after `--`; placing an arbitrary owner task before that separator would let a
+  // dash-prefixed task become a real CLI flag. Stdin satisfies both correctness
+  // and argument-injection safety.
   return argv;
 }
 
@@ -235,19 +282,15 @@ function joined(tools: readonly string[]): string {
  * The tool-surface flags, in the order they are safe to emit.
  *
  * Every one of them is built HERE, out of constants in this package. Not one is
- * derived from the task, the model name or anything else a caller supplies, so
- * the `--` guard below is not the only thing standing between an untrusted
- * string and a real option — there is nothing upstream of these flags to inject
- * into.
+ * derived from the task, the model name or anything else a caller supplies. Task
+ * text travels on stdin, so there is no untrusted string in this argv to inject.
  *
  * ORDER MATTERS, and for a reason worth stating: `--tools`, `--allowedTools`,
  * `--disallowedTools` and `--mcp-config` are all VARIADIC in the CLI, so each
  * one keeps swallowing argv elements until it meets something that looks like
  * an option. Every value is therefore a single comma-joined token, and the LAST
- * flag emitted is the boolean `--strict-mcp-config` — so the element sitting
- * immediately before the end-of-options `--` can never be a variadic still
- * looking for more. The `--` would stop them anyway; this means it does not have
- * to be the only thing that does.
+ * flag emitted is the boolean `--strict-mcp-config`, which terminates the prior
+ * variadic value. The prompt arrives later through stdin, outside argv entirely.
  *
  * WITHOUT A GATE, the surface is the file-only one Forge has always had, and
  * `--permission-prompts none` now states in the argv what used to be true only
@@ -367,14 +410,18 @@ export async function runAgent(spec: RunSpec, spawner: Spawner): Promise<RunResu
     return { ...base, ok: false, changedFiles: [], log: '', note: LOCAL_NOT_CONFIGURED };
   }
 
-  // claude-code: run the CLI headless inside the worktree. Branch on
+  // Hosted CLI: run headless inside the worktree. Codex adds its own
+  // workspace-write sandbox; Claude receives Forge's capability flags. Branch on
   // `failedToSpawn`, never on the exit code: a claude that ran and happened to
   // exit 127 is a FAILED RUN whose changeset we still enumerate below, not a
   // missing binary. Reading the sentinel off `code` would fabricate the latter
   // from the former and silently drop the files that run left behind.
-  const run = await spawner.run(CLAUDE_BINARY, agentArgv(agent, spec), {
+  const binary = agent.id === 'codex' ? CODEX_BINARY : CLAUDE_BINARY;
+  const run = await spawner.run(binary, agentArgv(agent, spec), {
     cwd: spec.worktree,
+    stdin: spec.task,
     ...(spec.env ? { env: spec.env } : {}),
+    ...(spec.signal ? { signal: spec.signal } : {}),
   });
   const log = mergeStreams(run);
   if (run.failedToSpawn) {
@@ -386,7 +433,7 @@ export async function runAgent(spec: RunSpec, spawner: Spawner): Promise<RunResu
       // The specific cause (ENOENT vs EACCES vs a timeout kill) is in `log`; the
       // note states only what is certain — it never ran — and offers the rung
       // that needs no external binary.
-      note: `the ${CLAUDE_BINARY} CLI could not be run — ensure it is installed and runnable, or choose the local rung`,
+      note: `the ${binary} CLI could not be run — ensure it is installed and runnable, or choose the local rung or another installed rung`,
     };
   }
 
@@ -413,6 +460,16 @@ export async function runAgent(spec: RunSpec, spawner: Spawner): Promise<RunResu
   }
 
   const changedFiles = parsePorcelainZ(status.stdout);
+  if (run.cancelled === true) {
+    return {
+      ...base,
+      ok: false,
+      cancelled: true,
+      changedFiles,
+      log,
+      note: 'the owner cancelled this run; any files written before cancellation are still waiting for review',
+    };
+  }
   // A clean exit AND a readable changeset is the only path to ok:true.
   if (run.code === 0) {
     return { ...base, ok: true, changedFiles, log };

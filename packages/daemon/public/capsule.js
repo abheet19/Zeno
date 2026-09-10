@@ -70,6 +70,30 @@ export function canonicalJSON(value) {
   return JSON.stringify(sortValue(value));
 }
 
+/**
+ * The server can refresh a held action without changing its actionHash. That is
+ * expected when a file's observed base moves: the governed action is the same,
+ * but its review changes from ready to drifted. Keep the comparison DOM-free
+ * so both Command and Forge use one tested rule instead of caching a stale,
+ * still-enabled approval capsule.
+ */
+export function pendingCapsuleNeedsRefresh(current, next) {
+  if (!current || !next || typeof current !== 'object' || typeof next !== 'object') return false;
+  if (typeof current.actionHash !== 'string' || current.actionHash !== next.actionHash) return false;
+  const presented = (preview) => ({
+    payload: Object.prototype.hasOwnProperty.call(preview, 'payload')
+      ? { present: true, value: preview.payload }
+      : { present: false },
+    payloadText: Object.prototype.hasOwnProperty.call(preview, 'payloadText')
+      ? { present: true, value: preview.payloadText }
+      : { present: false },
+    review: Object.prototype.hasOwnProperty.call(preview, 'review')
+      ? { present: true, value: preview.review }
+      : { present: false },
+  });
+  return canonicalJSON(presented(current)) !== canonicalJSON(presented(next));
+}
+
 const SUBTLE =
   typeof globalThis.crypto === 'object' && globalThis.crypto
     ? globalThis.crypto.subtle
@@ -298,6 +322,17 @@ const CSS = `
   tab-size:2;
 }
 .zn-caps .zn-payload:focus-visible{ outline:2px solid var(--zn-focus); outline-offset:2px; }
+
+/* A line-exact, server-built review. EOL markers keep CRLF/LF and final-newline
+   changes visible; cyan remains informational and green remains receipt-only. */
+.zn-caps .zn-diff{
+  background:var(--zn-g2); border:1px solid var(--zn-rule); border-radius:6px;
+  margin:0; padding:12px 14px; max-height:340px; overflow:auto;
+  font-family:var(--zn-mono); font-size:11.5px; line-height:1.55;
+  color:var(--zn-ink); white-space:pre; user-select:text; -webkit-user-select:text;
+  tab-size:2;
+}
+.zn-caps .zn-diff:focus-visible{ outline:2px solid var(--zn-focus); outline-offset:2px; }
 
 /* ---- small controls ---- */
 .zn-caps button{ font:inherit; cursor:pointer; }
@@ -551,6 +586,73 @@ function tierBadge(preview) {
   return chip(glyph, `${tier} · approval owed`, 'amber', `Tier ${tier}: your approval is required`);
 }
 
+function isWritePayload(payload) {
+  return payload !== null && typeof payload === 'object' &&
+    typeof payload.relPath === 'string' &&
+    typeof payload.contents === 'string' &&
+    typeof payload.expectBaseHash === 'string' &&
+    typeof payload.expectPostHash === 'string';
+}
+
+/**
+ * Validate the daemon's file-review envelope against the exact write payload.
+ * Kept DOM-free so the binding and refusal states are unit-testable.
+ */
+export function fileReviewModel(review, payload) {
+  if (!isWritePayload(payload)) return null;
+  const fail = (state, blocker) => ({
+    state, blocker, diff: null, truncated: false, omittedDiffLines: 0,
+    omittedCharacters: 0, note: '', review: review || null,
+  });
+  if (review === null || typeof review !== 'object') {
+    return fail('missing', 'the exact before/after review is missing for this file write');
+  }
+  if (review.version !== 1) return fail('mismatch', 'the file review has an unsupported version');
+  if (review.relPath !== payload.relPath) return fail('mismatch', 'the file review names a different path than the payload');
+  if (review.expectedBaseHash !== payload.expectBaseHash) {
+    return fail('mismatch', 'the file review is bound to a different base hash than the payload');
+  }
+  if (review.expectedPostHash !== payload.expectPostHash || review.observedPostHash !== payload.expectPostHash) {
+    return fail('mismatch', 'the file review is bound to different proposed bytes than the payload');
+  }
+  if (review.state === 'drifted') {
+    return fail('drifted', 'the sandbox base drifted after this action was proposed; re-propose before approving');
+  }
+  if (review.state === 'unavailable') {
+    return fail('unavailable', 'the sandbox base could not be read and verified; re-propose before approving');
+  }
+  if (review.state !== 'ready') return fail('mismatch', 'the file review carries an unknown state');
+  if (review.observedBaseHash !== payload.expectBaseHash) {
+    return fail('mismatch', 'the reviewed sandbox bytes do not match the payload’s expected base hash');
+  }
+  if (typeof review.diff !== 'string' || typeof review.truncated !== 'boolean') {
+    return fail('mismatch', 'the ready file review does not carry a bounded diff and truncation state');
+  }
+  const countsAreValid =
+    Number.isSafeInteger(review.omittedDiffLines) && review.omittedDiffLines >= 0 &&
+    Number.isSafeInteger(review.omittedCharacters) && review.omittedCharacters >= 0;
+  if (!countsAreValid) {
+    return fail('mismatch', 'the file review does not carry valid omitted-content counts');
+  }
+  const omittedDiffLines = review.omittedDiffLines;
+  const omittedCharacters = review.omittedCharacters;
+  if (review.truncated !== (omittedDiffLines > 0 || omittedCharacters > 0)) {
+    return fail('mismatch', 'the file review truncation state contradicts its omitted-content counts');
+  }
+  return {
+    state: 'ready',
+    blocker: review.truncated
+      ? 'the before/after diff is truncated; narrow or split the change and re-propose it before approving'
+      : null,
+    diff: review.diff,
+    truncated: review.truncated,
+    omittedDiffLines,
+    omittedCharacters,
+    note: typeof review.note === 'string' ? review.note : '',
+    review,
+  };
+}
+
 /* ------------------------------------------------------------------ *
  * 5 · renderCapsule                                                   *
  * ------------------------------------------------------------------ */
@@ -561,6 +663,8 @@ function tierBadge(preview) {
  *   payload       {unknown}  the exact payload value. Presence checked with `in`.
  *   payloadText   {string}   pre-serialised exact bytes (preferred when the daemon
  *                            has the literal bytes rather than the parsed value).
+ *   review        {object}   server-built, hash-bound before/after review for a
+ *                            file-write payload. Missing or drifted review blocks it.
  *   expiresAt     {string}   ISO-8601 — drives the live countdown when present.
  *   approvalTtlMs {number}   World.approvalTtlMs, for an honest expiry statement
  *                            when no clock is running yet.
@@ -731,10 +835,73 @@ export function renderCapsule(preview, opts = {}) {
   }
   add(body, targetField);
 
-  /* --- 6 · Payload body: the complete exact payload, opaque --g2 plane --- */
-  const payloadField = field(6, 'The exact change it will write');
   const hasText = typeof opts.payloadText === 'string';
   const hasValue = Object.prototype.hasOwnProperty.call(opts, 'payload');
+
+  /* --- 5 · Exact before/after review for file writes --- */
+  const review = fileReviewModel(
+    Object.prototype.hasOwnProperty.call(opts, 'review') ? opts.review : null,
+    hasValue ? opts.payload : undefined,
+  );
+  if (review !== null) {
+    root.dataset.reviewState = review.state;
+    const reviewField = field(5, 'Before / after diff');
+    const reviewRow = el('div', 'zn-hashrow');
+    const tone = review.state === 'ready' ? (review.truncated ? 'amber' : 'cyan') : 'red';
+    const glyph = review.state === 'ready' ? (review.truncated ? '△' : '≡') : '▲';
+    const label = review.state === 'ready'
+      ? (review.truncated ? 'base matched · bounded excerpt' : 'base matched · complete diff')
+      : `review · ${review.state}`;
+    add(reviewRow, chip(glyph, label, tone));
+    add(reviewField, reviewRow);
+
+    const details = review.review;
+    if (details) {
+      const hashes = el('dl', 'zn-tuple');
+      add(hashes, el('dt', null, 'path'), el('dd', null, String(details.relPath ?? '')));
+      add(hashes, el('dt', null, 'expected base'), el('dd', null, String(details.expectedBaseHash ?? '')));
+      add(hashes, el('dt', null, 'observed base'), el('dd', null, String(details.observedBaseHash ?? 'unavailable')));
+      add(hashes, el('dt', null, 'proposed state'), el('dd', null, String(details.expectedPostHash ?? '')));
+      if (details.observed && details.proposed) {
+        add(
+          hashes,
+          el('dt', null, 'size'),
+          el('dd', null, `${details.observed.bytes} → ${details.proposed.bytes} bytes · ${details.observed.lines} → ${details.proposed.lines} lines`),
+        );
+      }
+      add(reviewField, hashes);
+    }
+
+    if (review.diff !== null) {
+      const diff = el('pre', 'zn-diff', review.diff);
+      diff.tabIndex = 0;
+      diff.setAttribute('aria-label', review.truncated ? 'bounded before and after diff excerpt' : 'complete before and after diff');
+      const controls = el('div', 'zn-hashrow');
+      add(controls, copyBtn('copy diff', () => review.diff));
+      add(reviewField, diff, controls);
+      add(
+        reviewField,
+        el('div', 'zn-note',
+          'Line-ending marks are explicit: ␍␊ is CRLF, ␊ is LF, ␍ is CR, and ∅ means no final newline.'),
+      );
+    }
+    if (review.truncated) {
+      add(
+        reviewField,
+        el('div', 'zn-note',
+          `Bounded review: ${review.omittedDiffLines.toLocaleString()} diff lines and ${review.omittedCharacters.toLocaleString()} characters are omitted. Approval is disabled until a narrower or split proposal exposes the complete comparison.`),
+      );
+    }
+    if (review.note) add(reviewField, el('div', 'zn-note', review.note));
+    if (review.blocker) {
+      add(reviewField, unresolved(review.blocker));
+      addBlocker('file-review', review.blocker);
+    }
+    add(body, reviewField);
+  }
+
+  /* --- 6 · Payload body: the complete exact payload, opaque --g2 plane --- */
+  const payloadField = field(6, 'The exact change it will write');
   let payloadText = null;
   let payloadOrigin = null;
 

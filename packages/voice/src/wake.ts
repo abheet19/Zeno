@@ -35,7 +35,11 @@ export interface Wake {
  * into one of these before the check. Kept tight on purpose: every extra entry
  * is another everyday word that could false-trigger.
  */
-const WAKE_SINGLE: ReadonlySet<string> = new Set(['zeno', 'zeeno', 'xeno', 'zino', 'zenno', 'zeno']);
+// `znote` and `cnote` are measured local-Whisper outputs for the spoken name
+// "Zeno". They are accepted only as the first content token, preserving the
+// no-mid-sentence-wake rule while avoiding a dropped command when either
+// acoustic split wins.
+const WAKE_SINGLE: ReadonlySet<string> = new Set(['zeno', 'zeeno', 'zeenoth', 'xeno', 'zino', 'zenno', 'znote', 'cnote']);
 
 /**
  * The first half of a two-token mis-hearing ("zee no", "zee know"). "zee" on its

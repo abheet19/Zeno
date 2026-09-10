@@ -36,11 +36,10 @@
  *       answer it says it has not read the daemon; a failed read says the read
  *       failed. Neither is ever rendered as "there is nothing".
  *   S2  NOTHING IS INVENTED, and a missing data source is stated rather than
- *       stubbed. Installed skills have no route on this daemon, and the MCP edge
- *       is a separate stdio process this window cannot see — so both say exactly
- *       that instead of drawing a plausible row. The ledger PATH is likewise not
- *       served by any route, and this file says so rather than printing a path
- *       it cannot verify.
+ *       stubbed. Installed skills are read from GET /skills. The MCP edge is a
+ *       separate stdio process this window cannot see, so it says exactly that
+ *       instead of drawing a plausible connection. The ledger PATH is likewise
+ *       not served by any route, and this file never invents one.
  *   S3  It reads. Every fetch in this file is a GET; nothing here can approve,
  *       commit, delete or configure anything. The Vault search box is a GET to
  *       127.0.0.1 and the only control that sends anything at all.
@@ -191,6 +190,147 @@ const CSS = `
 .zs-find input::placeholder{ color:var(--ink-3,#6C7480); }
 .zs-more{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10px; color:var(--ink-3,#6C7480); padding-left:2px; }
 .zs-hr{ height:1px; background:var(--rule,#242C31); border:0; margin:2px 0; }
+
+/* Settings is a native modal: the left pane is navigation chrome and may use
+   Zeno glass; the right pane stays opaque because it contains policy facts and
+   capability state. No control is decorative — every button either changes an
+   existing per-device preference, selects a real category, or closes the modal. */
+.zs-settings-launch{
+  display:flex; align-items:center; justify-content:space-between; gap:18px;
+  padding:4px 2px;
+}
+.zs-settings-launch-copy{ min-width:0; }
+.zs-settings-launch-copy h3{ margin:0; color:var(--ink,#ECEBE6); font-size:13px; font-weight:600; }
+.zs-settings-launch-copy p{ margin:4px 0 0; color:var(--ink-2,#9AA1AC); font-size:11.5px; line-height:1.55; }
+.zs-settings-launch .zs-facts{ margin-top:8px; }
+.zs-settings-open{ flex:none; }
+
+.zs-settings-dialog{
+  width:min(920px,calc(100vw - 32px)); height:min(720px,calc(100vh - 32px));
+  max-width:none; max-height:none; padding:0; overflow:hidden;
+  color:var(--ink,#ECEBE6); background:var(--g2,#0F1214);
+  border:1px solid var(--gl-edge,var(--rule-2,#2C363B)); border-radius:16px;
+  box-shadow:var(--gl-cast,0 18px 46px -12px rgba(0,0,0,.62));
+  animation:zs-settings-in var(--dur-2,180ms) var(--ease,cubic-bezier(.2,.6,.2,1));
+}
+.zs-settings-dialog::backdrop{
+  background:color-mix(in srgb,var(--g1,#0A0C0E) 78%,transparent);
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+}
+@keyframes zs-settings-in{
+  from{ opacity:0; transform:translateY(8px) scale(.992); }
+  to{ opacity:1; transform:none; }
+}
+:root[data-reduce="1"] .zs-settings-dialog{ animation:none; }
+@media (prefers-reduced-motion:reduce){ .zs-settings-dialog{ animation:none; } }
+
+.zs-settings-frame{ display:grid; grid-template-columns:232px minmax(0,1fr); height:100%; min-height:0; }
+.zs-settings-side{
+  min-width:0; padding:14px 12px 12px; overflow:hidden;
+  display:flex; flex-direction:column; gap:12px;
+  background:var(--gl-tint); border-right:1px solid var(--gl-edge,var(--rule,#242C31));
+  box-shadow:inset 0 1px 0 var(--wash-hi);
+  backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
+}
+.zs-settings-side-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 2px; }
+.zs-settings-word{ display:flex; align-items:center; gap:8px; min-width:0; font-size:12px; font-weight:650; }
+.zs-settings-word img{ width:20px; height:20px; display:block; filter:drop-shadow(0 3px 9px color-mix(in srgb,var(--cyan,#38C3D6) 34%,transparent)); }
+.zs-settings-close{
+  width:32px; height:32px; flex:none; display:grid; place-items:center;
+  border:1px solid transparent; border-radius:8px; background:transparent;
+  color:var(--ink-2,#9AA1AC); font:20px/1 var(--font-ui,system-ui); cursor:pointer;
+}
+.zs-settings-close:hover{ color:var(--ink,#ECEBE6); background:var(--wash-2); border-color:var(--gl-edge,var(--rule,#242C31)); }
+.zs-settings-search{
+  display:flex; align-items:center; gap:8px; min-height:38px; padding:0 10px;
+  border:1px solid var(--rule-2,#2C363B); border-radius:10px;
+  background:color-mix(in srgb,var(--g2,#0F1214) 88%,transparent); color:var(--ink-3,#6C7480);
+}
+.zs-settings-search:focus-within{ border-color:var(--focus,#86DEEC); }
+.zs-settings-search input{
+  width:100%; min-width:0; padding:8px 0; border:0; outline:0;
+  background:transparent; color:var(--ink,#ECEBE6); font:12px/1.3 var(--font-ui,system-ui);
+}
+.zs-settings-search input::placeholder{ color:var(--ink-3,#6C7480); }
+.zs-settings-tabs{ display:flex; flex-direction:column; gap:3px; overflow:auto; padding:1px; }
+.zs-settings-tab{
+  display:grid; grid-template-columns:22px minmax(0,1fr); gap:8px; align-items:center;
+  width:100%; padding:8px 10px; border:1px solid transparent; border-radius:8px;
+  background:transparent; color:var(--ink-2,#9AA1AC); text-align:left;
+  font:12px/1.35 var(--font-ui,system-ui); cursor:pointer;
+}
+.zs-settings-tab:hover{ color:var(--ink,#ECEBE6); background:var(--wash); }
+.zs-settings-tab[aria-selected="true"]{
+  color:var(--ink,#ECEBE6); background:var(--wash-2); border-color:var(--gl-edge,var(--rule,#242C31));
+  box-shadow:inset 2px 0 0 var(--cyan,#38C3D6),inset 0 1px 0 var(--wash-hi);
+}
+.zs-settings-tab-glyph{ text-align:center; color:var(--ink-3,#6C7480); font-family:var(--font-glyph,"Segoe UI Symbol",system-ui); }
+.zs-settings-tab[aria-selected="true"] .zs-settings-tab-glyph{ color:var(--cyan,#38C3D6); }
+.zs-settings-local{
+  margin:auto 4px 0; padding-top:10px; border-top:1px solid var(--rule,#242C31);
+  color:var(--ink-3,#6C7480); font:9.5px/1.55 var(--font-mono,ui-monospace,Consolas,monospace);
+}
+
+.zs-settings-main{ min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--g2,#0F1214); }
+.zs-settings-main-head{ flex:none; padding:22px 24px 17px; border-bottom:1px solid var(--rule,#242C31); }
+.zs-settings-main-head .zs-k{ margin-bottom:5px; }
+.zs-settings-main-head h2{ margin:0; color:var(--ink,#ECEBE6); font-size:20px; font-weight:650; letter-spacing:-.018em; }
+.zs-settings-main-head p{ max-width:62ch; margin:5px 0 0; color:var(--ink-2,#9AA1AC); font-size:11.5px; line-height:1.5; }
+.zs-settings-panel{ min-width:0; min-height:0; padding:6px 24px 28px; overflow:auto; }
+.zs-settings-group{ padding-top:18px; }
+.zs-settings-group + .zs-settings-group{ margin-top:18px; border-top:1px solid var(--rule,#242C31); }
+.zs-settings-group-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:8px; }
+.zs-settings-group-head h3{ margin:0; color:var(--ink,#ECEBE6); font-size:12.5px; font-weight:650; }
+.zs-settings-group-head span{ color:var(--ink-3,#6C7480); font:9.5px/1.3 var(--font-mono,ui-monospace,Consolas,monospace); }
+.zs-settings-items{ border-top:1px solid var(--rule,#242C31); }
+.zs-setting{
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(116px,auto); gap:18px; align-items:center;
+  min-height:72px; padding:13px 0; border-bottom:1px solid var(--rule,#242C31);
+}
+.zs-setting-copy{ min-width:0; }
+.zs-setting-copy h4{ margin:0; color:var(--ink,#ECEBE6); font-size:12.5px; font-weight:600; }
+.zs-setting-copy p{ max-width:64ch; margin:4px 0 0; color:var(--ink-2,#9AA1AC); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.zs-setting-value{ min-width:0; color:var(--ink-2,#9AA1AC); font:10.5px/1.45 var(--font-mono,ui-monospace,Consolas,monospace); text-align:right; overflow-wrap:anywhere; }
+.zs-setting-value.good{ color:var(--green,#5BB98C); }
+.zs-setting-value.warn{ color:var(--amber,#E0A128); }
+.zs-setting-value.bad{ color:var(--red,#D8695A); }
+.zs-setting-action{
+  min-width:112px; min-height:34px; padding:6px 9px;
+  display:inline-flex; align-items:center; justify-content:flex-end; gap:8px;
+  border:1px solid var(--rule-2,#2C363B); border-radius:8px; background:var(--g3,#151A1D);
+  color:var(--ink,#ECEBE6); font:10.5px/1.2 var(--font-mono,ui-monospace,Consolas,monospace); cursor:pointer;
+}
+.zs-setting-action:hover{ background:var(--g4,#1B2124); border-color:color-mix(in srgb,var(--cyan,#38C3D6) 42%,var(--rule-2,#2C363B)); }
+.zs-switch{
+  width:30px; height:17px; padding:2px; flex:none; display:flex; align-items:center;
+  border-radius:999px; background:var(--g6,#2C363B); box-shadow:inset 0 0 0 1px var(--rule-2,#2C363B);
+}
+.zs-switch::after{ content:""; width:13px; height:13px; border-radius:50%; background:var(--ink-2,#9AA1AC); transition:transform var(--dur-2,180ms) var(--ease),background var(--dur-2,180ms) var(--ease); }
+.zs-setting-action[aria-pressed="true"] .zs-switch{ background:color-mix(in srgb,var(--cyan,#38C3D6) 72%,var(--g5,#222A2E)); }
+.zs-setting-action[aria-pressed="true"] .zs-switch::after{ transform:translateX(13px); background:var(--g1,#0A0C0E); }
+:root[data-reduce="1"] .zs-switch::after{ transition:none; }
+.zs-settings-empty{ padding:30px 0; }
+
+@media (max-width:720px){
+  .zs-settings-dialog{ width:calc(100vw - 20px); height:calc(100vh - 20px); border-radius:13px; }
+  .zs-settings-frame{ grid-template-columns:1fr; grid-template-rows:auto minmax(0,1fr); }
+  .zs-settings-side{ padding:10px; border-right:0; border-bottom:1px solid var(--gl-edge,var(--rule,#242C31)); gap:8px; }
+  .zs-settings-side-head{ grid-column:1/-1; }
+  .zs-settings-tabs{ display:grid; grid-template-columns:repeat(4,minmax(128px,1fr)); overflow:auto hidden; padding-bottom:2px; }
+  .zs-settings-tab{ white-space:nowrap; }
+  .zs-settings-local{ display:none; }
+  .zs-settings-main-head{ padding:16px 18px 13px; }
+  .zs-settings-panel{ padding:2px 18px 22px; }
+}
+@media (max-width:520px){
+  .zs-settings-launch{ align-items:flex-start; flex-direction:column; }
+  .zs-settings-open{ width:100%; }
+  .zs-settings-side-head{ padding:0; }
+  .zs-settings-main-head h2{ font-size:18px; }
+  .zs-setting{ grid-template-columns:minmax(0,1fr); gap:8px; align-items:start; }
+  .zs-setting-value{ text-align:left; }
+  .zs-setting-action{ width:100%; justify-content:space-between; }
+}
 `;
 
 function ensureStyles() {
@@ -486,7 +626,7 @@ function sourceRow(s) {
   return row('SRC', mk(s.name || 'a work source', 44), meta, s.detail ? String(s.detail) : null, facts);
 }
 
-function renderIntegrations(work, agents) {
+function renderIntegrations(work, agents, skills) {
   const sub = WORDS.integrationsSub;
   let body = '';
 
@@ -542,19 +682,39 @@ function renderIntegrations(work, agents) {
           esc(String(a.label || a.id || 'an agent')),
           'id ' + esc(String(a.id || '?')) + (Array.isArray(a.models) && a.models.length ? ' · models: ' + esc(a.models.join(', ')) : ''),
           local
-            ? 'Runs against Ollama on this machine.'
-            : 'Runs the agent’s own CLI, which reaches its own provider. Whether that CLI is installed here '
-              + 'is not reported by any route — the daemon offers the id, and the run itself is what finds out.',
-          fact('offered by the daemon', 'gr')
-          + fact(local ? 'reachable if Ollama is' : 'installation not reported', local ? 'gr' : null)
-          + fact(local ? 'stays on this machine' : '⚡ reaches its own provider', local ? 'gr' : 'am'),
+            ? 'Runs against Ollama on this machine. Availability means the daemon found at least one installed local model.'
+            : (a.available
+              ? 'The daemon executed this CLI’s version probe from the same desktop session Forge will use.'
+              : String(a.unavailableReason || 'The CLI did not answer the daemon’s availability probe.')),
+          fact(a.available ? 'runnable now' : 'unavailable', a.available ? 'gr' : 'am')
+          + fact(local ? 'local runtime' : 'hosted provider', local ? 'gr' : 'am')
+          + fact(local ? 'stays on this machine' : '⚡ sends code to its provider', local ? 'gr' : 'am'),
         );
       }).join('') + '</div>';
     }
   }
 
-  /* ---- 4 · the two things with no data source. Stated, never stubbed. ---- */
-  body += '<hr class="zs-hr">' + heading('no route reports these');
+  /* ---- 4 · repository skills, read from the route Forge uses ---- */
+  body += '<hr class="zs-hr">' + heading('repository skills');
+  if (!skills) body += unread('Installed skills');
+  else if (!skills.ok) body += unreadable('Installed skills', skills.error);
+  else {
+    const installed = (skills.data && Array.isArray(skills.data.skills)) ? skills.data.skills : [];
+    const failed = (skills.data && Array.isArray(skills.data.failed)) ? skills.data.failed : [];
+    body += installed.length
+      ? '<div class="zs-rows">' + installed.map((skill) => row(
+          'SKL', mk(skill.name || skill.id || 'skill', 44),
+          'id ' + esc(String(skill.id || '?')) + ' · ' + esc(String(skill.bytes || 0)) + ' bytes',
+          String(skill.description || 'No description was supplied.'),
+          fact(skill.verdict === 'suspicious' ? 'screen findings — review before use' : 'screened', skill.verdict === 'suspicious' ? 'am' : 'gr')
+          + fact('selected per run') + fact('cannot approve', 'cy'),
+        )).join('') + '</div>'
+      : empty('SKL', 'No repository skills are installed.', 'Add .agents/skills/<id>/SKILL.md to this selected repository, then reload Forge.');
+    if (failed.length) body += note(failed.length + ' skill file(s) could not be loaded. Forge will refuse a run that selects one of them.', 'am');
+  }
+
+  /* ---- 5 · the separate edge this HTTP window cannot observe ---- */
+  body += '<hr class="zs-hr">' + heading('separate process');
   body += '<div class="zs-rows">'
     + row('MCP', 'The MCP edge',
       'a separate stdio process · zeno-mcp',
@@ -562,11 +722,6 @@ function renderIntegrations(work, agents) {
       + 'has no HTTP route here, so this window cannot say whether a client is connected. What is fixed '
       + 'either way: it exposes tools that propose and read, and there is deliberately no approve tool.',
       fact('separate process') + fact('not visible from here', 'am') + fact('stdio — no socket'))
-    + row('SKL', 'Installed skills',
-      'no route',
-      'The skills library is built, but this daemon serves no endpoint that lists what is installed. '
-      + 'Rather than draw a plausible list, this section says there is nothing to read.',
-      fact('not served') + fact('not reported', 'am') + fact('egress unknown'))
     + '</div>';
 
   body += note('A source is read-only: it can be cited, never obeyed. Nothing on this list can approve '
@@ -576,106 +731,194 @@ function renderIntegrations(work, agents) {
 }
 
 /* ================================================================== *
- * SETTINGS — the rules in force, the two tokens, and this window      *
+ * SETTINGS — a searchable native dialog over the same truthful state *
  * ================================================================== */
 
-/* A preference row. The control itself is the top bar's — this button forwards
-   the click to it rather than keeping a second copy of the state, which is how
-   two readouts of one setting start disagreeing. */
-function prefRow(id, label, value, why) {
-  return '<div class="zs-row"><span class="zs-mark">·</span><div class="zs-bd">'
-    + '<div class="zs-top"><div class="zs-t">' + esc(label) + '</div></div>'
-    + '<p class="zs-m">' + esc(value) + '</p>'
-    + '<p class="zs-w">' + esc(why) + '</p>'
-    + '<div class="zs-facts">' + fact('stored on this device only') + fact('never synced', 'cy') + '</div>'
-    + '<div class="zs-acts"><button type="button" class="btn sm g" data-ctl="' + esc(id) + '">Change</button></div>'
-    + '</div></div>';
+const SETTINGS_CATEGORIES = Object.freeze([
+  { id: 'general', glyph: '◐', label: 'General', description: 'Appearance and privacy choices for this device.' },
+  { id: 'policy', glyph: '✓', label: 'Policy & receipts', description: 'The policy evidence and receipt chain reported by this daemon.' },
+  { id: 'capabilities', glyph: '◇', label: 'Capabilities', description: 'Which capability tokens this window and its agents can hold.' },
+  { id: 'runtime', glyph: '⌁', label: 'Runtime', description: 'The loopback daemon this window is actually connected to.' },
+]);
+
+function settingsCategory(id) {
+  return SETTINGS_CATEGORIES.find((category) => category.id === id) || SETTINGS_CATEGORIES[0];
 }
 
-function renderSettings(state) {
-  const sub = WORDS.settingsSub;
-  let body = '';
+function settingItem(category, title, description, search, html) {
+  return { category, title, description, search: `${title} ${description} ${search || ''}`.toLowerCase(), html };
+}
 
-  /* ---- 1 · the rules that were actually in force ---- */
-  body += heading('policy');
-  if (!state) body += unread('Policy');
-  else if (!state.ok) body += unreadable('Policy', state.error);
-  else {
+/* Each preference delegates to the original top-bar control. There is still one
+   owner for every value, so the modal can never drift from Command's controls. */
+function preferenceSetting(id, title, value, description, pressed, cycle) {
+  const pressedAttr = cycle ? '' : ` aria-pressed="${pressed ? 'true' : 'false'}"`;
+  const affordance = cycle
+    ? '<span aria-hidden="true">↻</span>'
+    : '<span class="zs-switch" aria-hidden="true"></span>';
+  const label = cycle ? `Change ${title}. Current value: ${value}.` : `${title}: ${pressed ? 'on' : 'off'}.`;
+  return '<article class="zs-setting">'
+    + '<div class="zs-setting-copy"><h4>' + esc(title) + '</h4><p>' + esc(description) + '</p></div>'
+    + '<button type="button" class="zs-setting-action" data-ctl="' + esc(id) + '" '
+    + 'data-settings-focus="control:' + esc(id) + '" aria-label="' + esc(label) + '"' + pressedAttr + '>'
+    + '<span>' + esc(value) + '</span>' + affordance + '</button></article>';
+}
+
+function readOnlySetting(title, value, description, tone) {
+  return '<article class="zs-setting">'
+    + '<div class="zs-setting-copy"><h4>' + esc(title) + '</h4><p>' + esc(description) + '</p></div>'
+    + '<div class="zs-setting-value' + (tone ? ' ' + esc(tone) : '') + '">' + value + '</div></article>';
+}
+
+function buildSettingsGroups(state) {
+  const themeAttr = R.getAttribute('data-theme');
+  const theme = themeAttr === 'dark' ? 'Dark' : themeAttr === 'light' ? 'Light' : 'System';
+  const reduce = R.getAttribute('data-reduce') === '1';
+  const flat = R.getAttribute('data-flat') === '1';
+  const hasOwner = token() !== '';
+
+  const general = [
+    settingItem('general', 'Theme', 'Cycle between system, dark, and light without syncing the choice.', 'appearance colour color system dark light',
+      preferenceSetting('ctl-theme', 'Theme', theme, 'Cycles System → Dark → Light. Stored in this browser profile and never synced.', false, true)),
+    settingItem('general', 'Reduce motion', 'Stop the field from breathing and drifting on this device.', 'animation accessibility movement',
+      preferenceSetting('ctl-motion', 'Reduce motion', reduce ? 'Reduced' : 'Full motion', 'An explicit choice here overrides the operating system setting in both directions.', reduce, false)),
+    settingItem('general', 'Flatten field', 'Draw the Command field face-on instead of in depth.', '2d three dimensional tilt rotation',
+      preferenceSetting('ctl-flat', 'Flatten field', flat ? '2D' : 'Depth', 'Flattening changes the picture only; every real node remains present.', flat, false)),
+    settingItem('general', 'Mask identifiers', 'Redact titles, paths, and hashes while preserving counts and state.', 'privacy masked hide redaction screen',
+      preferenceSetting('ctl-mask', 'Mask identifiers', masked() ? 'Masked' : 'Visible', 'Masking never hides that something is waiting for you.', masked(), false)),
+  ];
+
+  const policy = [];
+  if (!state) {
+    policy.push(settingItem('policy', 'Policy state', 'The daemon has not answered yet.', 'unknown loading',
+      readOnlySetting('Policy state', 'Not loaded', 'This page has not read the daemon yet. Treat the policy as unknown, never empty.', 'warn')));
+  } else if (!state.ok) {
+    const message = state.error && state.error.message ? String(state.error.message) : 'The daemon read failed.';
+    policy.push(settingItem('policy', 'Policy state', message, 'failure error unavailable',
+      readOnlySetting('Policy state', 'Could not read', `${message} This is a read failure, not an empty policy.`, 'bad')));
+  } else {
     const receipts = (state.data && Array.isArray(state.data.receipts)) ? state.data.receipts : [];
     const chain = (state.data && state.data.chain) || null;
     const newest = receipts.length ? receipts[receipts.length - 1] : null;
     const ph = newest && newest.policyHash ? String(newest.policyHash) : null;
-    body += kvs([
-      ['policy hash', ph
-        ? mk(ph, 80)
-        : '<span class="sub">no receipt has been written yet, so no policy hash has been recorded. '
-          + '/state does not report the policy directly — this is read off the newest receipt, which '
-          + 'records the rules that governed it.</span>', !!ph],
-      ['read from', ph
-        ? 'the newest receipt (' + mk(String(newest.id || 'no id'), 40) + ')'
-        : '<span class="sub">nothing — there is no receipt to read it from</span>', !!ph],
-      ['receipts', String(receipts.length)],
-      ['chain', chain
-        ? (chain.ok
-          ? '<span>verified — every link hashes to the one before it</span>'
-          : '<span class="sub">BROKEN at entry ' + esc(String(chain.firstBreakAt)) + '</span>')
-        : '<span class="sub">not reported</span>'],
-    ]);
+    policy.push(
+      settingItem('policy', 'Policy hash', 'Read from the newest receipt; /state does not report policy directly.', 'rules governance checksum',
+        readOnlySetting('Policy hash', ph ? mk(ph, 80) : 'Not recorded', ph
+          ? 'This is the exact hash recorded by the newest receipt.'
+          : 'No receipt exists yet, so no policy hash has been recorded.', ph ? 'good' : 'warn')),
+      settingItem('policy', 'Evidence source', 'The receipt that recorded the governing policy.', 'newest receipt id source',
+        readOnlySetting('Evidence source', ph ? 'Newest receipt · ' + mk(String(newest.id || 'no id'), 40) : 'No receipt',
+          ph ? 'The value above came from this receipt.' : 'There is no receipt from which to read a policy hash.', ph ? '' : 'warn')),
+      settingItem('policy', 'Receipts', 'The number returned by the current /state response.', 'ledger audit count',
+        readOnlySetting('Receipts', esc(String(receipts.length)), 'A live count from this daemon.', '')),
+      settingItem('policy', 'Receipt chain', 'Every receipt should hash to the entry before it.', 'verify verification integrity broken',
+        readOnlySetting('Receipt chain', chain ? (chain.ok ? 'Verified' : 'Broken at ' + esc(String(chain.firstBreakAt))) : 'Not reported',
+          chain ? (chain.ok ? 'Every reported link hashes to the one before it.' : 'The daemon reported an integrity break in the ledger.')
+            : 'The daemon did not report a chain verdict.', chain ? (chain.ok ? 'good' : 'bad') : 'warn')),
+    );
   }
 
-  /* ---- 2 · the two capability tokens. Presence only. ---- */
-  const hasOwner = token() !== '';
-  body += '<hr class="zs-hr">' + heading('capability tokens');
-  body += '<div class="zs-rows">'
-    + row('OWN', 'Owner token',
-      hasOwner ? 'present in this window' : 'absent — this page was not launched with the nonce',
-      hasOwner
-        ? 'This window holds it, so it may approve, commit, delete a recording and start a pairing. '
-          + 'Its value is never rendered, never logged and is not in this page’s text.'
-        : 'Without it this page can read but not approve. Open Zeno from the launch link the daemon printed.',
-      fact(hasOwner ? 'held by this window' : 'not held', hasOwner ? 'gr' : 'am')
-      + fact('may approve') + fact('value never shown', 'cy'))
-    + row('PRP', 'Proposer token',
-      'never sent to this window',
-      'Every agent holds this one. It may propose and read, and POST /approvals rejects it outright — '
-      + 'that is law L6 as topology rather than as a rule people agree to follow. The daemon prints it '
-      + 'on startup; this window has no copy and could not show one.',
-      fact('held by agents') + fact('may never approve', 'gr') + fact('not in this page', 'cy'))
-    + '</div>';
+  const capabilities = [
+    settingItem('capabilities', 'Owner token', 'Presence only; the token value never enters visible page text.', 'approval commit delete recording pairing nonce',
+      readOnlySetting('Owner token', hasOwner ? 'Present' : 'Absent', hasOwner
+        ? 'This window may approve, commit, delete a recording, and start pairing. Its token is never rendered or logged.'
+        : 'This page was not launched with the owner nonce, so it can read but cannot approve.', hasOwner ? 'good' : 'warn')),
+    settingItem('capabilities', 'Proposer token', 'Agents may propose and read, but POST /approvals rejects this token.', 'agent topology law l6 cannot approve',
+      readOnlySetting('Proposer token', 'Not in this page', 'The protected workspace file is held by agents. This browser has no copy and cannot reveal it.', 'good')),
+  ];
 
-  /* ---- 3 · this window's own preferences ---- */
-  const themeAttr = R.getAttribute('data-theme');
-  body += '<hr class="zs-hr">' + heading('display · this device only');
-  body += '<div class="zs-rows">'
-    + prefRow('ctl-theme', 'Theme', themeAttr === 'dark' ? 'dark' : themeAttr === 'light' ? 'light' : 'follow the system',
-      'Cycles system → dark → light. Stored in this browser profile and never synced.')
-    + prefRow('ctl-motion', 'Motion', R.getAttribute('data-reduce') === '1' ? 'reduced — the field does not animate' : 'on — the field breathes and drifts',
-      'An explicit choice here beats the operating system’s reduce-motion setting, in both directions.')
-    + prefRow('ctl-flat', '2D', R.getAttribute('data-flat') === '1' ? 'flattened — the field is drawn face-on' : 'off — the field is drawn in depth',
-      'Flattening removes the tilt and the rotation. It changes the picture, never the nodes in it.')
-    + prefRow('ctl-mask', 'Masked', masked() ? 'on — identifiers are redacted on screen' : 'off',
-      'Masking hides titles, paths and hashes. Counts and shape always survive: hiding that something is '
-      + 'waiting on you is the one thing masking must not do.')
-    + '</div>';
-
-  /* ---- 4 · where this daemon is, and what it will not tell this window ---- */
   let origin = '';
   try { origin = String(location.origin || ''); } catch { origin = ''; }
   let port = '';
   try { port = String(location.port || (location.protocol === 'https:' ? '443' : '80')); } catch { port = ''; }
-  body += '<hr class="zs-hr">' + heading('daemon');
-  body += kvs([
-    ['origin', origin ? esc(origin) : '<span class="sub">not readable</span>', true],
-    ['port', port ? esc(port) : '<span class="sub">not readable</span>', true],
-    ['bound to', 'loopback only — the socket is not reachable from the network'],
-    ['ledger path', '<span class="sub">not served. No route reports where the ledger file lives, so this '
-      + 'window cannot show you a path it has not been told. The daemon prints it on startup, and the CLI '
-      + 'reads the same file.</span>'],
-  ]);
-  body += note('The origin and port above are read from this page’s own address bar — they are where this '
-    + 'window is actually talking, not a configured value someone typed.', 'cy');
+  const runtime = [
+    settingItem('runtime', 'Origin', 'Read from this page’s own address, not from configured copy.', 'url address local daemon',
+      readOnlySetting('Origin', origin ? esc(origin) : 'Not readable', 'The endpoint this window is actually talking to.', origin ? '' : 'warn')),
+    settingItem('runtime', 'Port', 'Read from the live page address.', 'socket endpoint local',
+      readOnlySetting('Port', port ? esc(port) : 'Not readable', 'The port this browser is using right now.', port ? '' : 'warn')),
+    settingItem('runtime', 'Network binding', 'The daemon socket is not reachable from the network.', 'loopback 127 localhost security',
+      readOnlySetting('Network binding', 'Loopback only', 'Only this machine can reach the HTTP daemon.', 'good')),
+    settingItem('runtime', 'Ledger path', 'No HTTP route exposes the ledger location.', 'file audit storage cli startup',
+      readOnlySetting('Ledger path', 'Not served', 'The daemon prints the path on startup, and the CLI reads the same file. This page cannot invent it.', '')),
+  ];
 
-  return plane('sec-settings', 'Settings', sub, body);
+  return SETTINGS_CATEGORIES.map((category) => ({
+    ...category,
+    items: { general, policy, capabilities, runtime }[category.id],
+  }));
+}
+
+function renderSettingsGroups(groups, query, selectedId) {
+  const terms = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const selected = settingsCategory(selectedId);
+  const visible = terms.length
+    ? groups.map((group) => ({ ...group, items: group.items.filter((item) => terms.every((term) => item.search.includes(term))) }))
+      .filter((group) => group.items.length)
+    : groups.filter((group) => group.id === selected.id);
+  const count = visible.reduce((total, group) => total + group.items.length, 0);
+  if (!count) {
+    return '<div class="zs-settings-empty">' + empty('⌕', 'No settings match.',
+      'Try a setting name such as theme, masking, receipts, capabilities, or runtime.') + '</div>';
+  }
+  return visible.map((group) => '<section class="zs-settings-group" aria-labelledby="zs-settings-group-' + esc(group.id) + '">'
+    + (terms.length ? '<div class="zs-settings-group-head"><h3 id="zs-settings-group-' + esc(group.id) + '">' + esc(group.label)
+      + '</h3><span>' + esc(String(group.items.length)) + ' ' + plural(group.items.length, 'setting', 'settings') + '</span></div>' : '')
+    + '<div class="zs-settings-items">' + group.items.map((item) => item.html).join('') + '</div></section>').join('');
+}
+
+function renderSettingsDialog(state) {
+  const groups = buildSettingsGroups(state);
+  const query = String(S.settingsQuery || '');
+  const selectedMeta = settingsCategory(S.settingsCategory);
+  const selected = groups.find((group) => group.id === selectedMeta.id) || groups[0];
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const resultCount = terms.length
+    ? groups.reduce((total, group) => total + group.items.filter((item) => terms.every((term) => item.search.includes(term))).length, 0)
+    : selected.items.length;
+  const title = terms.length ? 'Search results' : selected.label;
+  const description = terms.length
+    ? `${resultCount} ${plural(resultCount, 'setting', 'settings')} match “${query.trim()}” across Zeno.`
+    : selected.description;
+  const tabs = (terms.length
+    ? [{ id: 'search', glyph: '⌕', label: 'Search results' }, ...SETTINGS_CATEGORIES]
+    : SETTINGS_CATEGORIES).map((category) => {
+      const on = terms.length ? category.id === 'search' : category.id === selected.id;
+      return '<button type="button" role="tab" class="zs-settings-tab" data-settings-category="' + esc(category.id) + '" '
+        + 'id="zs-settings-tab-' + esc(category.id) + '" '
+        + 'data-settings-focus="tab:' + esc(category.id) + '" aria-selected="' + (on ? 'true' : 'false') + '" '
+        + 'aria-controls="zs-settings-panel" tabindex="' + (on ? '0' : '-1') + '">'
+        + '<span class="zs-settings-tab-glyph" aria-hidden="true">' + esc(category.glyph) + '</span>'
+        + '<span>' + esc(category.label) + '</span></button>';
+    }).join('');
+  const labelledBy = terms.length ? 'zs-settings-title' : 'zs-settings-tab-' + selected.id;
+
+  return '<div class="zs-settings-frame">'
+    + '<aside class="zs-settings-side" aria-label="Settings categories">'
+    + '<div class="zs-settings-side-head"><div class="zs-settings-word"><img src="/brand/mark.svg" alt="" aria-hidden="true"><span>Zeno settings</span></div>'
+    + '<button type="button" class="zs-settings-close" data-close-settings data-settings-focus="close" aria-label="Close settings">×</button></div>'
+    + '<label class="zs-settings-search"><span aria-hidden="true">⌕</span>'
+    + '<input id="zs-settings-search" data-settings-focus="search" type="search" value="' + esc(query) + '" '
+    + 'placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" aria-controls="zs-settings-panel"></label>'
+    + '<div class="zs-settings-tabs" role="tablist" aria-orientation="vertical">' + tabs + '</div>'
+    + '<p class="zs-settings-local">Preferences stay on this device. Policy and runtime facts come from the local daemon.</p>'
+    + '</aside><section class="zs-settings-main">'
+    + '<header class="zs-settings-main-head"><p class="zs-k">Command preferences</p><h2 id="zs-settings-title">' + esc(title) + '</h2>'
+    + '<p>' + esc(description) + '</p></header>'
+    + '<div class="zs-settings-panel" id="zs-settings-panel" role="tabpanel" aria-labelledby="' + esc(labelledBy) + '">'
+    + renderSettingsGroups(groups, query, selected.id) + '</div></section></div>';
+}
+
+function renderSettings(state) {
+  const loaded = state && state.ok;
+  const hasOwner = token() !== '';
+  const body = '<div class="zs-settings-launch"><div class="zs-settings-launch-copy">'
+    + '<h3>Preferences, policy, capabilities, and runtime</h3>'
+    + '<p>Open a searchable settings workspace. Existing controls still use the same Command state and stay on this device.</p>'
+    + '<div class="zs-facts">' + fact('4 device preferences')
+    + fact(loaded ? 'policy read' : 'policy not yet read', loaded ? 'gr' : 'am')
+    + fact(hasOwner ? 'owner capability present' : 'read-only window', hasOwner ? 'cy' : 'am') + '</div></div>'
+    + '<button type="button" class="btn p zs-settings-open" data-open-settings>Open settings</button></div>';
+  return plane('sec-settings', 'Settings', WORDS.settingsSub, body);
 }
 
 /* ---- the standing sentences, in one place so they cannot drift ------------- */
@@ -700,13 +943,100 @@ const S = {
   brief: null,      // GET /brief
   work: null,       // GET /work
   agents: null,     // GET /forge/agents
+  skills: null,     // GET /skills
   state: null,      // GET /state
   query: '',        // the Vault search box's current query
+  settingsCategory: 'general', // the modal's selected real settings group
+  settingsQuery: '',           // local filtering only; it is never sent anywhere
   agentsAt: 0,      // when the runtime was last asked — it pokes Ollama, so it is not polled hard
 };
 
 function mount(name) { return document.querySelector('[data-mount="' + name + '"]'); }
 function paint(name, html) { const el = mount(name); if (el) el.innerHTML = html; }
+
+const SETTINGS_DIALOG_ID = 'zs-settings-dialog';
+let settingsOpener = null;
+
+function ensureSettingsDialog() {
+  let dialog = document.getElementById(SETTINGS_DIALOG_ID);
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = SETTINGS_DIALOG_ID;
+  dialog.className = 'zs-settings-dialog';
+  dialog.setAttribute('aria-labelledby', 'zs-settings-title');
+  dialog.innerHTML = '<div data-settings-dialog-body></div>';
+  dialog.addEventListener('close', () => {
+    if (settingsOpener && settingsOpener.isConnected && settingsOpener.focus) {
+      settingsOpener.focus({ preventScroll: true });
+    }
+    settingsOpener = null;
+  });
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+function settingsFocusSnapshot() {
+  const dialog = document.getElementById(SETTINGS_DIALOG_ID);
+  const active = document.activeElement;
+  if (!dialog || !dialog.open || !active || !dialog.contains(active)) return null;
+  const key = active.getAttribute && active.getAttribute('data-settings-focus');
+  if (!key) return null;
+  const snapshot = { key };
+  if (active.id === 'zs-settings-search') {
+    snapshot.start = active.selectionStart;
+    snapshot.end = active.selectionEnd;
+  }
+  return snapshot;
+}
+
+function restoreSettingsFocus(snapshot) {
+  if (!snapshot) return;
+  const dialog = document.getElementById(SETTINGS_DIALOG_ID);
+  if (!dialog || !dialog.open) return;
+  const target = Array.from(dialog.querySelectorAll('[data-settings-focus]'))
+    .find((element) => element.getAttribute('data-settings-focus') === snapshot.key);
+  if (!target || !target.focus) return;
+  target.focus({ preventScroll: true });
+  if (target.id === 'zs-settings-search' && snapshot.start != null) {
+    try { target.setSelectionRange(snapshot.start, snapshot.end == null ? snapshot.start : snapshot.end); } catch { /* not a text input */ }
+  }
+}
+
+function settingsSearchFocused() {
+  const active = document.activeElement;
+  return !!(active && active.id === 'zs-settings-search');
+}
+
+function paintSettingsDialog(opts) {
+  const dialog = ensureSettingsDialog();
+  const body = dialog.querySelector('[data-settings-dialog-body]');
+  if (!body) return;
+  // A background state poll must not replace the field while the owner types.
+  // Explicit search input uses force=true and restores the exact selection.
+  if (settingsSearchFocused() && !(opts && opts.force)) return;
+  const snapshot = (opts && opts.snapshot) || settingsFocusSnapshot();
+  body.innerHTML = renderSettingsDialog(S.state);
+  restoreSettingsFocus(snapshot);
+}
+
+function openSettings() {
+  const dialog = ensureSettingsDialog();
+  if (!dialog.open) settingsOpener = document.activeElement;
+  paintSettingsDialog({ force: true });
+  if (!dialog.open) {
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+  const search = dialog.querySelector('#zs-settings-search');
+  if (search && search.focus) search.focus({ preventScroll: true });
+}
+
+function closeSettings() {
+  const dialog = document.getElementById(SETTINGS_DIALOG_ID);
+  if (!dialog || !dialog.open) return;
+  if (typeof dialog.close === 'function') dialog.close();
+  else dialog.removeAttribute('open');
+}
 
 /* A repaint replaces the search box, which would eat what is being typed into
    it on the next poll. So the Vault is left alone while its box has focus: the
@@ -717,19 +1047,23 @@ function typing() {
 }
 
 function repaint() {
+  const settingsFocus = settingsFocusSnapshot();
   paint('sec-workstation', renderWorkstation(S.forge));
   if (!typing()) paint('sec-vault', renderVault(S.mem, S.brief, S.query));
-  paint('sec-integrations', renderIntegrations(S.work, S.agents));
+  paint('sec-integrations', renderIntegrations(S.work, S.agents, S.skills));
   paint('sec-settings', renderSettings(S.state));
+  paintSettingsDialog({ snapshot: settingsFocus });
 }
 
 /* After a search, the box is redrawn — put the cursor back in it, or the second
    query has to be started by finding the box again with the mouse. */
 function repaintAndFocusSearch() {
+  const settingsFocus = settingsFocusSnapshot();
   paint('sec-workstation', renderWorkstation(S.forge));
   paint('sec-vault', renderVault(S.mem, S.brief, S.query));
-  paint('sec-integrations', renderIntegrations(S.work, S.agents));
+  paint('sec-integrations', renderIntegrations(S.work, S.agents, S.skills));
   paint('sec-settings', renderSettings(S.state));
+  paintSettingsDialog({ snapshot: settingsFocus });
   const input = document.getElementById('zs-vq');
   if (input && input.focus) {
     input.focus({ preventScroll: true });
@@ -756,17 +1090,18 @@ async function refresh(opts) {
   try {
     const wantAgents = (opts && opts.agents) || S.agents === null || (Date.now() - S.agentsAt) > AGENTS_MIN_MS;
     const memPath = S.query ? '/memory?q=' + encodeURIComponent(S.query) : '/memory';
-    const [forge, mem, brief, work, state, agents] = await Promise.all([
+    const [forge, mem, brief, work, state, agents, skills] = await Promise.all([
       api('/forge/status'),
       api(memPath),
       api('/brief'),
       api('/work'),
       api('/state'),
       wantAgents ? api('/forge/agents') : Promise.resolve(S.agents),
+      api('/skills'),
     ]);
     // Each read is settled on its own: a vault that is not enabled must not
     // blank the workstation, and a failed brief must not blank the notes.
-    S.forge = forge; S.mem = mem; S.brief = brief; S.work = work; S.state = state;
+    S.forge = forge; S.mem = mem; S.brief = brief; S.work = work; S.state = state; S.skills = skills;
     if (wantAgents) { S.agents = agents; S.agentsAt = Date.now(); }
     if (opts && opts.focusSearch) repaintAndFocusSearch(); else repaint();
   } finally {
@@ -780,6 +1115,31 @@ function wire() {
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
+
+    const dialog = document.getElementById(SETTINGS_DIALOG_ID);
+    if (t.closest('[data-close-settings]') || (dialog && t === dialog)) {
+      closeSettings();
+      return;
+    }
+    if (t.closest('[data-open-settings]') || t.closest('.rail-n[data-jump="sec-settings"]')) {
+      openSettings();
+      return;
+    }
+    const categoryButton = t.closest('[data-settings-category]');
+    if (categoryButton) {
+      const id = categoryButton.getAttribute('data-settings-category');
+      if (id === 'search') {
+        const input = document.getElementById('zs-settings-search');
+        if (input && input.focus) input.focus({ preventScroll: true });
+        return;
+      }
+      if (SETTINGS_CATEGORIES.some((category) => category.id === id)) {
+        S.settingsCategory = id;
+        S.settingsQuery = '';
+        paintSettingsDialog({ force: true, snapshot: { key: `tab:${id}` } });
+      }
+      return;
+    }
 
     if (t.closest('[data-vault-find]')) {
       const input = document.getElementById('zs-vq');
@@ -802,20 +1162,51 @@ function wire() {
     // copy of the state that could drift from it.
     const ctl = t.closest('[data-ctl]');
     if (ctl) {
+      const focusKey = ctl.getAttribute('data-settings-focus');
       const b = document.getElementById(ctl.getAttribute('data-ctl'));
       if (b) b.click();
-      repaint();
+      paint('sec-settings', renderSettings(S.state));
+      paintSettingsDialog({ force: true, snapshot: focusKey ? { key: focusKey } : null });
     }
   });
 
-  // Enter in the search box searches, and does not submit anything anywhere.
+  // Search is entirely local: values never leave the page and every keystroke
+  // updates the real groups while preserving the caret in the replaced input.
+  document.addEventListener('input', (e) => {
+    const input = e.target;
+    if (!input || input.id !== 'zs-settings-search') return;
+    S.settingsQuery = String(input.value || '');
+    const snapshot = { key: 'search', start: input.selectionStart, end: input.selectionEnd };
+    paintSettingsDialog({ force: true, snapshot });
+  });
+
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
     const el = e.target;
-    if (!el || el.id !== 'zs-vq') return;
-    e.preventDefault();
-    S.query = String(el.value || '').trim();
-    refresh({ focusSearch: true });
+    if (!el) return;
+
+    // The category list follows the ARIA tabs keyboard pattern. Both axes are
+    // accepted because the same tabs become horizontal on narrow windows.
+    const tab = el.closest && el.closest('[role="tab"][data-settings-category]');
+    if (tab && ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'].includes(e.key)) {
+      const tabs = Array.from(tab.closest('[role="tablist"]').querySelectorAll('[role="tab"]'));
+      const at = tabs.indexOf(tab);
+      let next = at;
+      if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (at + 1) % tabs.length;
+      else next = (at - 1 + tabs.length) % tabs.length;
+      e.preventDefault();
+      tabs[next].click();
+      return;
+    }
+
+    // Enter in the Vault search performs its existing loopback GET. Settings
+    // search needs no Enter key because its local result set is already live.
+    if (e.key === 'Enter' && el.id === 'zs-vq') {
+      e.preventDefault();
+      S.query = String(el.value || '').trim();
+      refresh({ focusSearch: true });
+    }
   });
 }
 
@@ -825,6 +1216,7 @@ export function init() {
   if (started) return; started = true;
   if (!mount('sec-workstation')) return;   // the shell does not have these sections
   ensureStyles();
+  ensureSettingsDialog();
   repaint();                            // the honest "not loaded" state, first
   wire();
   refresh();

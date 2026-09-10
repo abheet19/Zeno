@@ -13,7 +13,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { emptySnapshot, groundReply, parseIntent, CANNOT_ANSWER, type ProposeWriteIntent } from '../src/index.js';
+import { cleanGroundedReply, emptySnapshot, groundReply, parseIntent, CANNOT_ANSWER, type ProposeWriteIntent } from '../src/index.js';
 import { AT, snapshot } from './fixtures.js';
 
 const S = snapshot();
@@ -191,6 +191,15 @@ test('a refusal carrying a fabricated citation is not let through', () => {
 
 test('two refusals are still just a refusal', () => {
   assert.equal(groundReply(`${CANNOT_ANSWER} ${CANNOT_ANSWER}`, S).ok, true);
+});
+
+test('a redundant refusal is removed only when the remaining answer is grounded by itself', () => {
+  const cited = `The migration is waiting [p1]. ${CANNOT_ANSWER}`;
+  assert.equal(cleanGroundedReply(cited, S), 'The migration is waiting [p1].');
+
+  const unsupported = `You have 5 approvals from Monday. ${CANNOT_ANSWER}`;
+  assert.equal(cleanGroundedReply(unsupported, S), unsupported);
+  assert.equal(cleanGroundedReply(CANNOT_ANSWER, S), CANNOT_ANSWER);
 });
 
 test('an empty answer is not grounded — silence is not an answer', () => {

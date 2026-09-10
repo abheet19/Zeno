@@ -26,6 +26,7 @@
 
 /** What a `read` intent wants surfaced. The daemon already exposes exactly these. */
 export type ReadTarget = 'pending' | 'receipts' | 'chain';
+export type NavigationTarget = 'command' | 'forge' | 'counsel';
 
 /**
  * A spoken command, understood. A discriminated union so a consumer must handle
@@ -35,6 +36,7 @@ export type ReadTarget = 'pending' | 'receipts' | 'chain';
 export type Intent =
   | { readonly kind: 'propose_write'; readonly relPath: string; readonly summary: string; readonly hint: string }
   | { readonly kind: 'add_task'; readonly title: string }
+  | { readonly kind: 'navigate'; readonly target: NavigationTarget }
   | {
       /**
        * "Build me a slugify utility" — a job for a coding agent, too big to be
@@ -199,8 +201,16 @@ const GREETING =
 const CANCEL =
   /^(?:never\s?mind|nevermind|forget it|scratch that|cancel|abort|stop)(?:\s+(?:that|it|this|please))?[.!]?$/i;
 
+// Navigation changes only the visible Zeno surface. It has no filesystem,
+// process or approval power, but it lets the wake flow finish the ordinary
+// sentence "Zeno, open Forge" instead of reporting a false grammar failure.
+// Local Whisper has also produced "open porch" for that exact sentence, so the
+// measured homophone is accepted only inside this explicit navigation shape.
+const NAVIGATE =
+  /^(?:open|go to|show|switch to)\s+(?:the\s+)?(command|forge|porch|counsel)(?:\s+(?:tab|workspace|screen|view))?(?:\s+and\s+(?:show|focus)(?:\s+me)?\s+(?:the\s+)?selected\s+(?:repository|project))?[.!?]?$/i;
+
 const READ_PENDING =
-  /^(?:what(?:'s| is| are)?\s+waiting|what(?:'s| is)?\s+pending|what(?:'s| is)?\s+(?:in\s+the\s+)?queue|what(?:'s| is)?\s+in\s+my\s+queue|what\s+needs\s+approval|what\s+is\s+awaiting(?:\s+approval)?|anything\s+waiting|show(?:\s+me)?\s+(?:the\s+)?queue)[.!?]?$/i;
+  /^(?:what(?:'s| is| are)?\s+waiting|what(?:'s| is)?\s+pending|what(?:'s| is)?\s+(?:in\s+the\s+)?queue|what(?:'s| is)?\s+in\s+my\s+queue|what\s+needs\s+approval|what\s+is\s+awaiting(?:\s+approval)?|anything\s+waiting|show(?:\s+me)?\s+(?:the\s+)?(?:pending\s+)?approvals?|show(?:\s+me)?\s+(?:the\s+)?queue)[.!?]?$/i;
 const READ_RECEIPTS =
   /^(?:read\s+(?:my\s+|the\s+)?receipts|show(?:\s+me)?\s+(?:the\s+|my\s+)?receipts|list\s+(?:the\s+|my\s+)?receipts|show\s+receipts|what\s+have\s+you\s+done)[.!?]?$/i;
 const READ_CHAIN =
@@ -329,6 +339,13 @@ export function parseCommand(command: string): Intent {
   // THE safety line: an approval by voice is refused, loudly, before anything
   // else can interpret it as an action.
   if (isApprovalAttempt(cmd)) return unrecognized(cmd, APPROVAL_BY_HAND);
+
+  const navigation = NAVIGATE.exec(cmd);
+  const spokenTarget = navigation?.[1]?.toLowerCase();
+  const target = spokenTarget === 'porch' ? 'forge' : spokenTarget;
+  if (target === 'command' || target === 'forge' || target === 'counsel') {
+    return { kind: 'navigate', target };
+  }
 
   if (READ_PENDING.test(cmd)) return { kind: 'read', what: 'pending' };
   if (READ_RECEIPTS.test(cmd)) return { kind: 'read', what: 'receipts' };

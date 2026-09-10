@@ -42,16 +42,20 @@
  *                                                            the code pane
  *   GET  /forge/search  -> { matches[], files, total, truncated }  the Search panel
  *   GET  /forge/agents  -> { agents[], efforts[], localModels[] }  the pickers
+ *   GET  /forge/tests   -> { scripts[], packageManager, caps }      real test scripts
+ *   POST /forge/tests/run -> { ok, code, durationMs, stdout, stderr }
+ *   GET  /forge/extensions -> local built-ins, skills and snippet manifests
+ *   GET  /forge/connectors -> strict run-scoped MCP capability facts
+ *   GET  /forge/run-progress -> owner-only SSE orchestration/token facts
  *   POST /forge/run     -> { run:{ok,agentId,model,effort,log,note}, changed[],
  *                            proposed[] }                    the chat
  *   POST /forge/commit  -> { receipt }                        the seal
  *
- * WHERE THERE IS NO REAL SOURCE, THE PANEL SAYS SO. Forge has no test runner, no
- * CI, no terminal, no rules engine and no MCP registry — so the Tests, CI,
- * Terminal, Rules, MCP, Debug and Plan surfaces render a plain sentence
- * naming what is missing, and render nothing else. A panel that invented a
- * passing test run would be worse than an absent panel; it would be a lie the
- * owner cannot see through. `renderUnwired()` is the single shape all of them use.
+ * Rules and skill selection use /skills; owner commands use /forge/terminal.
+ * Tests, the Zeno capability catalog, and run-scoped MCP connectors now come
+ * from daemon routes. WHERE THERE IS NO REAL SOURCE, THE PANEL SAYS SO: CI and
+ * Debug still name the missing wire and render nothing else. A panel that
+ * invented a passing run would be worse than an absent panel.
  * Search LEFT that list: it is `git grep -n` through /forge/search now, and its
  * hint names exactly what git grep does and does not look at.
  *
@@ -80,10 +84,21 @@
    it re-hashes the binding in front of the owner, refuses Approve on an
    unresolved field, spends the control after one click, and seals only from a
    receipt. Forge renders that component, not a friendlier copy of it. */
-import { renderCapsule } from './capsule.js';
+import { pendingCapsuleNeedsRefresh, renderCapsule } from './capsule.js';
 /* The editor, the theme built from glass/tokens.css, and the honest statement
    of which languages actually have a checker behind them. */
 import { DIAGNOSED, ZENO_THEME, languageForPath, loadMonaco, monacoIfLoaded, onThemeChange } from './monaco.js';
+import { forgeContextBody, forgeContextKey, newForgeContextState } from './forge-context-model.js';
+import {
+  applyRunProgress,
+  finalTokenUsage,
+  initialRunProgress,
+  markRunProgressGap,
+  phaseLabel,
+  runTransportState,
+  shouldRepaintRunProgress,
+  tokenUsageLabel,
+} from './run-progress-model.js';
 
 /* ================================================================== *
  * 0 · DOM helpers, the owner token, and the one fetch shape           *
@@ -333,27 +348,51 @@ export function initForge(section) {
     readAt: null,        // Date of the last completed read, so reload can prove it ran
     agents: null,        // GET /forge/agents, verbatim
     agentsErr: null,
+    context: null,       // GET /skills, including selected-repository rules
+    contextErr: null,
+    contextBusy: false,
+    skillIds: new Set(),
+    choosing: false,
+    folderNote: '',
+    terminalBusy: false,
+    terminalErr: null,
+    terminalResult: null,
+    terminalCommand: '',
+    terminalTabs: [{ id: 'shell-1', name: 'Shell 1', draft: '', history: [] }],
+    terminalId: 'shell-1',
+    terminalSeq: 1,
+    tests: null,
+    testsErr: null,
+    testsBusy: false,
+    testRunId: '',
+    testResults: new Map(),
+    extensions: null,
+    extensionsErr: null,
+    extensionsBusy: false,
+    connectors: null,
+    connectorsErr: null,
+    connectorsBusy: false,
+    collapsedDirs: new Set(),
+    rainbowBrackets: true,
+    explorerOpen: true,
+    sessionOpen: true,
 
     pan: 'explorer',     // rgA panel
     insp: 'chat',        // rgC inspector tab
     draw: 'terminal',    // rgD drawer tab
 
-    open: [],            // open file tabs, in order: [path]
-    file: null,          // the path showing in the code pane
-    fileData: null,      // GET /forge/file for S.file
-    fileErr: null,
-    fileBusy: false,
-    caret: 0,            // 1-based current line; 0 when the owner has not picked one
+    // Each editor group owns its own tab order and active file. File contents
+    // and dirty state remain path-scoped below, so opening the same path in two
+    // groups never creates two competing buffers.
+    editorGroups: [
+      { tabs: [], file: null, caret: 0 },
+      { tabs: [], file: null, caret: 0 },
+    ],
+    focusedGroup: 0,
+    splitEditor: false,
 
-    agentId: 'claude-code',
-    model: '',
-    effort: 'medium',
-
-    chat: [],            // real turns only: {who:'you'|'agent', at, ...}
-    runs: [],            // this session's runs: {at, task, ok, agentId, model, effort, files, waiting, applied}
-    proposals: [],       // the newest run's proposed[] capsules
-    running: false,
-    runAt: null,         // when the run in flight was sent — the one real number
+    sessions: [],        // independent chat/run histories; each may run concurrently
+    selectedSessionId: '',
 
     // The editor, and the one write it can make: a proposal.
     saving: false,
@@ -364,6 +403,7 @@ export function initForge(section) {
     gates: [],
     gatesErr: null,
     streamDown: false,
+    runProgressStreamDown: false,
 
     view: 'ide',         // 'ide' (five regions) or 'agent' (rgC takes the window)
 
@@ -380,19 +420,250 @@ export function initForge(section) {
     searchFor: '',       // the query the result now on screen actually answers
   };
 
-  /* ---- the five regions, built once and refilled in place ---------------- */
+  // One canonical read record per path. The compatibility accessors keep the
+  // rest of Forge talking about the focused group without duplicating state.
+  const fileRecords = new Map();
+  const group = (index = S.focusedGroup) => S.editorGroups[index === 1 ? 1 : 0];
+  const recordFor = (path) => {
+    if (!path) return null;
+    let record = fileRecords.get(path);
+    if (!record) {
+      record = { data: null, error: null, busy: false, request: 0 };
+      fileRecords.set(path, record);
+    }
+    return record;
+  };
+  Object.defineProperties(S, {
+    open: { get: () => [...new Set(S.editorGroups.flatMap((entry) => entry.tabs))] },
+    file: {
+      get: () => group().file,
+      set: (value) => { group().file = value || null; },
+    },
+    fileData: {
+      get: () => recordFor(group().file)?.data || null,
+      set: (value) => { const record = recordFor(group().file); if (record) record.data = value; },
+    },
+    fileErr: {
+      get: () => recordFor(group().file)?.error || null,
+      set: (value) => { const record = recordFor(group().file); if (record) record.error = value; },
+    },
+    fileBusy: {
+      get: () => recordFor(group().file)?.busy || false,
+      set: (value) => { const record = recordFor(group().file); if (record) record.busy = Boolean(value); },
+    },
+    caret: {
+      get: () => group().caret,
+      set: (value) => { group().caret = Number(value) || 0; },
+    },
+  });
+
+  let nextSessionNumber = 1;
+  function createSession() {
+    const number = nextSessionNumber++;
+    return {
+      id: `agent-${number}`,
+      name: `Agent ${number}`,
+      draft: '',
+      // Start on the no-bill rung while live availability is still loading.
+      // Auto routing may choose another provider, but a hosted run always stops
+      // for the explicit per-run confirmation below.
+      agentId: 'local',
+      model: '',
+      effort: 'low',
+      autoRoute: true,
+      route: null,
+      hostedConfirmation: null,
+      chat: [],
+      runs: [],
+      proposals: [],
+      routing: false,
+      running: false,
+      canceling: false,
+      cancelNote: null,
+      hostedRun: false,
+      runId: null,
+      runAt: null,
+      runProgress: null,
+      runProgressStale: false,
+      // The switch is scoped to this session and defaults on. The records
+      // themselves live in Vault Markdown, so creating/reloading a renderer does
+      // not create a second chat-local memory store.
+      ...newForgeContextState(),
+    };
+  }
+
+  function activeSession() {
+    return S.sessions.find((session) => session.id === S.selectedSessionId) || S.sessions[0];
+  }
+
+  function anySessionRunning() {
+    return S.sessions.some((session) => session.routing || session.running);
+  }
+
+  function anotherHostedRunIsActive(session) {
+    return S.sessions.some((item) => item !== session && item.running && item.hostedRun);
+  }
+
+  function provider(id) {
+    const list = (S.agents && Array.isArray(S.agents.agents)) ? S.agents.agents : [];
+    return list.find((agent) => agent && agent.id === id) || null;
+  }
+
+  function providerAvailable(id) {
+    const item = provider(id);
+    return item !== null && item.available !== false;
+  }
+
+  function firstAvailableProvider() {
+    const list = (S.agents && Array.isArray(S.agents.agents)) ? S.agents.agents : [];
+    const priority = ['local', 'codex', 'claude-code'];
+    return priority.map((id) => list.find((item) => item && item.id === id && item.available !== false)).find(Boolean)
+      || list.find((item) => item && item.available !== false)
+      || null;
+  }
+
+  function addSession() {
+    if (S.sessions.length >= 8) return;
+    const session = createSession();
+    S.sessions.push(session);
+    S.selectedSessionId = session.id;
+    paintC();
+    paintE();
+    const input = rgC.querySelector('#zf-task');
+    if (input) input.focus();
+  }
+
+  const firstSession = createSession();
+  S.sessions.push(firstSession);
+  S.selectedSessionId = firstSession.id;
+  try { S.rainbowBrackets = localStorage.getItem('zeno-forge-rainbow') !== '0'; } catch { /* storage is optional */ }
+  try { S.explorerOpen = localStorage.getItem('zeno-forge-explorer') !== '0'; } catch { /* storage is optional */ }
+  try { S.sessionOpen = localStorage.getItem('zeno-forge-session') !== '0'; } catch { /* storage is optional */ }
+
+  // Existing Forge renderers read these names throughout. Binding them to the
+  // selected session keeps those renderers small while every asynchronous run
+  // captures and updates its own session explicitly (see doRun).
+  for (const field of ['agentId', 'model', 'effort', 'chat', 'runs', 'proposals', 'running', 'runAt']) {
+    Object.defineProperty(S, field, {
+      configurable: false,
+      enumerable: false,
+      get: () => activeSession()[field],
+      set: (value) => { activeSession()[field] = value; },
+    });
+  }
+
+  /* ---- the workbench regions, built once and refilled in place ----------- */
   const root = el('div', 'forge');
+  const rgTop = el('div', 'rgTop');
   const rgA = el('aside', 'rgA');
   const rgB = el('div', 'rgB');
   const rgC = el('div', 'rgC');
   const rgD = el('div', 'rgD');
   const rgE = el('div', 'rgE');
+  rgTop.setAttribute('aria-label', 'Forge workbench controls');
   rgA.setAttribute('aria-label', 'Explorer');
   rgB.setAttribute('aria-label', 'Code');
   rgC.setAttribute('aria-label', 'Agent session');
   rgD.setAttribute('aria-label', 'Terminal, tests, CI and processes');
   rgE.setAttribute('aria-label', 'Repository status');
-  add(root, rgA, rgB, rgD, rgC, rgE);
+  add(root, rgTop, rgA, rgB, rgD, rgC, rgE);
+
+  // Side panes are first-class workbench regions. Keep their visibility and
+  // width under owner control just like the existing bottom drawer.
+  const explorerDrag = btn('fg-vdrag fg-vdrag-left');
+  explorerDrag.setAttribute('aria-label', 'Resize Explorer');
+  explorerDrag.setAttribute('aria-orientation', 'vertical');
+  const sessionDrag = btn('fg-vdrag fg-vdrag-right');
+  sessionDrag.setAttribute('aria-label', 'Resize agent session');
+  sessionDrag.setAttribute('aria-orientation', 'vertical');
+  add(root, explorerDrag, sessionDrag);
+
+  const paneSize = (property, fallback) => {
+    const inline = parseFloat(root.style.getPropertyValue(property));
+    if (Number.isFinite(inline)) return inline;
+    // Use the actual responsive track before falling back. Otherwise the first
+    // keyboard resize at laptop width jumps to the desktop default.
+    const pane = property === '--fexplorer' ? rgA : rgC;
+    const rendered = pane.getBoundingClientRect().width;
+    return rendered > 0 ? rendered : fallback;
+  };
+  const savePaneSize = (key, value) => {
+    try { localStorage.setItem(key, String(Math.round(value))); } catch { /* storage is optional */ }
+  };
+  const restorePaneSize = (key, property, min, max) => {
+    try {
+      const value = Number(localStorage.getItem(key));
+      if (Number.isFinite(value) && value >= min && value <= max) root.style.setProperty(property, `${Math.round(value)}px`);
+    } catch { /* storage is optional */ }
+  };
+  restorePaneSize('zeno-forge-explorer-width', '--fexplorer', 176, 440);
+  restorePaneSize('zeno-forge-session-width', '--fsession', 260, 620);
+
+  function syncPaneVisibility() {
+    if (S.explorerOpen) R.removeAttribute('data-forge-explorer');
+    else R.setAttribute('data-forge-explorer', 'closed');
+    if (S.sessionOpen || S.view === 'agent') R.removeAttribute('data-forge-session');
+    else R.setAttribute('data-forge-session', 'closed');
+    explorerDrag.hidden = !S.explorerOpen || S.view === 'agent';
+    sessionDrag.hidden = !S.sessionOpen || S.view === 'agent';
+  }
+
+  function setPaneOpen(which, open) {
+    if (which === 'explorer') S.explorerOpen = open;
+    if (which === 'session') S.sessionOpen = open;
+    try { localStorage.setItem(`zeno-forge-${which}`, open ? '1' : '0'); } catch { /* storage is optional */ }
+    syncPaneVisibility();
+    paintTop();
+    requestAnimationFrame(layoutEditors);
+  }
+
+  function wireSideDrag(handle, side) {
+    const property = side === 'left' ? '--fexplorer' : '--fsession';
+    const key = side === 'left' ? 'zeno-forge-explorer-width' : 'zeno-forge-session-width';
+    const fallback = side === 'left' ? 318 : 440;
+    const min = side === 'left' ? 176 : 260;
+    const max = side === 'left' ? 440 : 620;
+    const clamp = (value) => Math.max(min, Math.min(max, value));
+    let bounds = null;
+    const move = (ev) => {
+      const raw = side === 'left' ? ev.clientX - bounds.left : bounds.right - ev.clientX;
+      root.style.setProperty(property, `${Math.round(clamp(raw))}px`);
+      layoutEditors();
+    };
+    const up = () => {
+      handle.classList.remove('grab');
+      const value = paneSize(property, fallback);
+      savePaneSize(key, value);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+    handle.addEventListener('pointerdown', (ev) => {
+      bounds = root.getBoundingClientRect();
+      handle.classList.add('grab');
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+      ev.preventDefault();
+    });
+    handle.addEventListener('dblclick', () => {
+      root.style.removeProperty(property);
+      try { localStorage.removeItem(key); } catch { /* storage is optional */ }
+      layoutEditors();
+    });
+    handle.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+      const direction = ev.key === 'ArrowRight' ? 1 : -1;
+      const delta = side === 'left' ? direction * 16 : direction * -16;
+      const value = clamp(paneSize(property, fallback) + delta);
+      root.style.setProperty(property, `${Math.round(value)}px`);
+      savePaneSize(key, value);
+      layoutEditors();
+      ev.preventDefault();
+    });
+  }
+  wireSideDrag(explorerDrag, 'left');
+  wireSideDrag(sessionDrag, 'right');
   section.replaceChildren(root);
 
   /* ---- the editor's host and its state, declared before anything can reach
@@ -409,20 +680,122 @@ export function initForge(section) {
      reaches for `ed`, and a `let` read before its declaration is a
      ReferenceError, not an undefined. */
   const edHost = el('div', 'edhost');
-  const edMon = el('div', 'edmon');
-  const edAux = el('div', 'edaux');
-  edMon.hidden = true;
-  add(edHost, edMon, edAux);
+  const paneViews = [0, 1].map((index) => {
+    const shell = el('section', 'edpane');
+    shell.dataset.editorGroup = String(index);
+    shell.setAttribute('aria-label', `Editor group ${index + 1}`);
+    const chrome = el('div', 'edchrome');
+    const body = el('div', 'edbody');
+    const mon = el('div', 'edmon');
+    const aux = el('div', 'edaux');
+    mon.hidden = true;
+    add(body, mon, aux);
+    add(shell, chrome, body);
+    shell.addEventListener('pointerdown', () => focusEditorGroup(index, false));
+    add(edHost, shell);
+    return { shell, chrome, body, mon, aux, editor: null, modelSubs: [], placeViewport: null, lastCaret: -1 };
+  });
+  const editorSplitDrag = el('div', 'edsplit-drag');
+  editorSplitDrag.tabIndex = 0;
+  editorSplitDrag.setAttribute('role', 'separator');
+  editorSplitDrag.setAttribute('aria-label', 'Resize editor groups');
+  editorSplitDrag.setAttribute('aria-orientation', 'vertical');
+  edHost.insertBefore(editorSplitDrag, paneViews[1].shell);
+  paneViews[1].shell.hidden = true;
+  editorSplitDrag.hidden = true;
+
+  // These aliases always point at the focused group. Existing menu, status and
+  // governance code therefore keeps one active-editor contract while the two
+  // pane records hold their independent view state.
+  let edMon = paneViews[0].mon;
+  let edAux = paneViews[0].aux;
 
   let M = null;              // the monaco namespace, once it is loaded
-  let ed = null;             // the editor instance, once it is created
+  let ed = null;             // focused editor instance, once it is created
   let edErr = null;          // why the editor is absent, in the owner's words
   const models = new Map();  // path -> monaco ITextModel
-  const modelSubs = [];      // listeners on the model currently on screen
+  let modelSubs = paneViews[0].modelSubs;
   /** Paths whose buffer has been touched since it was read. Guards modelFor:
       a repaint must never overwrite unsaved edits with the bytes on disk. */
   const dirtyPaths = new Set();
   let lastCaretPainted = -1;
+
+  function bindEditorGroup(index) {
+    S.focusedGroup = index === 1 ? 1 : 0;
+    const view = paneViews[S.focusedGroup];
+    edMon = view.mon;
+    edAux = view.aux;
+    ed = view.editor;
+    modelSubs = view.modelSubs;
+    lastCaretPainted = view.lastCaret;
+    placeViewport = view.placeViewport;
+  }
+
+  function persistEditorGroup() {
+    const view = paneViews[S.focusedGroup];
+    view.editor = ed;
+    view.modelSubs = modelSubs;
+    view.lastCaret = lastCaretPainted;
+    view.placeViewport = placeViewport;
+  }
+
+  function focusEditorGroup(index, repaint = true) {
+    if (index === 1 && !S.splitEditor) return;
+    persistEditorGroup();
+    bindEditorGroup(index);
+    for (const [at, view] of paneViews.entries()) view.shell.dataset.focused = at === S.focusedGroup ? 'true' : 'false';
+    if (repaint) {
+      paintB();
+      paintE();
+    }
+  }
+
+  function forEditorGroup(index, action) {
+    const previous = S.focusedGroup;
+    persistEditorGroup();
+    bindEditorGroup(index);
+    try { return action(); }
+    finally {
+      persistEditorGroup();
+      bindEditorGroup(previous);
+    }
+  }
+
+  function layoutEditors() {
+    for (const view of paneViews) if (view.editor) view.editor.layout();
+  }
+  function setEditorSplitFraction(value) {
+    const fraction = Math.max(0.25, Math.min(0.75, value));
+    edHost.style.setProperty('--editor-split', `${(fraction * 100).toFixed(2)}%`);
+    try { localStorage.setItem('zeno-forge-editor-split', String(fraction)); } catch { /* optional */ }
+    layoutEditors();
+  }
+  editorSplitDrag.addEventListener('pointerdown', (event) => {
+    editorSplitDrag.setPointerCapture(event.pointerId);
+    const move = (next) => {
+      const bounds = edHost.getBoundingClientRect();
+      if (bounds.width) setEditorSplitFraction((next.clientX - bounds.left) / bounds.width);
+    };
+    const up = () => {
+      editorSplitDrag.removeEventListener('pointermove', move);
+      editorSplitDrag.removeEventListener('pointerup', up);
+    };
+    editorSplitDrag.addEventListener('pointermove', move);
+    editorSplitDrag.addEventListener('pointerup', up);
+    event.preventDefault();
+  });
+  editorSplitDrag.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    const raw = parseFloat(edHost.style.getPropertyValue('--editor-split')) / 100;
+    setEditorSplitFraction((Number.isFinite(raw) ? raw : 0.5) + (event.key === 'ArrowRight' ? 0.03 : -0.03));
+    event.preventDefault();
+  });
+  try {
+    const savedSplit = Number(localStorage.getItem('zeno-forge-editor-split'));
+    if (Number.isFinite(savedSplit) && savedSplit > 0) setEditorSplitFraction(savedSplit);
+  } catch { /* optional */ }
+  paneViews[0].shell.dataset.focused = 'true';
+  syncPaneVisibility();
 
   /* ---- masked mode ------------------------------------------------------- *
    * The shell's `masked` control sets data-lock on :root, and the CSS veils
@@ -451,16 +824,115 @@ export function initForge(section) {
        buffer, which dismisses the rest. The body-mounted menu is handled in
        CSS, beside the rest of the veil, because it is not this editor's to
        close. */
-    if (masked && ed) {
-      ed.trigger('zeno.mask', 'closeFindWidget', null);
-      ed.trigger('zeno.mask', 'hideSuggestWidget', null);
-      ed.trigger('zeno.mask', 'closeParameterHints', null);
+    if (masked) {
+      for (const view of paneViews) {
+        if (!view.editor) continue;
+        view.editor.trigger('zeno.mask', 'closeFindWidget', null);
+        view.editor.trigger('zeno.mask', 'hideSuggestWidget', null);
+        view.editor.trigger('zeno.mask', 'closeParameterHints', null);
+      }
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && rgB.contains(focused)) focused.blur();
     }
   };
   syncLock();
   new MutationObserver(syncLock).observe(R, { attributes: true, attributeFilter: ['data-lock'] });
+
+  /* ================================================================ *
+   * workbench bar — mode, real view shortcuts, and concurrent agents *
+   * ================================================================ */
+
+  function paintTop() {
+    const mode = el('div', 'fgmode');
+    mode.setAttribute('role', 'tablist');
+    mode.setAttribute('aria-label', 'Forge mode');
+    for (const [id, label] of [['agent', 'Agent'], ['ide', 'Editor']]) {
+      const b = btn(null, label, () => setView(id));
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', S.view === id ? 'true' : 'false');
+      add(mode, b);
+    }
+
+    const menu = el('div', 'fgmenu');
+    const item = (label, title, action) => {
+      const b = btn(null, label, action);
+      b.title = title;
+      add(menu, b);
+    };
+    item('File', 'Open the Explorer', () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); });
+    // setView repaints the top bar through paintC. Focus after that repaint so
+    // the browser cannot return focus to the menu button that was just removed.
+    const withActiveEditor = (action) => {
+      setView('ide');
+      requestAnimationFrame(() => {
+        const activeEditor = paneViews[S.focusedGroup]?.editor;
+        if (activeEditor) action(activeEditor);
+      });
+    };
+    const focusActiveEditor = (editor) => {
+      editor.focus();
+      const root = editor.getDomNode?.();
+      if (root && !root.contains(document.activeElement)) {
+        // Chromium's native EditContext can ignore Monaco's first focus call.
+        root.querySelector('[role="textbox"], textarea')?.focus();
+      }
+    };
+    item('Edit', 'Focus the active editor', () => withActiveEditor(focusActiveEditor));
+    item('Selection', 'Expand the current editor selection', () => withActiveEditor((editor) => {
+      focusActiveEditor(editor);
+      editor.trigger('zeno.menu', 'editor.action.smartSelect.expand', null);
+    }));
+    item('View', 'Switch between the full IDE and focused agent', () => setView(S.view === 'ide' ? 'agent' : 'ide'));
+    item('Go', 'Search the selected repository', () => {
+      setView('ide'); setPaneOpen('explorer', true); S.pan = 'search'; paintA();
+      requestAnimationFrame(() => rgA.querySelector('.sform input')?.focus());
+    });
+    item('Run', 'Focus the agent task composer', () => {
+      if (!S.sessionOpen) setPaneOpen('session', true);
+      S.insp = 'chat'; paintC();
+      const input = rgC.querySelector('#zf-task');
+      if (input) input.focus();
+    });
+    item('Terminal', 'Open the owner terminal', () => { setView('ide'); S.draw = 'terminal'; setDrawerMin(false); paintD(); });
+    item('Help', 'Open repository rules and installed skills', () => {
+      setView('ide'); setPaneOpen('explorer', true); S.pan = 'rules'; paintA();
+    });
+
+    const centre = btn('fgworkspace', null, () => {
+      setView('ide'); setPaneOpen('explorer', true); S.pan = 'search'; paintA();
+      requestAnimationFrame(() => rgA.querySelector('.sform input')?.focus());
+    });
+    centre.setAttribute('aria-label', 'Search files in the Forge workspace');
+    centre.title = 'Search files and symbols in the selected repository';
+    const st = S.status;
+    add(centre, glyph('⌕', 'fgworkspace-mark'), el('span', null, st && st.repo ? `${repoName(st)} — search` : 'Search Forge workspace'));
+
+    const right = el('div', 'fgtop-right');
+    const running = S.sessions.filter((session) => session.running).length;
+    if (running) {
+      const chip = el('span', 'chip');
+      chip.dataset.state = 'listening';
+      add(chip, glyph('●', 'chip-glyph'), document.createTextNode(`${running} running`));
+      add(right, chip);
+    }
+    const paneToggle = (label, mark, pressed, action) => {
+      const toggle = btn('fgpane-toggle', mark, action);
+      toggle.setAttribute('aria-label', label);
+      toggle.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+      toggle.title = label;
+      add(right, toggle);
+    };
+    if (S.view === 'ide') {
+      paneToggle(S.explorerOpen ? 'Hide Explorer' : 'Show Explorer', '◧', S.explorerOpen, () => setPaneOpen('explorer', !S.explorerOpen));
+      paneToggle(drawerMin() ? 'Show bottom panel' : 'Hide bottom panel', '▤', !drawerMin(), () => setDrawerMin(!drawerMin()));
+      paneToggle(S.sessionOpen ? 'Hide agent session' : 'Show agent session', '◨', S.sessionOpen, () => setPaneOpen('session', !S.sessionOpen));
+    }
+    const fresh = btn('btn sm fgnew', '+ New agent', addSession);
+    fresh.disabled = S.sessions.length >= 8;
+    fresh.title = fresh.disabled ? 'Forge keeps at most eight sessions in one window.' : 'Start another independent agent session';
+    add(right, fresh);
+    rgTop.replaceChildren(mode, menu, centre, right);
+  }
 
   /* ================================================================ *
    * rgA — the explorer rail: repo head, panel body, panel switcher    *
@@ -470,6 +942,7 @@ export function initForge(section) {
     ['explorer', 'Explorer'],
     ['search', 'Search'],
     ['scm', 'Source control'],
+    ['extensions', 'Extensions & themes'],
     ['rules', 'Rules & skills'],
     ['mcp', 'MCP servers'],
     ['tests', 'Tests'],
@@ -480,44 +953,60 @@ export function initForge(section) {
   function paintA() {
     const st = S.status;
 
-    // The workspace head. There is exactly one workspace — the sandbox — so this
-    // names it and re-reads it, rather than offering a switcher over one item.
-    const head = btn('mdl', null, () => void reloadRepo());
-    add(head, glyph('☰'));
+    // Opening a repository and refreshing it are separate owner actions.
+    const head = el('div', 'mdl');
     const name = el('b', null, st && st.repo ? repoName(st) : 'sandbox');
     name.title = st && st.root ? String(st.root) : 'the daemon sandbox';
-    add(head, name, el('span', 'sp'));
-    /* The word alone was a dead control on the common case. A repository that
-       has not changed redraws an identical tree, so a click produced no visible
-       difference whatsoever and the honest reading was "this button is broken".
-       The clock time of the read changes on every click even when the repository
-       does not, so the button now answers the only question it was being asked. */
-    head.disabled = S.reloading;
-    add(head, el('span', null,
-      S.reloading ? 'reading…' : (S.readAt ? `reload · ${clockOf(S.readAt)}` : 'reload')));
-    head.title = S.readAt
-      ? `Re-read the sandbox and the open file from disk. Last read at ${clockOf(S.readAt)}.`
-      : 'Re-read the sandbox and the open file from disk.';
+    const open = btn('btn sm', S.choosing ? 'Opening…' : 'Open folder', () => void chooseFolder());
+    open.disabled = S.choosing || anySessionRunning() || S.terminalBusy || !!S.testRunId || S.saving;
+    open.title = 'Choose the repository Zeno should work in';
+    const reload = btn('btn sm', S.reloading ? 'Reading…' : 'Reload', () => void reloadRepo());
+    reload.disabled = S.reloading || S.choosing;
+    reload.title = S.readAt ? `Last read at ${clockOf(S.readAt)}` : 'Refresh files, providers, repository rules and skills';
+    head.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+    add(head, name, el('span', 'sp'), open, reload);
+    if (S.folderNote) add(head, el('span', 'hint', S.folderNote));
 
     const body = el('div', 'panbody');
     add(body, PANEL[S.pan] ? PANEL[S.pan]() : PANEL.explorer());
 
-    const bar = el('div', 'panbar');
-    const d = el('div', 'd', 'panels');
-    const tree = el('div', 'tree');
+    const activity = el('nav', 'fgactivity');
+    activity.setAttribute('aria-label', 'Forge views');
+    const icons = {
+      explorer: '▱', search: '⌕', scm: '⑂', extensions: '⬡', rules: '✦',
+      mcp: '⇄', tests: '✓', debug: '▷', tasks: '☷',
+    };
     for (const [id, label] of PANELS) {
-      const b = btn(null, label, () => { S.pan = id; paintA(); });
+      const b = btn(null, label, () => {
+        S.pan = id;
+        paintA();
+        if (id === 'tests' && !S.tests && !S.testsBusy) void loadTests();
+        if (id === 'extensions' && !S.extensions && !S.extensionsBusy) void loadExtensions();
+        if (id === 'mcp' && !S.connectors && !S.connectorsBusy) void loadConnectors();
+      });
       b.setAttribute('aria-current', id === S.pan ? 'true' : 'false');
-      add(tree, b);
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      b.textContent = icons[id] || '·';
+      add(activity, b);
     }
-    add(bar, d, tree);
 
-    rgA.replaceChildren(head, body, bar);
+    const side = el('div', 'fgside');
+    const current = PANELS.find(([id]) => id === S.pan);
+    add(side, el('div', 'fgside-title', current ? current[1] : 'Explorer'), head, body);
+    rgA.replaceChildren(activity, side);
+  }
+
+  function workspaceName(st) {
+    return st && st.root
+      ? String(st.root).replace(/\\/g, '/').split('/').filter(Boolean).pop() || 'sandbox'
+      : 'sandbox';
   }
 
   function repoName(st) {
     const b = String(st.branch || '');
-    return b ? `sandbox · ${b}` : 'sandbox';
+    const folder = workspaceName(st);
+    return b ? `${folder} · ${b}` : folder;
   }
 
   /* ---- the panels. Two are real; the rest say plainly that they are not. -- */
@@ -569,28 +1058,48 @@ export function initForge(section) {
         return wrap;
       }
 
-      const tree = el('div', 'tree');
-      let group = null;
-      for (const p of paths) {
-        const cut = p.lastIndexOf('/');
-        const dir = cut === -1 ? '' : p.slice(0, cut);
-        const base = cut === -1 ? p : p.slice(cut + 1);
-        if (dir !== group) {
-          group = dir;
-          const d = el('div', 'd', dir === '' ? '/' : dir.toUpperCase() + '/');
-          d.title = dir === '' ? 'repository root' : dir;
-          add(tree, d);
+      const tree = el('div', 'tree fgtree');
+      const rootNode = { dirs: new Map(), files: [] };
+      for (const path of paths) {
+        const parts = path.split('/').filter(Boolean);
+        let node = rootNode;
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { dirs: new Map(), files: [] });
+          node = node.dirs.get(parts[i]);
         }
-        const b = btn(null, null, () => openFile(p));
-        const dirty = changed.has(p);
-        add(b, glyph(dirty ? '●' : '○'));
-        b.firstChild.style.color = dirty ? 'var(--green)' : 'var(--ink-3)';
-        const nm = el('span', 'nm', base);
-        add(b, nm);
-        b.title = dirty ? `${p} — ${statusWord(changed.get(p))}` : p;
-        b.setAttribute('aria-current', p === S.file ? 'true' : 'false');
-        add(tree, b);
+        node.files.push({ name: parts[parts.length - 1] || path, path });
       }
+
+      const renderNode = (node, prefix, depth, target) => {
+        const directories = [...node.dirs.entries()].sort(([a], [b]) => a.localeCompare(b));
+        for (const [name, child] of directories) {
+          const path = prefix ? `${prefix}/${name}` : name;
+          const collapsed = S.collapsedDirs.has(path);
+          const folder = btn('fgtree-folder', null, () => {
+            if (collapsed) S.collapsedDirs.delete(path); else S.collapsedDirs.add(path);
+            paintA();
+          });
+          folder.style.setProperty('--depth', String(depth));
+          folder.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          folder.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${path}`);
+          folder.title = path;
+          add(folder, glyph(collapsed ? '›' : '⌄', 'fgchev'), glyph('◇', 'fgfolder'), el('span', 'nm', name));
+          add(target, folder);
+          if (!collapsed) renderNode(child, path, depth + 1, target);
+        }
+        for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
+          const b = btn('fgtree-file', null, () => openFile(file.path));
+          b.style.setProperty('--depth', String(depth));
+          const dirty = changed.has(file.path);
+          const mark = glyph(dirty ? '●' : '○', 'fgfile-mark');
+          mark.style.color = dirty ? 'var(--green)' : 'var(--ink-3)';
+          add(b, glyph('', 'fgchev'), mark, el('span', 'nm', file.name));
+          b.title = dirty ? `${file.path} — ${statusWord(changed.get(file.path))}` : file.path;
+          b.setAttribute('aria-current', file.path === S.file ? 'true' : 'false');
+          add(target, b);
+        }
+      };
+      renderNode(rootNode, '', 0, tree);
       add(wrap, tree);
 
       if (S.status.trackedCapped) {
@@ -751,24 +1260,119 @@ export function initForge(section) {
       return wrap;
     },
 
-    /* ---- the five with no live source. Each names what is missing. -------- */
-    rules() {
-      return renderUnwired(
-        'No rules engine is wired',
-        'Nothing in this daemon loads per-repo rules or skills, so there is no rule set, no hash and no conflict to report. This panel will have content when a rules source exists — not before.',
-      );
+    /* EXTENSIONS & THEMES — a live Zeno catalog, with provenance and limits. */
+    extensions() {
+      const wrap = el('div', 'pw');
+      const heading = el('div', 'acts');
+      add(heading, el('div', 'd', 'Zeno capabilities'));
+      const refresh = btn('btn sm ghost', S.extensionsBusy ? 'Reading…' : 'Refresh catalog', () => void loadExtensions());
+      refresh.disabled = S.extensionsBusy;
+      add(heading, el('span', 'sp'), refresh);
+      add(wrap, heading);
+
+      const monaco = el('div', 'box');
+      add(monaco, el('b', null, 'Monaco editor core'), el('div', null, 'Enabled · syntax services, tabs, minimap, find, folding, and multi-cursor editing are served locally.'));
+      add(wrap, monaco);
+
+      const rainbow = el('div', 'box');
+      const label = el('label', 'fgcheck');
+      const check = el('input');
+      check.type = 'checkbox';
+      check.checked = S.rainbowBrackets;
+      check.addEventListener('change', () => {
+        S.rainbowBrackets = check.checked;
+        try { localStorage.setItem('zeno-forge-rainbow', check.checked ? '1' : '0'); } catch { /* storage is optional */ }
+        for (const view of paneViews) if (view.editor) view.editor.updateOptions({
+          bracketPairColorization: { enabled: check.checked, independentColorPoolPerBracketType: true },
+          guides: { bracketPairs: check.checked ? 'active' : false, bracketPairsHorizontal: check.checked ? 'active' : false, indentation: true, highlightActiveIndentation: true },
+        });
+      });
+      add(label, check, document.createTextNode(' Rainbow brackets'));
+      add(rainbow, label, el('div', null, 'A real Monaco editor setting. The choice applies immediately and is stored only on this device.'));
+      add(wrap, rainbow);
+
+      add(wrap, el('div', 'd', 'glass theme'));
+      const themes = el('div', 'acts fgthemes');
+      for (const [value, labelText] of [['system', 'System'], ['dark', 'Graphite'], ['light', 'Glass Dawn']]) {
+        const b = btn('btn sm', labelText, () => {
+          if (value === 'system') R.removeAttribute('data-theme'); else R.setAttribute('data-theme', value);
+          try { localStorage.setItem('zeno-th', value); } catch { /* storage is optional */ }
+          paintA();
+        });
+        const current = R.getAttribute('data-theme') || 'system';
+        b.setAttribute('aria-pressed', current === value ? 'true' : 'false');
+        add(themes, b);
+      }
+      add(wrap, themes, el('div', 'hint', 'Themes use the same Glass design tokens as Command and Counsel; Monaco rebuilds from those tokens when the theme changes.'));
+      if (S.extensionsErr) add(wrap, renderNote(`Capability catalog unavailable: ${S.extensionsErr}`, 'rd'));
+      if (!S.extensions && !S.extensionsErr) add(wrap, renderNote('Reading installed local capabilities…'));
+      const catalog = S.extensions;
+      if (catalog) {
+        add(wrap, el('div', 'd', 'installed skills'));
+        const skills = Array.isArray(catalog.skills) ? catalog.skills : [];
+        if (!skills.length) add(wrap, renderNote('No repository or global Agent Skills were found in the bounded local libraries.'));
+        for (const skill of skills) {
+          const box = el('div', 'box');
+          add(box, el('b', null, skill.name || skill.id));
+          add(box, el('div', null, skill.status === 'unreadable' ? `Unreadable · ${skill.reason || 'unknown reason'}` : (skill.description || 'No description.')));
+          add(box, el('div', 'hint', `${skill.provenance || 'unknown source'} · ${skill.selectableInThisRepository ? 'selectable for this repository' : 'catalogued here; install into this repository to select'} · ${skill.verdict || skill.status || 'read'}`));
+          add(box, el('div', 'hint', Array.isArray(skill.permissions) && skill.permissions.length ? `Permission: ${skill.permissions.join(', ')}. ${skill.authority || ''}` : 'This entry grants no tool permission.'));
+          add(wrap, box);
+        }
+        add(wrap, el('div', 'd', 'snippet manifests'));
+        const snippets = Array.isArray(catalog.snippets) ? catalog.snippets : [];
+        if (!snippets.length) add(wrap, renderNote('No .code-snippets manifests were found in the repository or VS Code user snippets folder.'));
+        for (const snippet of snippets) {
+          const box = el('div', 'box');
+          add(box, el('b', null, snippet.file), el('div', null, `${snippet.entries || 0} snippet${snippet.entries === 1 ? '' : 's'} · ${snippet.provenance}`));
+          add(box, el('div', 'hint', snippet.status === 'unreadable'
+            ? `Could not read: ${snippet.reason}`
+            : 'Catalogued only. Forge does not inject VS Code user snippets into Monaco yet.'));
+          add(wrap, box);
+        }
+        const actions = el('div', 'acts');
+        const choose = btn('btn sm', 'Open Rules & skills', () => { S.pan = 'rules'; paintA(); });
+        add(actions, choose);
+        add(wrap, actions, el('div', 'hint', catalog.note || 'Zeno capability catalog.'));
+        add(wrap, renderNote('VS Code Marketplace and VSIX extensions are not compatible with this build. The list above contains only capabilities Zeno found locally and can describe truthfully.'));
+      }
+      return wrap;
     },
+
+    /* ---- source-backed views; absent sources still say so plainly. -------- */
+    rules() { return contextPanel(); },
     mcp() {
-      return renderUnwired(
-        'No MCP servers are registered',
-        'This daemon holds no connector registry, so there is nothing to list and no tool permissions to show. An empty list here is the true one.',
-      );
+      const wrap = el('div', 'pw');
+      const hd = el('div', 'acts');
+      add(hd, el('div', 'd', 'run-scoped MCP & connectors'));
+      const refresh = btn('btn sm ghost', S.connectorsBusy ? 'Reading…' : 'Refresh', () => void loadConnectors());
+      refresh.disabled = S.connectorsBusy;
+      add(hd, el('span', 'sp'), refresh);
+      add(wrap, hd);
+      if (S.connectorsErr) add(wrap, renderNote(`Connector catalog unavailable: ${S.connectorsErr}`, 'rd'));
+      if (!S.connectors && !S.connectorsErr) add(wrap, renderNote('Reading the daemon’s strict MCP configuration…'));
+      const catalog = S.connectors;
+      if (catalog) {
+        for (const server of catalog.servers || []) {
+          const box = el('div', 'box');
+          add(box, el('b', null, server.name || server.id));
+          const status = server.configured ? 'configured' : 'off';
+          add(box, el('div', null, `${status} · ${server.activeRuns || 0} active run${server.activeRuns === 1 ? '' : 's'}`));
+          add(box, el('div', 'hint', `Tools: ${(server.tools || []).join(', ') || 'none'}`));
+          add(box, el('div', 'hint', server.permissions || 'No permissions reported.'));
+          add(box, el('div', 'hint', `Source: ${server.provenance || 'unknown'}`));
+          if ('attached' in server) add(box, el('div', 'hint', `Extension: ${server.attached ? 'proved attached' : 'not attached'} · allowed origins: ${server.allowedOrigins || 0}`));
+          add(wrap, box);
+        }
+        if (Array.isArray(catalog.external) && catalog.external.length === 0) {
+          add(wrap, renderNote('No ambient external MCP server is loaded. Forge uses a strict per-run configuration.'));
+        }
+        add(wrap, el('div', 'hint', catalog.note || catalog.mode || 'Strict run-scoped MCP configuration.'));
+      }
+      return wrap;
     },
     tests() {
-      return renderUnwired(
-        'No test runner is wired',
-        'Forge cannot run tests: there is no daemon route that executes a test command, so there is no pass, no fail and no coverage to report. Any number shown here would be invented.',
-      );
+      return testPanel(false);
     },
     debug() {
       return renderUnwired(
@@ -956,8 +1560,9 @@ export function initForge(section) {
   );
 
   /** The bytes /forge/file last handed us for the file on screen. */
-  function diskText() {
-    return S.fileData && typeof S.fileData.contents === 'string' ? S.fileData.contents : null;
+  function diskText(path = S.file) {
+    const data = recordFor(path)?.data;
+    return data && typeof data.contents === 'string' ? data.contents : null;
   }
 
   /**
@@ -975,10 +1580,10 @@ export function initForge(section) {
   }
 
   /** Whether the buffer differs from what is on disk, as last read. */
-  function isDirty() {
-    if (!ed || !S.file || !M) return false;
-    const model = models.get(S.file);
-    const disk = diskText();
+  function isDirty(path = S.file) {
+    if (!path || !M) return false;
+    const model = models.get(path);
+    const disk = diskText(path);
     if (!model || disk === null) return false;
     return bufferLF(model) !== disk;
   }
@@ -987,20 +1592,175 @@ export function initForge(section) {
    * Whether this file may be edited, and — when it may not — the sentence that
    * says why. Never a bare disabled control.
    */
-  function readOnlyReason() {
+  function readOnlyReason(path = S.file) {
     if (!OWNER_TOKEN) {
       return 'This window was opened without an owner token, so it can read the sandbox but cannot propose a change to it.';
     }
-    if (S.fileData && S.fileData.truncated) {
-      return `Only the first ${diskText() === null ? 0 : diskText().split('\n').length} lines of this ${S.fileData.lines}-line file were read, so the buffer is not the whole file. Saving it would propose the file with the rest cut off.`;
+    const data = recordFor(path)?.data;
+    if (data && data.truncated) {
+      return `Only the first ${diskText(path) === null ? 0 : diskText(path).split('\n').length} lines of this ${data.lines}-line file were read, so the buffer is not the whole file. Saving it would propose the file with the rest cut off.`;
     }
     return null;
+  }
+
+  const EDITOR_LAYOUT_KEY = 'zeno-forge-editor-layout-v1';
+  let editorLayoutRestored = false;
+
+  function persistEditorLayout() {
+    try {
+      localStorage.setItem(EDITOR_LAYOUT_KEY, JSON.stringify({
+        root: S.status && S.status.root ? S.status.root : null,
+        split: S.splitEditor,
+        focused: S.focusedGroup,
+        groups: S.editorGroups.map((entry) => ({ tabs: entry.tabs, file: entry.file })),
+      }));
+    } catch { /* local persistence is optional */ }
+  }
+
+  function restoreEditorLayout() {
+    if (editorLayoutRestored || !S.status) return;
+    editorLayoutRestored = true;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(EDITOR_LAYOUT_KEY) || 'null'); }
+    catch { saved = null; }
+    if (!saved || !Array.isArray(saved.groups) || saved.root !== S.status.root) return;
+    for (const index of [0, 1]) {
+      const source = saved.groups[index] || {};
+      const tabs = Array.isArray(source.tabs)
+        ? [...new Set(source.tabs.filter((path) => typeof path === 'string' && path.length > 0))].slice(0, 40)
+        : [];
+      S.editorGroups[index].tabs = tabs;
+      S.editorGroups[index].file = tabs.includes(source.file) ? source.file : (tabs[0] || null);
+    }
+    S.splitEditor = Boolean(saved.split);
+    S.focusedGroup = saved.focused === 1 && S.splitEditor ? 1 : 0;
+    paneViews[1].shell.hidden = !S.splitEditor;
+    editorSplitDrag.hidden = !S.splitEditor;
+    bindEditorGroup(S.focusedGroup);
+    for (const [index, view] of paneViews.entries()) view.shell.dataset.focused = index === S.focusedGroup ? 'true' : 'false';
+    const paths = [...new Set(S.editorGroups.map((entry) => entry.file).filter(Boolean))];
+    for (const path of paths) void rereadPath(path, false);
+  }
+
+  function setSplitEditor(open) {
+    S.splitEditor = Boolean(open);
+    paneViews[1].shell.hidden = !S.splitEditor;
+    editorSplitDrag.hidden = !S.splitEditor;
+    edHost.dataset.split = S.splitEditor ? 'true' : 'false';
+    if (!S.splitEditor && S.focusedGroup === 1) focusEditorGroup(0, false);
+    persistEditorLayout();
+    paintB();
+    requestAnimationFrame(layoutEditors);
+  }
+
+  function discardPath(path) {
+    dirtyPaths.delete(path);
+    const model = models.get(path);
+    if (model && !model.isDisposed()) {
+      for (const view of paneViews) if (view.editor && view.editor.getModel() === model) view.editor.setModel(null);
+      model.dispose();
+    }
+    models.delete(path);
+    fileRecords.delete(path);
+  }
+
+  function closeTab(index, path, options = {}) {
+    const target = group(index);
+    if (!target.tabs.includes(path)) return true;
+    const visibleElsewhere = S.editorGroups.some((entry, at) => at !== index && entry.tabs.includes(path));
+    if (dirtyPaths.has(path) && !visibleElsewhere && options.discard !== true) {
+      const discard = window.confirm(`“${path}” has unsaved edits.\n\nDiscard them and close the tab?`);
+      if (!discard) return false;
+    }
+    const closedAt = target.tabs.indexOf(path);
+    target.tabs = target.tabs.filter((entry) => entry !== path);
+    if (target.file === path) target.file = target.tabs[Math.min(closedAt, target.tabs.length - 1)] || null;
+    if (!S.editorGroups.some((entry) => entry.tabs.includes(path))) discardPath(path);
+    persistEditorLayout();
+    paintB();
+    paintA();
+    paintE();
+    return true;
+  }
+
+  function closeTabs(index, mode, anchor) {
+    const tabs = [...group(index).tabs];
+    const at = tabs.indexOf(anchor);
+    const targets = mode === 'others' ? tabs.filter((path) => path !== anchor)
+      : mode === 'right' ? tabs.slice(at + 1)
+        : tabs;
+    for (const path of targets) if (!closeTab(index, path)) break;
+  }
+
+  function transferTab(path, from, to, copy) {
+    if (!path || from === to) return;
+    const destination = group(to);
+    if (!destination.tabs.includes(path)) destination.tabs.push(path);
+    destination.file = path;
+    if (!copy) {
+      const source = group(from);
+      source.tabs = source.tabs.filter((entry) => entry !== path);
+      if (source.file === path) source.file = source.tabs.at(-1) || null;
+    }
+    if (!S.splitEditor) S.splitEditor = true;
+    paneViews[1].shell.hidden = false;
+    editorSplitDrag.hidden = false;
+    edHost.dataset.split = 'true';
+    focusEditorGroup(to, false);
+    persistEditorLayout();
+    paintB();
+    requestAnimationFrame(layoutEditors);
+  }
+
+  function paneTabs(index) {
+    const entry = group(index);
+    const tabs = el('div', 'tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', `Open files in editor group ${index + 1}`);
+    if (entry.tabs.length === 0) add(tabs, el('span', 'tb empty', 'no file open'));
+    const changed = new Set(((S.status && S.status.changed) || []).map((item) => item.path));
+    for (const path of entry.tabs) {
+      const tab = el('div', 'tb');
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', path === entry.file ? 'true' : 'false');
+      tab.title = path;
+      const activate = btn('tb-main', null, () => {
+        focusEditorGroup(index, false);
+        void openFile(path, undefined, index);
+      });
+      const dot = el('span', dirtyPaths.has(path) ? 'fdot' : changed.has(path) ? 'fdot changed' : 'fdot clean');
+      dot.setAttribute('aria-label', dirtyPaths.has(path) ? 'unsaved edits' : changed.has(path) ? 'changed in worktree' : 'unchanged');
+      add(activate, dot, el('span', 'tb-name', path.split('/').pop()));
+      const close = btn('tb-close', '×', (event) => { event.stopPropagation(); closeTab(index, path); });
+      close.setAttribute('aria-label', `Close ${path}`);
+      add(tab, activate, close);
+      add(tabs, tab);
+    }
+    add(tabs, el('span', 'sp'));
+    const active = entry.file;
+    const menu = el('details', 'edtab-menu');
+    const summary = el('summary', null, '⋯');
+    summary.setAttribute('aria-label', `Editor group ${index + 1} tab actions`);
+    const actions = el('div', 'edtab-actions');
+    const menuAction = (label, action, disabled = false) => {
+      const control = btn(null, label, () => { menu.open = false; action(); });
+      control.disabled = disabled;
+      add(actions, control);
+    };
+    menuAction('Open to side', () => transferTab(active, index, index === 0 ? 1 : 0, true), !active);
+    menuAction('Move to other group', () => transferTab(active, index, index === 0 ? 1 : 0, false), !active);
+    menuAction('Close others', () => closeTabs(index, 'others', active), entry.tabs.length < 2);
+    menuAction('Close to the right', () => closeTabs(index, 'right', active), !active || entry.tabs.indexOf(active) === entry.tabs.length - 1);
+    menuAction('Close all', () => closeTabs(index, 'all', active), entry.tabs.length === 0);
+    add(menu, summary, actions);
+    add(tabs, menu);
+    return tabs;
   }
 
   function paintB() {
     /* crumbs: repository › directory › file, then the branch. */
     const crumbs = el('div', 'crumbs');
-    add(crumbs, el('span', null, 'sandbox'));
+    add(crumbs, el('span', null, workspaceName(S.status)));
     if (S.file) {
       const parts = S.file.split('/');
       const base = parts.pop();
@@ -1023,40 +1783,37 @@ export function initForge(section) {
       add(crumbs, br);
     }
 
-    /* file tabs */
-    const tabs = el('div', 'tabs');
-    tabs.setAttribute('role', 'tablist');
-    if (S.open.length === 0) {
-      const none = el('span', 'tb');
-      none.textContent = 'no file open';
-      add(tabs, none);
-    }
-    const changed = new Set(((S.status && S.status.changed) || []).map((c) => c.path));
-    for (const p of S.open) {
-      const t = btn('tb', null, () => openFile(p));
-      t.setAttribute('role', 'tab');
-      t.setAttribute('aria-selected', p === S.file ? 'true' : 'false');
-      const dot = el('span', changed.has(p) ? 'fdot' : 'fdot clean');
-      dot.setAttribute('aria-hidden', 'true');
-      add(t, dot, el('span', null, p.split('/').pop()));
-      t.title = changed.has(p) ? `${p} — changed in the working tree` : p;
-      add(tabs, t);
-    }
-    add(tabs, el('span', 'sp'));
+    const tools = el('div', 'edtools');
+    const split = btn('ed-split', S.splitEditor ? 'Unsplit editor' : 'Split editor', () => setSplitEditor(!S.splitEditor));
+    split.setAttribute('aria-pressed', S.splitEditor ? 'true' : 'false');
+    split.title = 'Split or unsplit the editor. Ctrl+\\';
+    add(tools, split);
 
-    rgB.replaceChildren(crumbs, tabs, editorBar(), edHost);
-    syncEditor();
+    paneViews[1].shell.hidden = !S.splitEditor;
+    editorSplitDrag.hidden = !S.splitEditor;
+    edHost.dataset.split = S.splitEditor ? 'true' : 'false';
+    for (const index of S.splitEditor ? [0, 1] : [0]) {
+      forEditorGroup(index, () => {
+        paneViews[index].chrome.replaceChildren(paneTabs(index), editorBar());
+        syncEditor();
+      });
+    }
+    rgB.replaceChildren(crumbs, tools, edHost);
+    bindEditorGroup(S.focusedGroup);
   }
 
   /** Repaint the strip alone. Markers and the dirty flag move often; the tabs do not. */
   function paintBar() {
-    const bar = rgB.querySelector('.edbar');
-    if (bar) rgB.replaceChild(editorBar(), bar);
+    const index = S.focusedGroup;
+    const bar = paneViews[index].chrome.querySelector('.edbar');
+    if (bar) bar.replaceWith(editorBar());
   }
 
   /* ---- the strip under the tabs: what is checked, and the two actions ---- */
 
   function editorBar() {
+    const paneIndex = S.focusedGroup;
+    const path = S.file;
     const bar = el('div', 'edbar');
     const model = S.file ? models.get(S.file) : null;
     const lang = model ? model.getLanguageId() : null;
@@ -1118,7 +1875,8 @@ export function initForge(section) {
     fmtDrawn = formatSupported();
     if (fmtDrawn) {
       const f = btn('btn sm', 'Format', () => {
-        const act = ed.getAction('editor.action.formatDocument');
+        focusEditorGroup(paneIndex, false);
+        const act = ed && ed.getAction('editor.action.formatDocument');
         if (act) void act.run();
       });
       f.title = `Monaco's registered formatter for ${lang}. Shift+Alt+F.`;
@@ -1132,13 +1890,13 @@ export function initForge(section) {
       why.title = ro;
       add(bar, why);
     } else {
-      const dirty = isDirty();
+      const dirty = isDirty(path);
       if (dirty) {
         const d = el('span', 'edwhy dirty', 'unsaved edits');
         d.title = 'This buffer differs from the bytes read from the sandbox.';
         add(bar, d);
       }
-      const save = btn('btn sm', S.saving ? 'Proposing…' : 'Propose save', () => void proposeSave());
+      const save = btn('btn sm', S.saving ? 'Proposing…' : 'Propose save', () => void proposeSave(paneIndex));
       save.disabled = S.saving || !dirty;
       save.title = dirty
         ? 'Ctrl+S. Sends the buffer to /previews — the same gate an agent write crosses. A routine edit is committed and receipted by the kernel; anything larger waits for your approval. This never writes to the sandbox directly.'
@@ -1209,15 +1967,17 @@ export function initForge(section) {
 
   function syncEditor() {
     placeViewport = null;
-    if (S.fileBusy) return showAux(paneMessage('Reading the file from the sandbox…'));
-    if (S.fileErr) return showAux(paneMessage(S.fileErr));
+    if (S.fileBusy) { if (ed) ed.setModel(null); return showAux(paneMessage('Reading the file from the sandbox…')); }
+    if (S.fileErr) { if (ed) ed.setModel(null); return showAux(paneMessage(S.fileErr)); }
     if (!S.file || !S.fileData) {
+      if (ed) ed.setModel(null);
       return showAux(paneMessage(
         'No file is open. Pick one from the Explorer and its real contents are read from the sandbox and shown here.\n\n' +
         'This pane never shows source that is not in the repository — with nothing selected it shows nothing, not a sample.',
       ));
     }
     if (S.fileData.binary) {
+      if (ed) ed.setModel(null);
       return showAux(paneMessage(
         `${S.file} is not a text file (${bytesLabel(S.fileData.bytes)}). There is nothing to render as source, so nothing is rendered.`,
       ));
@@ -1241,6 +2001,7 @@ export function initForge(section) {
 
   function mountEditor() {
     if (!M) return;
+    const paneIndex = S.focusedGroup;
     if (ed === null) {
       ed = M.editor.create(edMon, {
         theme: ZENO_THEME,
@@ -1248,12 +2009,12 @@ export function initForge(section) {
         // The window's own mono face, so code in the editor and code in a
         // capsule are visibly the same text in the same voice.
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
-        fontSize: 12.5,
-        lineHeight: 20,
+        fontSize: 14,
+        lineHeight: 22,
         fontLigatures: false,
         // The features this pane exists to have.
-        bracketPairColorization: { enabled: true, independentColorPoolPerBracketType: true },
-        guides: { bracketPairs: 'active', bracketPairsHorizontal: 'active', indentation: true, highlightActiveIndentation: true },
+        bracketPairColorization: { enabled: S.rainbowBrackets, independentColorPoolPerBracketType: true },
+        guides: { bracketPairs: S.rainbowBrackets ? 'active' : false, bracketPairsHorizontal: S.rainbowBrackets ? 'active' : false, indentation: true, highlightActiveIndentation: true },
         minimap: { enabled: true, renderCharacters: false, maxColumn: 90 },
         folding: true,
         foldingHighlight: true,
@@ -1271,7 +2032,7 @@ export function initForge(section) {
         cursorBlinking: 'smooth',
         cursorSmoothCaretAnimation: 'on',
         scrollBeyondLastLine: false,
-        padding: { top: 10, bottom: 28 },
+        padding: { top: 12, bottom: 30 },
         tabSize: 2,
         // rgB is `overflow:hidden` (the grid depends on it), which would clip
         // the context menu, the find widget and every hover. Fixed overflow
@@ -1279,32 +2040,39 @@ export function initForge(section) {
         fixedOverflowWidgets: true,
         scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
       });
+      // Record the instance before its first focus event so top-bar commands
+      // can target a newly mounted editor without requiring a prior click.
+      paneViews[paneIndex].editor = ed;
       ed.onDidChangeCursorPosition((e) => {
-        S.caret = e.position.lineNumber;
-        if (S.caret !== lastCaretPainted) {
-          lastCaretPainted = S.caret;
+        group(paneIndex).caret = e.position.lineNumber;
+        if (S.focusedGroup === paneIndex && group(paneIndex).caret !== lastCaretPainted) {
+          lastCaretPainted = group(paneIndex).caret;
+          paneViews[paneIndex].lastCaret = lastCaretPainted;
           paintE();
         }
       });
+      ed.onDidFocusEditorWidget(() => focusEditorGroup(paneIndex));
       M.editor.onDidChangeMarkers((uris) => {
-        const model = S.file ? models.get(S.file) : null;
+        const path = group(paneIndex).file;
+        const model = path ? models.get(path) : null;
         if (!model) return;
-        if (uris.some((u) => u.toString() === model.uri.toString())) paintBar();
+        if (S.focusedGroup === paneIndex && uris.some((u) => u.toString() === model.uri.toString())) paintBar();
       });
-      registerEditorActions();
+      registerEditorActions(ed, paneIndex);
     }
 
-    const model = modelFor(S.file, diskText());
+    const path = S.file;
+    const model = modelFor(path, diskText(path));
     if (ed.getModel() !== model) {
       for (const d of modelSubs.splice(0)) d.dispose();
       ed.setModel(model);
       modelSubs.push(model.onDidChangeContent(() => {
-        const path = S.file;
         if (path) {
-          if (bufferLF(model) === diskText()) dirtyPaths.delete(path);
+          if (bufferLF(model) === diskText(path)) dirtyPaths.delete(path);
           else dirtyPaths.add(path);
         }
-        paintBar();
+        if (S.focusedGroup === paneIndex) paintB();
+        else paneViews[paneIndex].chrome.replaceChildren(paneTabs(paneIndex), forEditorGroup(paneIndex, editorBar));
       }));
       lastCaretPainted = -1;
       watchFormatter();
@@ -1317,7 +2085,7 @@ export function initForge(section) {
         ed.revealLineInCenter(S.caret);
       }
     }
-    const ro = readOnlyReason();
+    const ro = readOnlyReason(path);
     ed.updateOptions({ readOnly: ro !== null, readOnlyMessage: { value: ro || '' } });
   }
 
@@ -1340,32 +2108,36 @@ export function initForge(section) {
     } else if (text !== null && bufferLF(model) !== text && !dirtyPaths.has(path)) {
       model.setValue(text);
     }
-    if (S.fileData && S.fileData.eol === 'CRLF') model.setEOL(M.editor.EndOfLineSequence.CRLF);
+    const data = recordFor(path)?.data;
+    if (data && data.eol === 'CRLF') model.setEOL(M.editor.EndOfLineSequence.CRLF);
     else model.setEOL(M.editor.EndOfLineSequence.LF);
     return model;
   }
 
   /* ---- the right-click menu, and the keys ------------------------------- */
 
-  function registerEditorActions() {
-    if (!M || !ed || ed.__zenoActions) return;
-    ed.__zenoActions = true;
-    ed.addAction({
+  function registerEditorActions(target = ed, paneIndex = S.focusedGroup) {
+    if (!M || !target || target.__zenoActions) return;
+    target.__zenoActions = true;
+    target.addAction({
       id: 'zeno.proposeSave',
       label: 'Propose this save to the kernel',
       keybindings: [M.KeyMod.CtrlCmd | M.KeyCode.KeyS],
       contextMenuGroupId: 'zeno',
       contextMenuOrder: 1,
-      run: () => { void proposeSave(); },
+      run: () => { void proposeSave(paneIndex); },
     });
-    ed.addAction({
+    target.addAction({
       id: 'zeno.revert',
       label: 'Discard these edits and re-read the file from the sandbox',
       contextMenuGroupId: 'zeno',
       contextMenuOrder: 2,
-      run: () => { dirtyPaths.delete(S.file); void rereadOpenFile(true); },
+      run: () => {
+        const path = group(paneIndex).file;
+        if (path) { dirtyPaths.delete(path); void rereadPath(path, true); }
+      },
     });
-    ed.addAction({
+    target.addAction({
       id: 'zeno.agentView',
       label: 'Agent-only view',
       keybindings: [M.KeyMod.CtrlCmd | M.KeyMod.Shift | M.KeyCode.KeyA],
@@ -1373,14 +2145,23 @@ export function initForge(section) {
       contextMenuOrder: 3,
       run: () => setView(S.view === 'agent' ? 'ide' : 'agent'),
     });
-    ed.addAction({
+    target.addAction({
       id: 'zeno.copyPath',
       label: 'Copy the sandbox path of this file',
       contextMenuGroupId: 'zeno',
       contextMenuOrder: 4,
       run: () => {
-        if (S.file && navigator.clipboard) void navigator.clipboard.writeText(S.file).catch(() => {});
+        const path = group(paneIndex).file;
+        if (path && navigator.clipboard) void navigator.clipboard.writeText(path).catch(() => {});
       },
+    });
+    target.addAction({
+      id: 'zeno.splitEditor',
+      label: 'Split or unsplit editor',
+      keybindings: [M.KeyMod.CtrlCmd | M.KeyCode.Backslash],
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 5,
+      run: () => setSplitEditor(!S.splitEditor),
     });
   }
 
@@ -1396,16 +2177,17 @@ export function initForge(section) {
    * labelling the owner's own editor "owner" would hold every save forever with
    * no way to ever say yes.
    */
-  async function proposeSave() {
-    if (S.saving || !OWNER_TOKEN || !S.file || !ed) return;
-    if (readOnlyReason() !== null) return;
-    const model = models.get(S.file);
+  async function proposeSave(paneIndex = S.focusedGroup) {
+    const path = group(paneIndex).file;
+    const targetEditor = paneViews[paneIndex].editor;
+    if (S.saving || !OWNER_TOKEN || !path || !targetEditor) return;
+    if (readOnlyReason(path) !== null) return;
+    const model = models.get(path);
     if (!model) return;
-    const path = S.file;
     // Compare on the wire form, propose in the file's own form: the model
     // carries the file's real line endings, so a CRLF file is proposed as CRLF
     // rather than silently reformatted by the act of opening it.
-    if (bufferLF(model) === diskText()) return;
+    if (bufferLF(model) === diskText(path)) return;
     const contents = model.getValue();
 
     S.saving = true;
@@ -1462,7 +2244,7 @@ export function initForge(section) {
     if (receipt) {
       dirtyPaths.delete(path);
       void loadStatus();
-      void rereadOpenFile(true);
+      void rereadPath(path, true);
     }
     paintC();
     paintBar();
@@ -1477,14 +2259,17 @@ export function initForge(section) {
    * the same response, so a window without the editor is degraded, not wrong.
    */
   function plainPane() {
+    const paneIndex = S.focusedGroup;
+    const path = S.file;
+    const data = recordFor(path)?.data;
     const wrap = el('div', 'edwrap');
     const code = el('div', 'code');
     code.tabIndex = 0;
     const mini = el('div', 'mini');
     mini.setAttribute('aria-hidden', 'true');
 
-    const lines = String(S.fileData.contents).split('\n');
-    const colour = highlights(S.file);
+    const lines = String(data.contents).split('\n');
+    const colour = highlights(path);
     const lexState = { block: false };
     const frag = document.createDocumentFragment();
     for (let i = 0; i < lines.length; i++) {
@@ -1498,18 +2283,20 @@ export function initForge(section) {
     code.addEventListener('click', (ev) => {
       const r = ev.target instanceof Element ? ev.target.closest('.row') : null;
       if (!r) return;
-      S.caret = Number(r.dataset.line) || 0;
+      group(paneIndex).caret = Number(r.dataset.line) || 0;
+      focusEditorGroup(paneIndex, false);
       paintB();
       paintE();
     });
-    if (S.fileData.truncated) {
+    if (data.truncated) {
       const cut = el('div', 'row');
       add(cut, el('span', 'ln', '…'), el('span', 'tx',
-        `file continues — ${S.fileData.lines} lines in total, the first ${lines.length} are shown`));
+        `file continues — ${data.lines} lines in total, the first ${lines.length} are shown`));
       code.appendChild(cut);
     }
     drawMini(mini, lines);
     placeViewport = trackViewport(code, mini);
+    paneViews[paneIndex].placeViewport = placeViewport;
     add(wrap, code, mini);
     // The rectangle is a measurement, so it is placed after the pane is in the
     // document — one frame later, since this node is returned detached.
@@ -1575,13 +2362,57 @@ export function initForge(section) {
 
   const INSP = [['chat', 'Chat'], ['plan', 'Plan'], ['runs', 'Runs'], ['actions', 'Actions'], ['lens', 'Lens']];
 
+  function sessionTabState(item) {
+    if (item.running && item.runProgress && item.runProgress.terminal === true) {
+      if (item.runProgress.outcome === 'completed') return 'done';
+      if (item.runProgress.outcome === 'cancelled') return 'cancelled';
+      return 'failed';
+    }
+    if (item.running) return 'running';
+    if (!item.runs.length) return 'idle';
+    return item.runs[item.runs.length - 1].ok ? 'done' : 'failed';
+  }
+
+  function paintSessionTab(button, item) {
+    button.replaceChildren();
+    const state = sessionTabState(item);
+    add(button, glyph('●', `fgsession-dot ${state}`), el('span', 'fgsession-name', item.name));
+    if (item.running && item.runProgress) {
+      const progress = el('span', `fgsession-progress${item.runProgressStale ? ' stale' : ''}`,
+        `${item.runProgress.orchestrationPercent}%${item.runProgressStale ? '?' : ''}`);
+      progress.setAttribute('aria-label', item.runProgressStale
+        ? `${item.runProgress.orchestrationPercent}% orchestration progress; live event history is incomplete`
+        : `${item.runProgress.orchestrationPercent}% orchestration progress`);
+      add(button, progress);
+    }
+    if (item.running && item.runProgress && item.runProgress.terminal === true) {
+      button.title = `${item.name} provider ${item.runProgress.outcome}; waiting for the final run response`;
+    } else if (item.running && item.runProgressStale) {
+      button.title = `${item.name} is running; some live progress events could not be replayed`;
+    } else if (item.running) {
+      button.title = `${item.name} is running${S.runProgressStreamDown ? '; live updates are reconnecting' : ''}`;
+    } else {
+      button.title = `${item.name} · ${item.runs.length} completed run${item.runs.length === 1 ? '' : 's'}`;
+    }
+  }
+
+  /** Update a background session's compact tab without replacing the active composer. */
+  function updateSessionTabProgress(item) {
+    for (const button of rgC.querySelectorAll('[data-session-id]')) {
+      if (button.dataset.sessionId !== item.id) continue;
+      paintSessionTab(button, item);
+      return;
+    }
+  }
+
   function paintC() {
+    const session = activeSession();
     const ses = el('div', 'sesrow');
-    const last = S.runs[S.runs.length - 1];
-    const label = el('span', 'sesname', last ? `session · ${short(last.task, 40)}` : 'session · nothing run yet');
+    const last = session.runs[session.runs.length - 1];
+    add(ses, el('b', null, 'Session'));
+    const label = el('span', 'sesname', last ? `${session.name} · ${short(last.task, 32)}` : `${session.name} · ready`);
     if (last) label.title = last.task;
-    add(ses, label);
-    add(ses, el('span', 'sp'));
+    add(ses, el('span', 'sp'), label);
     // What is owed, where it is owed, said in the header of the surface that
     // owes it. Drawn from the capsules actually held, never from a click.
     const owed = gatesWaiting();
@@ -1593,6 +2424,27 @@ export function initForge(section) {
       chip.title = 'Every capsule the daemon is holding is in this thread, whatever proposed it. Nothing lands until you approve it.';
       add(ses, chip);
     }
+
+    const sessions = el('div', 'fgsessions');
+    sessions.setAttribute('role', 'tablist');
+    sessions.setAttribute('aria-label', 'Agent sessions');
+    for (const item of S.sessions) {
+      const b = btn(null, null, () => {
+        S.selectedSessionId = item.id;
+        paintC();
+        paintE();
+      });
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', item.id === session.id ? 'true' : 'false');
+      b.dataset.sessionId = item.id;
+      paintSessionTab(b, item);
+      add(sessions, b);
+    }
+    const addAgent = btn('fgsession-add', '+', addSession);
+    addAgent.setAttribute('aria-label', 'New agent session');
+    addAgent.title = 'New agent session';
+    addAgent.disabled = S.sessions.length >= 8;
+    add(sessions, addAgent);
     if (S.streamDown) {
       const chip = el('span', 'chip');
       chip.dataset.state = 'warn';
@@ -1616,34 +2468,93 @@ export function initForge(section) {
 
     /* the composer: the task that starts a run */
     const compose = el('div', 'compose');
-    const input = el('input');
-    input.type = 'text';
+    const input = el('textarea');
+    input.rows = 2;
+    input.maxLength = 16_000;
     input.id = 'zf-task';
-    input.placeholder = S.running ? 'a run is in flight…' : 'Describe the change… ↵ to run';
+    input.placeholder = session.routing ? 'choosing the route…' : session.running ? 'this agent is running…' : 'Ask anything or describe a change… ↵ to run';
     input.setAttribute('aria-label', 'The task to hand the agent');
-    input.value = taskDraft;
-    input.disabled = S.running || !OWNER_TOKEN;
-    input.addEventListener('input', () => { taskDraft = input.value; sendBtn.disabled = !canRun(); });
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey && canRun()) { ev.preventDefault(); void doRun(); }
+    input.value = session.draft;
+    input.disabled = session.routing || session.running || !OWNER_TOKEN;
+    input.addEventListener('input', () => {
+      session.draft = input.value;
+      // A changed task is a different outbound payload, so an earlier consent
+      // can never silently carry over to it.
+      session.hostedConfirmation = null;
+      invalidateRunContext(session);
+      if (S.insp === 'lens') scheduleRunContext(session);
+      sendBtn.disabled = !canRun(session);
     });
-    const sendBtn = btn('btn sm', S.running ? 'Running…' : 'Run', () => void doRun());
-    sendBtn.disabled = !canRun();
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey && canRun(session)) { ev.preventDefault(); void doRun(session); }
+    });
+    const sendBtn = btn('btn sm', session.routing ? 'Routing…' : session.running ? 'Running…' : 'Run', () => void doRun(session));
+    sendBtn.disabled = !canRun(session);
     add(compose, input, sendBtn);
+
+    const hostedGate = session.hostedConfirmation ? renderHostedConfirmation(session) : null;
 
     /* the footer: the model and effort selectors, from GET /forge/agents */
     const crow = el('div', 'crow');
-    add(crow, buildPickers());
-    rgC.replaceChildren(ses, tabs, bd, compose, crow);
+    add(crow, buildPickers(session));
+    const skillButton = btn('btn sm', `Skills (${S.skillIds.size})`, () => { S.insp = 'lens'; paintC(); });
+    skillButton.title = 'Select the installed skills included in the next run';
+    add(crow, skillButton);
+    const route = el('div', 'fgroute');
+    route.dataset.auto = session.autoRoute ? '1' : '0';
+    add(route, glyph(session.autoRoute ? '◆' : '◇', 'fgroute-mark'), el('span', null,
+      session.route && session.route.rationale
+        ? session.route.rationale
+        : session.autoRoute
+          ? 'Automatic routing uses task type, privacy, and providers proven available on this machine. A hosted choice still asks before sending code.'
+          : 'Manual routing is active; the selected provider, model, and effort will be used.'));
+    const composerShell = el('div', 'composer-shell');
+    add(composerShell, compose, crow, route);
+    rgC.replaceChildren(ses, sessions, tabs, bd, ...(hostedGate ? [hostedGate] : []), composerShell);
+    paintTop();
   }
 
-  let taskDraft = '';
-
-  function canRun() {
-    return Boolean(OWNER_TOKEN && !S.running && taskDraft.trim() !== '');
+  function canRun(session = activeSession()) {
+    // A missing availability response is UNKNOWN, not permission to guess.
+    // Keep Run inert until the daemon has proved at least one route runnable.
+    const providerReady = Boolean(S.agents && (session.autoRoute || providerAvailable(session.agentId)));
+    return Boolean(OWNER_TOKEN && !session.routing && !session.running && !session.hostedConfirmation
+      && !S.choosing && !S.contextBusy && providerReady && session.draft.trim() !== '');
   }
 
-  function buildPickers() {
+  function renderHostedConfirmation(session) {
+    const pending = session.hostedConfirmation;
+    const item = provider(pending.route.agentId);
+    const label = (item && item.label) || pending.route.agentId;
+    const gate = el('div', 'fghosted');
+    gate.setAttribute('role', 'alert');
+    gate.setAttribute('aria-label', 'Confirm hosted agent run');
+    add(gate, el('b', null, `Run once with ${label}?`));
+    const memory = session.contextPreview && session.contextPreview.memory;
+    const memoryNotice = memory && memory.enabled
+      ? `${Array.isArray(memory.entries) ? memory.entries.length : 0} task-relevant Vault record${Array.isArray(memory.entries) && memory.entries.length === 1 ? '' : 's'} will be included as cited, non-authoritative context. `
+      : 'Vault memory is disabled for this session. ';
+    add(gate, el('p', null,
+      `${label} will receive this task and the bounded project context needed for the run. ` +
+      memoryNotice +
+      'This can consume your provider plan or API allowance. Forge will not retry automatically, allows one hosted run at a time, and every file still waits for your approval.'));
+    const actions = el('div', 'acts');
+    const confirm = btn('btn sm', `Run with ${label}`, () => void runHosted(session));
+    confirm.dataset.intent = 'confirm-hosted';
+    confirm.disabled = anotherHostedRunIsActive(session);
+    if (confirm.disabled) confirm.title = 'Another hosted agent is running. This confirmation stays here until that run finishes.';
+    const keep = btn('btn sm ghost', 'Keep editing', () => {
+      session.hostedConfirmation = null;
+      paintC();
+      const input = rgC.querySelector('#zf-task');
+      if (input) input.focus();
+    });
+    add(actions, confirm, keep);
+    add(gate, actions);
+    return gate;
+  }
+
+  function buildPickers(session = activeSession()) {
     const box = el('span');
     box.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%';
     if (S.agentsErr) {
@@ -1654,27 +2565,54 @@ export function initForge(section) {
       add(box, el('span', null, 'reading the available agents…'));
       return box;
     }
+    const autoLabel = el('label', 'fgauto');
+    const auto = el('input');
+    auto.type = 'checkbox';
+    auto.checked = session.autoRoute;
+    auto.disabled = session.running || session.routing;
+    auto.addEventListener('change', () => {
+      session.autoRoute = auto.checked;
+      session.hostedConfirmation = null;
+      session.route = auto.checked ? null : { rationale: 'Manual routing is active; the controls below are the route.' };
+      paintC();
+    });
+    add(autoLabel, auto, document.createTextNode(' Auto'));
+    autoLabel.title = 'Automatically choose provider, model, and effort from the task; clear this to override them manually.';
+    add(box, autoLabel);
     const agents = S.agents.agents || [];
     const agentSel = el('select');
     agentSel.setAttribute('aria-label', 'Agent');
     for (const a of agents) {
-      const o = el('option', null, a.label || a.id);
+      const unavailable = a.available === false;
+      const o = el('option', null, `${a.label || a.id}${unavailable ? ' — unavailable' : ''}`);
       o.value = a.id;
-      if (a.id === S.agentId) o.selected = true;
+      o.disabled = unavailable;
+      if (unavailable && a.unavailableReason) o.title = a.unavailableReason;
+      if (a.id === session.agentId) o.selected = true;
       add(agentSel, o);
     }
-    agentSel.addEventListener('change', () => { S.agentId = agentSel.value; S.model = ''; paintC(); paintE(); });
+    agentSel.disabled = session.running || session.routing || !agents.some((a) => a && a.available !== false);
+    const selectedProvider = agents.find((a) => a && a.id === session.agentId);
+    if (selectedProvider && selectedProvider.available === false) {
+      agentSel.title = selectedProvider.unavailableReason || 'This provider is not runnable on this machine.';
+    }
+    agentSel.addEventListener('change', () => {
+      session.agentId = agentSel.value; session.model = ''; session.autoRoute = false;
+      session.hostedConfirmation = null;
+      session.route = { rationale: 'Manual routing is active; you selected the provider.' };
+      paintC(); paintE();
+    });
 
     const modelSel = el('select');
     modelSel.setAttribute('aria-label', 'Model');
-    const chosen = agents.find((a) => a.id === S.agentId);
-    const models = S.agentId === 'local' ? (S.agents.localModels || []) : ((chosen && chosen.models) || []);
+    const chosen = agents.find((a) => a.id === session.agentId);
+    const models = session.agentId === 'local' ? (S.agents.localModels || []) : ((chosen && chosen.models) || []);
     if (models.length === 0) {
-      const o = el('option', null, S.agentId === 'local' ? 'no local model installed' : 'the agent’s default');
+      const o = el('option', null, session.agentId === 'local' ? 'no local model installed' : 'the agent’s default');
       o.value = '';
       add(modelSel, o);
       modelSel.disabled = true;
-      modelSel.title = S.agentId === 'local'
+      modelSel.title = session.agentId === 'local'
         ? 'Ollama listed no installed models, so there is nothing to pick.'
         : 'This agent chooses its own model; the daemon offers no list.';
     } else {
@@ -1684,26 +2622,42 @@ export function initForge(section) {
       for (const m of models) {
         const o = el('option', null, m);
         o.value = m;
-        if (m === S.model) o.selected = true;
+        if (m === session.model) o.selected = true;
         add(modelSel, o);
       }
     }
-    modelSel.addEventListener('change', () => { S.model = modelSel.value; paintE(); });
+    if ((chosen && chosen.available === false) || session.running || session.routing) modelSel.disabled = true;
+    modelSel.addEventListener('change', () => {
+      session.model = modelSel.value; session.autoRoute = false;
+      session.hostedConfirmation = null;
+      session.route = { rationale: 'Manual routing is active; you selected the model.' };
+      paintC(); paintE();
+    });
 
     const effortSel = el('select');
     effortSel.setAttribute('aria-label', 'Effort');
     for (const e of S.agents.efforts || []) {
       const o = el('option', null, `effort: ${e}`);
       o.value = e;
-      if (e === S.effort) o.selected = true;
+      if (e === session.effort) o.selected = true;
       add(effortSel, o);
     }
     const supports = !chosen || chosen.supportsEffort !== false;
-    effortSel.disabled = !supports;
+    const runnable = !chosen || chosen.available !== false;
+    effortSel.disabled = session.running || session.routing || !supports || !runnable;
     if (!supports) effortSel.title = 'This agent does not take an effort level.';
-    effortSel.addEventListener('change', () => { S.effort = effortSel.value; paintE(); });
+    else if (!runnable) effortSel.title = chosen.unavailableReason || 'This provider is unavailable.';
+    effortSel.addEventListener('change', () => {
+      session.effort = effortSel.value; session.autoRoute = false;
+      session.hostedConfirmation = null;
+      session.route = { rationale: 'Manual routing is active; you selected the effort.' };
+      paintC(); paintE();
+    });
 
     add(box, agentSel, modelSel, effortSel, el('span', 'sp'), el('span', null, '↵ to run'));
+    if (chosen && chosen.available === false) {
+      add(box, el('span', 'fgprovider-note', chosen.unavailableReason || 'This provider is unavailable.'));
+    }
     return box;
   }
 
@@ -1770,7 +2724,10 @@ export function initForge(section) {
         kvAdd(kv, 'agent', r.agentId);
         kvAdd(kv, 'model', r.model || 'the agent’s default');
         kvAdd(kv, 'effort', r.effort || '—');
+        kvAdd(kv, 'routing', r.automatic ? 'automatic' : 'manual');
+        if (r.cancelled) kvAdd(kv, 'outcome', 'cancelled by you');
         kvAdd(kv, 'agent finished', r.ok ? 'yes' : 'no');
+        if (r.tokenUsage) kvAdd(kv, 'token usage', tokenUsageLabel(r.tokenUsage));
         kvAdd(kv, 'files changed', String(r.files));
         // Split, for the same reason the chat footer is split: "proposed" was a
         // total that silently included the routine writes the kernel had already
@@ -1779,6 +2736,7 @@ export function initForge(section) {
         kvAdd(kv, 'awaiting your approval', String(r.waiting));
         kvAdd(kv, 'auto-applied (routine)', String(r.applied));
         add(box, kv);
+        if (r.routeRationale) add(box, renderNote(r.routeRationale, 'cy'));
         if (r.note) add(box, renderNote(r.note, 'rd'));
         add(wrap, box);
       }
@@ -1832,18 +2790,17 @@ export function initForge(section) {
         'Forge hands the task straight to the agent; nothing in this daemon produces a plan for you to approve first, so there is no plan to show. When a planning step exists, it will appear here.',
       );
     },
-    lens() {
-      return renderUnwired(
-        'No rules or skills are loaded',
-        'Nothing keys rules or skills into a run, so there is no list, no hash and no conflict to report. This panel stays empty until a rules source exists.',
-      );
-    },
+    lens() { return contextPanel(); },
   };
 
   function youTurn(t) {
     const m = el('div', 'msg');
-    add(m, el('div', 'who', 'you'));
+    const who = el('div', 'who');
+    add(who, el('span', null, 'you'));
+    if (t.route) add(who, el('span', 'mchip', t.route.automatic ? 'auto-routed' : 'manual route'));
+    add(m, who);
     add(m, el('div', 'bub', t.text));
+    if (t.route && t.route.rationale) add(m, renderNote(t.route.rationale, 'cy'));
     return m;
   }
 
@@ -1970,17 +2927,19 @@ export function initForge(section) {
     // agent's inner voice. It reports mechanics we actually know — never
     // invented reasoning.
     add(m, el('div', 'think',
-      `ran headless in an isolated worktree · ${t.files.length} ${t.files.length === 1 ? 'file' : 'files'} changed · ${clock(t.at)}`));
+      `${t.cancelled ? 'stopped by you' : 'ran headless'} in an isolated worktree · ${t.files.length} ${t.files.length === 1 ? 'file' : 'files'} changed · ${clock(t.at)}`));
+    if (t.tokenUsage) add(m, el('div', 'think', tokenUsageLabel(t.tokenUsage)));
 
     // TOOL CALLS as discrete rows: one per file the run actually wrote, with the
-    // real line range it produced. Clicking one opens that file in the pane.
+    // real line range it produced. A deletion/binary/oversized output is a
+    // visibly skipped row, never a write row that implies a capsule exists.
     for (const f of t.files) {
-      const row = btn('tool', null, () => openFile(f.path));
-      add(row, el('span', 'th', 'write'));
+      const row = f.skipped ? el('div', 'tool') : btn('tool', null, () => openFile(f.path));
+      add(row, el('span', 'th', f.skipped ? 'skip' : 'write'));
       const p = el('span', 'pth', f.lines ? `${f.path}:1–${f.lines}` : f.path);
-      p.title = f.path;
+      p.title = f.skipped ? `${f.path} — ${f.skipped.note}` : f.path;
       add(row, p);
-      add(row, el('span', 'ok', f.tier ? f.tier : '·'));
+      add(row, el('span', 'ok', f.skipped ? 'not proposed' : (f.tier ? f.tier : '·')));
       add(m, row);
     }
     if (t.files.length === 0) {
@@ -2036,9 +2995,13 @@ export function initForge(section) {
   function setDrawerMin(min) {
     if (min) R.setAttribute('data-drawer', 'min');
     else R.removeAttribute('data-drawer');
-    if (!colBtn) return;
-    colBtn.textContent = min ? '▲ expand' : '▼ collapse';
-    colBtn.setAttribute('aria-expanded', min ? 'false' : 'true');
+    if (colBtn) {
+      colBtn.textContent = min ? '▲ expand' : '▼ collapse';
+      colBtn.setAttribute('aria-expanded', min ? 'false' : 'true');
+    }
+    // The workbench bar mirrors the drawer state. Repaint that small strip so
+    // its icon and accessible label always describe what the next click does.
+    paintTop();
   }
 
   function paintD() {
@@ -2062,6 +3025,7 @@ export function initForge(section) {
         S.draw = id;
         if (drawerMin()) setDrawerMin(false);
         paintD();
+        if (id === 'tests' && !S.tests && !S.testsBusy) void loadTests();
       });
       c.setAttribute('role', 'tab');
       c.setAttribute('aria-selected', id === S.draw ? 'true' : 'false');
@@ -2079,21 +3043,142 @@ export function initForge(section) {
     rgD.replaceChildren(drag, hd, bd);
   }
 
+  function activeTerminal() {
+    let terminal = S.terminalTabs.find((entry) => entry.id === S.terminalId);
+    if (!terminal) {
+      terminal = S.terminalTabs[0];
+      S.terminalId = terminal.id;
+    }
+    return terminal;
+  }
+
+  function testPanel(compact) {
+    const wrap = el('div', compact ? 'fgtests compact' : 'pw fgtests');
+    const hd = el('div', 'acts');
+    add(hd, el('b', null, 'Repository verification'));
+    const refresh = btn('btn sm ghost', S.testsBusy ? 'Reading…' : 'Refresh', () => void loadTests());
+    refresh.disabled = S.testsBusy || !!S.testRunId;
+    add(hd, el('span', 'sp'), refresh);
+    add(wrap, hd);
+    if (S.testsErr) add(wrap, renderNote(`Tests unavailable: ${S.testsErr}`));
+    if (!S.tests) {
+      if (!S.testsErr) add(wrap, renderNote('Discovering package test scripts…'));
+      return wrap;
+    }
+    add(wrap, el('div', 'hint', S.tests.note || 'Only test scripts declared by this repository are shown.'));
+    const scripts = Array.isArray(S.tests.scripts) ? S.tests.scripts : [];
+    if (!scripts.length) {
+      add(wrap, renderUnwired(
+        'No runnable verification scripts were found',
+        'Forge scanned bounded package manifests and found no test, test:*, check, typecheck, or lint script. Add one to package.json, then refresh.',
+      ));
+      return wrap;
+    }
+    for (const script of scripts) {
+      const row = el('div', 'box fgtest');
+      const top = el('div', 'acts');
+      add(top, el('b', null, `${script.packageName} · ${script.script}`));
+      const run = btn('btn sm', S.testRunId === script.id ? 'Running…' : 'Run', () => void runTest(script));
+      run.setAttribute('aria-label', `Run ${script.script} in ${script.packageName}`);
+      run.disabled = !OWNER_TOKEN || !!S.testRunId;
+      add(top, el('span', 'sp'), run);
+      add(row, top, el('div', 'hint', `${script.packagePath} · ${script.displayCommand}`));
+      add(row, el('div', 'hint', script.scriptBody + (script.scriptBodyClipped ? ' (display clipped)' : '')));
+      const result = S.testResults.get(script.id);
+      if (result) {
+        const outcome = result.failedToSpawn
+          ? (result.timedOut ? 'timed out and was stopped' : 'could not start')
+          : result.ok ? 'passed' : `failed · exit ${result.code}`;
+        const status = el('div', `note ${result.ok ? 'gn' : 'rd'}`, `${outcome} · ${result.durationMs}ms · ${result.startedAt}`);
+        status.setAttribute('role', 'status');
+        add(row, status);
+        if (result.stdout) add(row, el('pre', 'code', result.stdout));
+        if (result.stderr) add(row, el('pre', 'code', result.stderr));
+        if (!result.stdout && !result.stderr) add(row, el('div', 'hint', 'The test process returned no output.'));
+        if (result.outputClipped) add(row, el('div', 'hint', 'Output was clipped at the daemon boundary; the result above still comes from the real exit code.'));
+      }
+      add(wrap, row);
+    }
+    const count = scripts.length;
+    add(wrap, el('div', 'hint', `${count} runnable script${count === 1 ? '' : 's'} from ${S.tests.scannedPackages} package manifest${S.tests.scannedPackages === 1 ? '' : 's'}${S.tests.truncated ? ' · discovery stopped at its safety cap' : ''}.`));
+    if (!OWNER_TOKEN) add(wrap, renderNote('Open Zeno from its launcher to run repository tests. This page is read-only.'));
+    return wrap;
+  }
+
   const DRAWER_BODY = {
     terminal() {
       const wrap = el('div');
-      add(wrap, renderUnwired(
-        'No terminal is wired',
-        'There is no daemon route that runs a shell command, so this window cannot execute anything and nothing is running. ' +
-        'Opening a terminal never runs anything on its own — and here there is not even a shell to open.',
-      ));
+      const tabbar = el('div', 'acts fgterm-tabs');
+      tabbar.setAttribute('role', 'tablist');
+      for (const terminal of S.terminalTabs) {
+        const tab = btn('chip', terminal.name, () => { S.terminalId = terminal.id; paintD(); });
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', terminal.id === S.terminalId ? 'true' : 'false');
+        if (terminal.id === S.terminalId) tab.dataset.state = 'listening';
+        tab.title = `${terminal.name} · ${terminal.history.length} command${terminal.history.length === 1 ? '' : 's'} in this window session`;
+        add(tabbar, tab);
+      }
+      const create = btn('btn sm ghost', '+ Shell', () => {
+        if (S.terminalTabs.length >= 6) return;
+        const id = `shell-${++S.terminalSeq}`;
+        S.terminalTabs.push({ id, name: `Shell ${S.terminalSeq}`, draft: '', history: [] });
+        S.terminalId = id;
+        paintD();
+      });
+      create.setAttribute('aria-label', 'New terminal tab');
+      create.disabled = S.terminalTabs.length >= 6 || S.terminalBusy;
+      add(tabbar, create);
+      if (S.terminalTabs.length > 1) {
+        const close = btn('btn sm ghost', '×', () => {
+          const index = S.terminalTabs.findIndex((terminal) => terminal.id === S.terminalId);
+          if (index < 0 || S.terminalBusy) return;
+          S.terminalTabs.splice(index, 1);
+          S.terminalId = S.terminalTabs[Math.max(0, index - 1)].id;
+          paintD();
+        });
+        close.setAttribute('aria-label', 'Close current terminal tab');
+        close.disabled = S.terminalBusy;
+        add(tabbar, close);
+      }
+      add(wrap, tabbar);
+
+      const active = activeTerminal();
+      const transcript = el('div', 'fgterm-history');
+      transcript.setAttribute('aria-live', 'polite');
+      if (!active.history.length) add(transcript, el('div', 'hint', `${active.name} has no commands yet.`));
+      for (const entry of active.history) {
+        const item = el('div', 'box fgterm-entry');
+        add(item, el('div', 'hint', `❯ ${entry.command} · ${entry.durationMs}ms · ${entry.failedToSpawn ? 'could not start' : `exit ${entry.code}`}`));
+        if (entry.stdout) add(item, el('pre', 'code', entry.stdout));
+        if (entry.stderr) add(item, el('pre', 'code', entry.stderr));
+        if (!entry.stdout && !entry.stderr) add(item, el('div', 'hint', 'The process returned no output.'));
+        add(transcript, item);
+      }
+      add(wrap, transcript);
+
+      const form = el('form', 'acts');
+      const command = el('input');
+      command.type = 'text';
+      command.setAttribute('aria-label', 'Terminal command');
+      command.placeholder = 'Type a command, for example git status --short';
+      command.maxLength = 4000;
+      command.value = active.draft;
+      command.style.cssText = 'min-width:180px;flex:1;background:var(--g1);color:var(--ink);border:1px solid var(--rule-2);border-radius:3px;padding:5px 7px;font:inherit';
+      command.disabled = !OWNER_TOKEN || S.terminalBusy || S.choosing;
+      const run = btn('btn sm', S.terminalBusy ? 'Running…' : 'Run command');
+      run.type = 'submit';
+      run.disabled = !OWNER_TOKEN || S.terminalBusy || S.choosing || !active.draft.trim();
+      command.addEventListener('input', () => { active.draft = command.value; run.disabled = !active.draft.trim(); });
+      form.addEventListener('submit', (ev) => { ev.preventDefault(); void runTerminal(); });
+      add(form, command, run);
+      add(wrap, form, el('div', 'hint', 'Owner command in the selected folder · one-shot, non-interactive process · 30-second limit · bounded output. Tabs keep history for this window session; they are not PTYs and do not preserve shell state between commands. Opening this panel runs nothing.'));
+      if (!OWNER_TOKEN) add(wrap, renderNote('Open Zeno from its launcher to run commands. This page is read-only.'));
+      if (S.terminalBusy) add(wrap, renderNote(`Running: ${S.terminalCommand}`));
+      if (S.terminalErr) add(wrap, renderNote(S.terminalErr));
       return wrap;
     },
     tests() {
-      return renderUnwired(
-        'No test runner is wired',
-        'Nothing here runs tests, so there is no pass, no fail, no duration and no coverage. A green line in this panel would be fiction, so the panel stays empty.',
-      );
+      return testPanel(true);
     },
     ci() {
       return renderUnwired(
@@ -2128,17 +3213,18 @@ export function initForge(section) {
     let startY = 0;
     let startH = 0;
     const clamp = (h) => Math.max(34, Math.min(window.innerHeight * 0.7, h));
+    const defaultDrawerHeight = () => Math.min(540, Math.max(260, window.innerHeight * 0.4));
     /* The height the drawer HAS when open — taken from the variable, never
        measured. Measuring is what made the shut drawer eat the owner's size:
        while it is shut the measurement is 34px, the collapsed track, so a drag
        started from 34px and wrote that back over a drawer the owner had sized to
        343px. Opening it first does not help, because the layout the measurement
-       needs has not been recomputed by the time the drag reads it. 150 is the
-       stylesheet's own `var(--fdrawer,150px)` default, for a never-resized drawer. */
+       needs has not been recomputed by the time the drag reads it. The fallback
+       mirrors the stylesheet's bounded 40vh default for a never-resized drawer. */
     const openHeight = () => {
       const inline = parseFloat(root.style.getPropertyValue('--fdrawer'));
       if (Number.isFinite(inline)) return inline;
-      return drawerMin() ? 150 : rgD.offsetHeight;
+      return drawerMin() ? defaultDrawerHeight() : rgD.offsetHeight;
     };
     const onMove = (ev) => {
       root.style.setProperty('--fdrawer', `${Math.round(clamp(startH + (startY - ev.clientY)))}px`);
@@ -2182,30 +3268,30 @@ export function initForge(section) {
     const bits = [];
     const st = S.status;
 
-    const repo = el('b', null, 'sandbox');
+    const repo = el('b', 'fgst-repo', workspaceName(st));
     bits.push(repo);
     if (st && st.repo) {
-      bits.push(el('span', null, st.branch || '(no branch)'));
-      bits.push(el('span', null, st.head ? `HEAD ${st.head}` : 'HEAD — no commits yet'));
+      bits.push(el('span', 'fgst-branch', st.branch || '(no branch)'));
+      bits.push(el('span', 'fgst-head', st.head ? `HEAD ${st.head}` : 'HEAD — no commits yet'));
       const n = (st.changed || []).length;
-      bits.push(el('span', null, n === 0 ? 'worktree clean' : `worktree ${n} changed`));
+      bits.push(el('span', 'fgst-tree', n === 0 ? 'worktree clean' : `worktree ${n} changed`));
     } else {
       // Before the first answer we know nothing about the repository, so we say
       // nothing about it. Reporting "not a git repository" here was a claim the
       // window had not yet earned — it would have been printed even where a
       // perfectly good repository existed and the read was simply in flight.
-      bits.push(el('span', null,
+      bits.push(el('span', 'fgst-tree',
         S.statusErr ? 'status unavailable' : S.status ? 'not a git repository' : 'reading the repository…'));
     }
 
     if (S.file && S.fileData && !S.fileData.binary) {
-      bits.push(el('span', null,
+      bits.push(el('span', 'fgst-file',
         `${S.fileData.encoding} · ${S.fileData.eol} · ${S.fileData.lines} ln · ${bytesLabel(S.fileData.bytes)}`));
-      bits.push(el('span', null, S.caret ? `ln ${S.caret}` : 'ln —'));
+      bits.push(el('span', 'fgst-caret', S.caret ? `ln ${S.caret}` : 'ln —'));
     } else if (S.file && S.fileData && S.fileData.binary) {
-      bits.push(el('span', null, `binary · ${bytesLabel(S.fileData.bytes)}`));
+      bits.push(el('span', 'fgst-file', `binary · ${bytesLabel(S.fileData.bytes)}`));
     } else {
-      bits.push(el('span', null, 'no file open'));
+      bits.push(el('span', 'fgst-file', 'no file open'));
     }
 
     const sp = el('span', 'sp');
@@ -2221,7 +3307,7 @@ export function initForge(section) {
       ? S.agents.agents.find((a) => a && a.id === S.agentId)
       : null;
     const effortCounts = !chosenAgent || chosenAgent.supportsEffort !== false;
-    const agent = el('span');
+    const agent = el('span', 'fgst-agent');
     add(agent, el('b', null, S.agentId));
     add(agent, document.createTextNode(
       ` · ${S.model || 'default model'}${effortCounts ? ` · effort ${S.effort}` : ''}`));
@@ -2230,16 +3316,19 @@ export function initForge(section) {
     /* The egress line, and it is a statement of fact rather than a badge: a
        local model runs on this machine and nothing leaves it; a hosted agent
        reaches its own provider, and saying "local only" there would be false. */
-    const eg = el('span', 'chip');
+    const eg = el('span', 'chip fgst-egress');
     const egLocal = S.agentId === 'local';
-    eg.dataset.state = egLocal ? 'listening' : 'warn';
-    add(eg, glyph(egLocal ? '⌂' : '↗', 'chip-glyph'));
-    add(eg, document.createTextNode(egLocal ? 'egress: local only' : 'egress: this agent reaches its own provider'));
+    const egAvailable = !S.agents || providerAvailable(S.agentId);
+    eg.dataset.state = !egAvailable ? 'error' : egLocal ? 'listening' : 'warn';
+    add(eg, glyph(!egAvailable ? '!' : egLocal ? '⌂' : '↗', 'chip-glyph'));
+    add(eg, document.createTextNode(!egAvailable
+      ? 'provider unavailable'
+      : egLocal ? 'egress: local only' : 'egress: this agent reaches its own provider'));
     bits.push(eg);
 
-    const mode = el('span', 'chip');
+    const mode = el('span', 'chip fgst-safety');
     add(mode, glyph('◇', 'chip-glyph'));
-    add(mode, document.createTextNode('mode: propose — Forge never approves'));
+    add(mode, document.createTextNode('agents propose · terminal runs on your click'));
     bits.push(mode);
 
     /* THE VIEW SWITCH. A real button in the status bar, because a shortcut
@@ -2264,6 +3353,306 @@ export function initForge(section) {
    * 3 · the reads and the two writes                                  *
    * ================================================================ */
 
+
+  let contextPreviewTimer = null;
+
+  function invalidateRunContext(session) {
+    session.contextPreview = null;
+    session.contextPreviewKey = '';
+    session.contextPreviewErr = null;
+  }
+
+  function nextContextTask(session) {
+    return String((session.hostedConfirmation && session.hostedConfirmation.task)
+      || session.draft
+      || session.contextPreviewTask
+      || '').trim();
+  }
+
+  async function loadRunContext(session, taskValue, force = false) {
+    const task = String(taskValue ?? nextContextTask(session)).trim();
+    if (!task) return null;
+    const selectedSkills = [...S.skillIds];
+    const key = forgeContextKey(task, session.memoryEnabled, selectedSkills);
+    if (!force && session.contextPreview && session.contextPreviewKey === key) return session.contextPreview;
+    if (session.contextPreviewBusy) return null;
+
+    session.contextPreviewBusy = true;
+    session.contextPreviewErr = null;
+    if (activeSession() === session) paintC();
+    const result = await api('/forge/context', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(forgeContextBody(task, session.memoryEnabled, selectedSkills)),
+    });
+    session.contextPreviewBusy = false;
+
+    // A task, skill or memory switch changed while the read was in flight. The
+    // response truthfully describes the old selection, so never relabel it as the
+    // new one; the next scheduled read will fetch the current bytes.
+    const currentTask = String((session.hostedConfirmation && session.hostedConfirmation.task) || session.draft || task).trim();
+    const stillCurrent = key === forgeContextKey(currentTask, session.memoryEnabled, [...S.skillIds]);
+    if (!stillCurrent) {
+      if (activeSession() === session) paintC();
+      return null;
+    }
+    if (!result.ok) {
+      session.contextPreviewErr = errText(result);
+      session.contextPreview = null;
+      session.contextPreviewKey = '';
+    } else {
+      session.contextPreview = result.data && result.data.context ? result.data.context : null;
+      session.contextPreviewKey = session.contextPreview ? key : '';
+      session.contextPreviewTask = task;
+      if (!session.contextPreview) session.contextPreviewErr = 'The daemon answered without a context preview.';
+    }
+    if (activeSession() === session) paintC();
+    return session.contextPreview;
+  }
+
+  function scheduleRunContext(session) {
+    if (contextPreviewTimer !== null) clearTimeout(contextPreviewTimer);
+    contextPreviewTimer = setTimeout(() => {
+      contextPreviewTimer = null;
+      if (S.insp === 'lens' && activeSession() === session) void loadRunContext(session);
+    }, 250);
+  }
+
+  function contextPanel() {
+    const session = activeSession();
+    const wrap = el('div', 'pw');
+    wrap.style.overflowWrap = 'anywhere';
+    const refresh = btn('btn sm', S.contextBusy ? 'Reading…' : 'Refresh rules & skills', () => void loadContext());
+    refresh.disabled = S.contextBusy || S.running;
+    add(wrap, refresh);
+    if (S.contextBusy) add(wrap, renderNote('Reading the selected repository…'));
+    if (S.contextErr) add(wrap, renderNote(`Rules and skills unavailable: ${S.contextErr}`));
+    const memoryBox = el('div', 'box');
+    const memoryLabel = el('label');
+    const memorySwitch = el('input');
+    memorySwitch.type = 'checkbox';
+    memorySwitch.checked = session.memoryEnabled !== false;
+    memorySwitch.disabled = session.running || session.routing || session.contextPreviewBusy || !OWNER_TOKEN;
+    memorySwitch.addEventListener('change', () => {
+      session.memoryEnabled = memorySwitch.checked;
+      session.hostedConfirmation = null;
+      invalidateRunContext(session);
+      paintC();
+      scheduleRunContext(session);
+    });
+    add(memoryLabel, memorySwitch, document.createTextNode(' Use durable Vault memory for this session'));
+    add(memoryBox, memoryLabel, el('div', 'hint', session.memoryEnabled
+      ? 'Enabled by default. Only records recalled as relevant to this task are sent; each stays a cited record with no authority.'
+      : 'Disabled for this session. The Vault remains enabled, stored, searchable, and unchanged.'));
+    add(wrap, memoryBox);
+
+    const context = S.context;
+    if (!context) return wrap;
+    add(wrap, el('div', 'hint', `Skill library: ${context.dir || 'location unavailable'}`));
+    add(wrap, el('b', null, 'Repository rules'));
+    add(wrap, el('div', 'hint', 'These files are included in agent tasks. They grant no extra permission and cannot override your request.'));
+    const rules = Array.isArray(context.rules) ? context.rules : [];
+    if (!rules.length) add(wrap, renderNote('No supported rule files were found in this repository.'));
+    for (const rule of rules) {
+      const detail = el('details');
+      add(detail, el('summary', null, `${rule.path} · ${rule.bytes} bytes${rule.truncated ? ' · truncated' : ''}`));
+      const body = el('pre', null, rule.body || '');
+      body.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto';
+      add(detail, body); add(wrap, detail);
+    }
+    add(wrap, el('b', null, 'Skills for the next run'));
+    add(wrap, el('div', 'hint', 'Select skills deliberately. Screening findings are advisory; every action still uses its existing permission boundary.'));
+    const skills = Array.isArray(context.skills) ? context.skills : [];
+    if (!skills.length) add(wrap, renderNote('No installed skills were found. Add a skill under this library, then refresh.'));
+    for (const skill of skills) {
+      const row = el('div', 'box');
+      const label = el('label');
+      const check = el('input'); check.type = 'checkbox';
+      check.checked = S.skillIds.has(skill.id);
+      check.disabled = S.running || S.contextBusy || !OWNER_TOKEN;
+      check.addEventListener('change', () => {
+        if (check.checked) S.skillIds.add(skill.id); else S.skillIds.delete(skill.id);
+        // Skills become part of the outbound prompt, so changing them invalidates
+        // any hosted consent that was bound to the previous prompt.
+        for (const session of S.sessions) {
+          session.hostedConfirmation = null;
+          invalidateRunContext(session);
+        }
+        paintA(); paintC();
+        scheduleRunContext(activeSession());
+      });
+      add(label, check, document.createTextNode(` ${skill.name || skill.id}`));
+      add(row, label, el('div', null, skill.description || ''), el('div', 'hint', `${skill.verdict || 'not screened'} · ${skill.bytes || 0} bytes`));
+      for (const finding of skill.findings || []) add(row, el('div', 'hint', `${finding.severity}: ${finding.why || finding.rule}`));
+      add(wrap, row);
+    }
+    for (const failure of context.failed || []) add(wrap, renderNote(`Unreadable skill: ${typeof failure === 'string' ? failure : JSON.stringify(failure)}`));
+    if (context.note) add(wrap, renderNote(context.note));
+
+    const previewTask = nextContextTask(session);
+    add(wrap, el('b', null, 'Exact context for the next run'));
+    if (!previewTask) {
+      add(wrap, renderNote('Type a task below. Forge Lens will then assemble and show the exact sanitized, bounded prompt before the run starts.'));
+      return wrap;
+    }
+    const expectedKey = forgeContextKey(previewTask, session.memoryEnabled, [...S.skillIds]);
+    const exact = session.contextPreview && session.contextPreviewKey === expectedKey
+      ? session.contextPreview
+      : null;
+    const exactRefresh = btn('btn sm', session.contextPreviewBusy ? 'Preparing…' : 'Refresh exact context', () => void loadRunContext(session, previewTask, true));
+    exactRefresh.disabled = session.contextPreviewBusy || session.running || session.routing;
+    add(wrap, exactRefresh);
+    if (session.contextPreviewBusy) add(wrap, renderNote('Retrieving task-relevant Vault records and bounding the complete prompt…'));
+    if (session.contextPreviewErr) add(wrap, renderNote(`Exact context unavailable: ${session.contextPreviewErr}`, 'rd'));
+    if (!exact && !session.contextPreviewBusy && !session.contextPreviewErr) {
+      add(wrap, renderNote('Preparing the exact context for this task…'));
+      queueMicrotask(() => void loadRunContext(session, previewTask));
+      return wrap;
+    }
+    if (!exact) return wrap;
+
+    const recalled = exact.memory && Array.isArray(exact.memory.entries) ? exact.memory.entries : [];
+    add(wrap, el('div', 'hint', exact.memory && exact.memory.note ? exact.memory.note : 'Memory state unavailable.'));
+    if (exact.contextFile) {
+      add(wrap, el('div', 'hint', `Standing context: ${exact.contextFile.path} · ${bytesLabel(exact.contextFile.bytes)}${exact.contextFile.truncated ? ' · truncated' : ''}`));
+    } else {
+      add(wrap, el('div', 'hint', 'Standing context: no ZENO.md in this repository.'));
+    }
+    if (session.memoryEnabled && recalled.length === 0) add(wrap, renderNote('No Vault record matched this task, so none will be sent.'));
+    for (const record of recalled) {
+      const detail = el('details', 'box');
+      add(detail, el('summary', null, `${record.description || '(untitled)'} · ${record.citation || 'citation unavailable'}`));
+      const meta = el('dl', 'kv');
+      kvAdd(meta, 'kind', record.kind);
+      kvAdd(meta, 'source', record.source);
+      kvAdd(meta, 'citation', record.citation);
+      kvAdd(meta, 'matched', Array.isArray(record.matched) ? record.matched.join(', ') : '—');
+      add(detail, meta, el('pre', null, record.body || ''));
+      add(wrap, detail);
+    }
+    if (exact.sanitization && exact.sanitization.redacted > 0) {
+      add(wrap, renderNote(`${exact.sanitization.redacted} sensitive value${exact.sanitization.redacted === 1 ? '' : 's'} redacted before this context can reach a model.`, 'cy'));
+    }
+    const promptDetail = el('details', 'box');
+    promptDetail.open = true;
+    add(promptDetail, el('summary', null,
+      `Exact bounded prompt · ${exact.characters || 0}/${exact.limit || 0} characters · sha256 ${short(exact.hash, 18)}`));
+    const prompt = el('pre', null, exact.prompt || '');
+    prompt.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;user-select:text';
+    add(promptDetail, prompt);
+    add(wrap, promptDetail);
+    return wrap;
+  }
+
+  async function loadContext() {
+    if (S.contextBusy) return;
+    S.contextBusy = true; S.contextErr = null;
+    paintA(); paintC();
+    const result = await api('/skills');
+    S.contextBusy = false;
+    if (!result.ok) { S.contextErr = errText(result); S.context = null; S.skillIds.clear(); }
+    else {
+      S.context = result.data || {};
+      const available = new Set((S.context.skills || []).map((skill) => skill.id));
+      S.skillIds = new Set([...S.skillIds].filter((id) => available.has(id)));
+    }
+    // A refresh may have changed rule or skill bytes even when the selected ids
+    // stayed the same. Their previous hash is no longer a truthful preflight.
+    for (const session of S.sessions) invalidateRunContext(session);
+    paintA(); paintC();
+  }
+
+  async function loadTests() {
+    if (S.testsBusy) return;
+    S.testsBusy = true; S.testsErr = null;
+    paintA(); paintD();
+    const result = await api('/forge/tests');
+    S.testsBusy = false;
+    if (!result.ok) { S.tests = null; S.testsErr = errText(result); }
+    else S.tests = result.data || { scripts: [] };
+    paintA(); paintD();
+  }
+
+  async function runTest(script) {
+    if (!OWNER_TOKEN || S.testRunId || !script || !script.id) return;
+    S.testRunId = script.id;
+    S.testsErr = null;
+    paintA(); paintD();
+    const result = await api('/forge/tests/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: script.id }),
+    });
+    S.testRunId = '';
+    if (!result.ok) S.testsErr = `Test request failed: ${errText(result)}`;
+    else S.testResults.set(script.id, result.data);
+    paintA(); paintD();
+    await Promise.all([loadStatus(), rereadOpenFile(), loadContext()]);
+  }
+
+  async function loadExtensions() {
+    if (S.extensionsBusy) return;
+    S.extensionsBusy = true; S.extensionsErr = null;
+    paintA();
+    const result = await api('/forge/extensions');
+    S.extensionsBusy = false;
+    if (!result.ok) { S.extensions = null; S.extensionsErr = errText(result); }
+    else S.extensions = result.data || {};
+    paintA();
+  }
+
+  async function loadConnectors() {
+    if (S.connectorsBusy) return;
+    S.connectorsBusy = true; S.connectorsErr = null;
+    paintA();
+    const result = await api('/forge/connectors');
+    S.connectorsBusy = false;
+    if (!result.ok) { S.connectors = null; S.connectorsErr = errText(result); }
+    else S.connectors = result.data || {};
+    paintA();
+  }
+
+  async function runTerminal() {
+    const terminal = activeTerminal();
+    if (!OWNER_TOKEN || S.terminalBusy || S.choosing || !terminal.draft.trim()) return;
+    S.terminalCommand = terminal.draft.trim();
+    S.terminalBusy = true; S.terminalErr = null; S.terminalResult = null;
+    const started = Date.now();
+    paintD(); paintA();
+    const result = await api('/forge/terminal', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: S.terminalCommand }),
+    });
+    S.terminalBusy = false;
+    if (!result.ok) S.terminalErr = `Command request failed: ${errText(result)}`;
+    else {
+      S.terminalResult = result.data;
+      terminal.history.push({
+        command: S.terminalCommand,
+        durationMs: Math.max(0, Date.now() - started),
+        ...result.data,
+      });
+      if (terminal.history.length > 40) terminal.history.splice(0, terminal.history.length - 40);
+      terminal.draft = '';
+    }
+    paintD(); paintA();
+    await Promise.all([loadStatus(), rereadOpenFile(), loadContext()]);
+  }
+
+  async function chooseFolder() {
+    if (S.choosing || anySessionRunning() || S.terminalBusy || !!S.testRunId || S.saving) return;
+    if (!window.zenoProject || typeof window.zenoProject.choose !== 'function') {
+      S.folderNote = 'Folder selection is available in the Zeno desktop app.'; paintA(); return;
+    }
+    if (dirtyPaths.size && !window.confirm('Open another folder and discard unsaved editor changes?')) return;
+    S.choosing = true; S.folderNote = ''; paintA();
+    try {
+      const result = await window.zenoProject.choose();
+      if (result && result.ok) { section.replaceChildren(renderNote(`Switching to ${result.path || 'the selected folder'}…`)); return; }
+      S.folderNote = result && result.canceled ? 'Folder selection canceled.' : (result && result.error ? String(result.error) : 'The folder could not be opened.');
+    } catch (error) { S.folderNote = `The folder could not be opened: ${error.message || error}`; }
+    S.choosing = false; paintA();
+  }
+
   async function loadStatus() {
     const r = await api('/forge/status');
     if (!r.ok) {
@@ -2272,9 +3661,11 @@ export function initForge(section) {
     } else {
       S.status = r.data;
       S.statusErr = null;
+      restoreEditorLayout();
     }
     paintA();
     paintB();
+    paintTop();
     paintE();
   }
 
@@ -2293,7 +3684,12 @@ export function initForge(section) {
     S.reloading = true;
     paintA();
     try {
-      await Promise.all([loadStatus(), rereadOpenFile()]);
+      await Promise.all([
+        loadStatus(), loadAgents(), rereadOpenFile(), loadContext(),
+        ...(S.tests ? [loadTests()] : []),
+        ...(S.extensions ? [loadExtensions()] : []),
+        ...(S.connectors ? [loadConnectors()] : []),
+      ]);
     } finally {
       S.reloading = false;
       S.readAt = new Date();
@@ -2308,19 +3704,27 @@ export function initForge(section) {
    */
   async function rereadOpenFile(discardEdits) {
     const path = S.file;
+    return path ? rereadPath(path, discardEdits) : undefined;
+  }
+
+  async function rereadPath(path, discardEdits) {
     if (!path) return;
     // A re-read never throws away unsaved edits on its own — modelFor guards
     // them. `discardEdits` is the one case where that guard is deliberately
     // lifted: the owner asked to revert, or their edit just landed on disk.
     if (discardEdits === true) dirtyPaths.delete(path);
+    const record = recordFor(path);
+    const request = ++record.request;
+    record.busy = true;
     const r = await api(`/forge/file?path=${encodeURIComponent(path)}`);
-    if (S.file !== path) return;   // the owner opened something else mid-read
+    if (record.request !== request) return;
+    record.busy = false;
     if (!r.ok) {
-      S.fileData = null;
-      S.fileErr = `${path} could not be read: ${errText(r)}`;
+      record.data = null;
+      record.error = `${path} could not be read: ${errText(r)}`;
     } else {
-      S.fileData = r.data;
-      S.fileErr = null;
+      record.data = r.data;
+      record.error = null;
     }
     paintB();
     paintE();
@@ -2335,9 +3739,21 @@ export function initForge(section) {
       S.agents = r.data;
       S.agentsErr = null;
       const list = (r.data && r.data.agents) || [];
-      if (!list.some((a) => a.id === S.agentId) && list.length) S.agentId = list[0].id;
       const efforts = (r.data && r.data.efforts) || [];
-      if (efforts.length && !efforts.includes(S.effort)) S.effort = efforts[0];
+      const available = firstAvailableProvider();
+      for (const session of S.sessions) {
+        if (session.running || session.routing) continue;
+        const selected = list.find((a) => a && a.id === session.agentId);
+        if ((!selected || selected.available === false) && available) {
+          session.agentId = available.id;
+          session.model = '';
+          session.hostedConfirmation = null;
+          session.route = {
+            rationale: `${available.label || available.id} selected because the previous provider is not runnable on this machine.`,
+          };
+        }
+        if (efforts.length && !efforts.includes(session.effort)) session.effort = efforts[0];
+      }
     }
     paintC();
     paintE();
@@ -2348,31 +3764,41 @@ export function initForge(section) {
    * optional and 1-based: a search hit passes the line it was found on, so the
    * pane lands on it rather than at the top of a two-thousand-line file.
    */
-  async function openFile(path, line) {
+  async function openFile(path, line, paneIndex = S.focusedGroup) {
     if (!path) return;
     const at = Number(line);
-    S.file = path;
-    if (!S.open.includes(path)) S.open.push(path);
-    S.fileBusy = true;
-    S.fileErr = null;
-    S.fileData = null;
-    S.caret = Number.isInteger(at) && at > 0 ? at : 0;
+    const index = paneIndex === 1 && S.splitEditor ? 1 : 0;
+    const target = group(index);
+    focusEditorGroup(index, false);
+    target.file = path;
+    if (!target.tabs.includes(path)) target.tabs.push(path);
+    target.caret = Number.isInteger(at) && at > 0 ? at : 0;
+    const record = recordFor(path);
+    const request = ++record.request;
+    record.busy = record.data === null;
+    record.error = null;
+    persistEditorLayout();
     paintA();
     paintB();
     paintE();
 
+    if (record.data !== null) {
+      revealCaret(index);
+      return;
+    }
     const r = await api(`/forge/file?path=${encodeURIComponent(path)}`);
-    S.fileBusy = false;
+    if (record.request !== request) return;
+    record.busy = false;
     if (!r.ok) {
-      S.fileData = null;
-      S.fileErr = `${path} could not be read: ${errText(r)}`;
+      record.data = null;
+      record.error = `${path} could not be read: ${errText(r)}`;
     } else {
-      S.fileData = r.data;
-      S.fileErr = null;
+      record.data = r.data;
+      record.error = null;
     }
     paintB();
     paintE();
-    revealCaret();
+    revealCaret(index);
   }
 
   /**
@@ -2383,53 +3809,276 @@ export function initForge(section) {
    * where the cap's own "file continues — N lines in total" row is — which says
    * why the line is not shown instead of silently doing nothing.
    */
-  function revealCaret() {
-    if (!S.caret) return;
-    if (ed && ed.getModel()) {
-      ed.setPosition({ lineNumber: S.caret, column: 1 });
-      ed.revealLineInCenter(S.caret);
+  function revealCaret(paneIndex = S.focusedGroup) {
+    const target = group(paneIndex);
+    const view = paneViews[paneIndex];
+    if (!target.caret) return;
+    if (view.editor && view.editor.getModel()) {
+      view.editor.setPosition({ lineNumber: target.caret, column: 1 });
+      view.editor.revealLineInCenter(target.caret);
       return;
     }
-    const code = rgB.querySelector('.code');
+    const code = view.aux.querySelector('.code');
     if (!code) return;
-    const row = code.querySelector(`.row[data-line="${S.caret}"]`);
+    const row = code.querySelector(`.row[data-line="${target.caret}"]`);
     if (row) row.scrollIntoView({ block: 'center' });
-    else if (S.fileData && S.fileData.truncated) code.scrollTop = code.scrollHeight;
+    else if (recordFor(target.file)?.data?.truncated) code.scrollTop = code.scrollHeight;
+  }
+
+  async function resolveRoute(session, task) {
+    if (!session.autoRoute) {
+      const available = !S.agents || providerAvailable(session.agentId);
+      const route = {
+        automatic: false,
+        agentId: session.agentId,
+        model: session.model,
+        effort: session.effort,
+        blocked: !available,
+        rationale: available
+          ? 'Manual routing was used because automatic routing is off for this session.'
+          : (provider(session.agentId)?.unavailableReason || 'The selected provider is unavailable on this machine.'),
+      };
+      session.route = route;
+      return route;
+    }
+    const response = await api('/forge/route', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ task }),
+    });
+    if (!response.ok || !response.data || !response.data.route) {
+      const route = {
+        automatic: false,
+        agentId: session.agentId,
+        model: session.model,
+        effort: session.effort,
+        rationale: `Automatic routing was unavailable (${errText(response)}). Forge kept the visible picker values for this run.`,
+      };
+      session.route = route;
+      return route;
+    }
+    const chosen = response.data.route;
+    const agents = (S.agents && S.agents.agents) || [];
+    const agent = agents.find((candidate) => candidate.id === chosen.agentId);
+    const efforts = (S.agents && S.agents.efforts) || [];
+    if (!agent || !efforts.includes(chosen.effort)) {
+      const route = {
+        automatic: false,
+        agentId: session.agentId,
+        model: session.model,
+        effort: session.effort,
+        rationale: 'The automatic router returned a choice this Forge build does not expose. The visible picker values were kept.',
+      };
+      session.route = route;
+      return route;
+    }
+    if (chosen.runnable === false) {
+      const route = {
+        automatic: true,
+        agentId: chosen.agentId,
+        model: typeof chosen.model === 'string' ? chosen.model : '',
+        effort: chosen.effort,
+        kind: chosen.kind || 'general',
+        blocked: true,
+        rationale: String(chosen.rationale || 'No safe provider is available for this task.'),
+      };
+      session.route = route;
+      return route;
+    }
+    if (agent.available === false) {
+      const localOnly = chosen.kind === 'private-local';
+      const order = chosen.kind === 'architecture'
+        ? ['codex', 'local', 'claude-code']
+        : chosen.kind === 'frontend'
+          ? ['local', 'claude-code', 'codex']
+          : ['local', 'codex', 'claude-code'];
+      const fallback = localOnly ? null : order.map((id) => agents.find((item) => item.id === id && item.available !== false)).find(Boolean);
+      if (!fallback) {
+        const route = {
+          automatic: true,
+          agentId: chosen.agentId,
+          model: typeof chosen.model === 'string' ? chosen.model : '',
+          effort: chosen.effort,
+          kind: chosen.kind || 'general',
+          blocked: true,
+          rationale: localOnly
+            ? 'This task names sensitive data, but no local Ollama model is available. Forge will not send it to a hosted provider.'
+            : 'No coding provider is currently runnable on this machine.',
+        };
+        session.route = route;
+        return route;
+      }
+      const models = fallback.id === 'local' ? ((S.agents && S.agents.localModels) || []) : (fallback.models || []);
+      const route = {
+        automatic: true,
+        agentId: fallback.id,
+        model: models[0] || '',
+        effort: chosen.effort,
+        kind: chosen.kind || 'general',
+        rationale: `${fallback.label || fallback.id} selected because ${agent.label || agent.id} is unavailable on this machine.`,
+      };
+      session.agentId = route.agentId;
+      session.model = route.model;
+      session.effort = route.effort;
+      session.route = route;
+      return route;
+    }
+    const route = {
+      automatic: true,
+      agentId: chosen.agentId,
+      model: typeof chosen.model === 'string' ? chosen.model : '',
+      effort: chosen.effort,
+      kind: chosen.kind || 'general',
+      rationale: String(chosen.rationale || 'Automatic routing selected this provider, model, and effort.'),
+    };
+    session.agentId = route.agentId;
+    session.model = route.model;
+    session.effort = route.effort;
+    session.route = route;
+    return route;
   }
 
   /** POST /forge/run — the agent proposes; nothing here applies anything. */
-  async function doRun() {
-    if (!canRun()) return;
-    const task = taskDraft.trim();
-    S.chat.push({ who: 'you', text: task, at: new Date() });
-    S.running = true;
-    S.runAt = new Date();
-    taskDraft = '';
+  async function doRun(runSession = activeSession()) {
+    if (!canRun(runSession)) return;
+    const task = runSession.draft.trim();
+    runSession.routing = true;
+    paintC();
+    const preparedContext = await loadRunContext(runSession, task);
+    if (!preparedContext) {
+      runSession.routing = false;
+      runSession.route = {
+        blocked: true,
+        rationale: `Forge did not start because its exact context could not be prepared.${runSession.contextPreviewErr ? ' ' + runSession.contextPreviewErr : ''}`,
+      };
+      paintC();
+      paintE();
+      return;
+    }
+    const route = await resolveRoute(runSession, task);
+    runSession.routing = false;
+    if (route.blocked) {
+      runSession.route = route;
+      paintC();
+      paintE();
+      return;
+    }
+    const chosen = provider(route.agentId);
+    if ((chosen && chosen.hosted === true) || route.agentId === 'claude-code' || route.agentId === 'codex') {
+      // Consent is bound to the exact task and resolved route. Editing either
+      // clears it, and every later hosted run asks again.
+      runSession.hostedConfirmation = { task, route };
+      paintC();
+      paintE();
+      return;
+    }
+    await runResolved(runSession, task, route, false);
+  }
+
+  async function runHosted(runSession) {
+    const pending = runSession.hostedConfirmation;
+    if (!pending || runSession.running || runSession.routing || anotherHostedRunIsActive(runSession)) return;
+    runSession.hostedConfirmation = null;
+    await runResolved(runSession, pending.task, pending.route, true);
+  }
+
+  /** Ask the daemon to stop this exact process tree. The running card stays
+   * visible until the original /forge/run request reports what the stopped run
+   * actually left behind; accepting a cancel request is not the run outcome. */
+  async function cancelRun(runSession) {
+    if (!runSession.running || !runSession.runId || runSession.canceling) return;
+    const runId = runSession.runId;
+    runSession.canceling = true;
+    runSession.cancelNote = 'Stopping the agent process and its descendants…';
+    paintC();
+    const r = await api('/forge/run/cancel', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId }),
+    });
+    // The original request may have settled while this small request was in
+    // flight. Never let an old cancellation repaint a later run.
+    if (runSession.runId !== runId) return;
+    if (!r.ok) {
+      runSession.canceling = false;
+      runSession.cancelNote = `The cancellation request failed: ${errText(r)}`;
+      paintC();
+      return;
+    }
+    runSession.cancelNote = r.data && r.data.cancelled === false
+      ? String(r.data.note || 'The run already finished; waiting for its result.')
+      : 'Cancellation accepted. Waiting for the stopped run and any partial files it left for review.';
+    // Keep canceling=true until /forge/run settles. That is the only response
+    // that can truthfully say the process stopped and enumerate partial files.
+    paintC();
+  }
+
+  async function runResolved(runSession, task, route, hostedConfirmed) {
+    if (!runSession.chat.length && !runSession.runs.length) runSession.name = short(task, 26);
+    runSession.chat.push({ who: 'you', text: task, at: new Date(), route });
+    runSession.running = true;
+    runSession.canceling = false;
+    runSession.cancelNote = null;
+    runSession.hostedRun = hostedConfirmed;
+    runSession.runId = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? `ui-${globalThis.crypto.randomUUID()}`
+      : `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    runSession.runAt = new Date();
+    runSession.runProgress = initialRunProgress(runSession.runId, route.agentId, route.model || '');
+    runSession.runProgressStale = false;
+    runSession.draft = '';
     S.insp = 'chat';
     paintC();
     paintE();
     startRunClock();
 
-    const body = { task, agentId: S.agentId };
-    if (S.model) body.model = S.model;
-    if (S.effort) body.effort = S.effort;
+    const selectedSkillIds = [...S.skillIds];
+    const body = {
+      ...forgeContextBody(task, runSession.memoryEnabled, selectedSkillIds),
+      agentId: route.agentId,
+      runId: runSession.runId,
+    };
+    if (runSession.contextPreview && runSession.contextPreview.hash) body.contextHash = runSession.contextPreview.hash;
+    if (route.model) body.model = route.model;
+    if (route.effort) body.effort = route.effort;
+    if (hostedConfirmed) body.hostedConfirmed = true;
     const r = await api('/forge/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
 
-    S.running = false;
-    S.runAt = null;
+    runSession.running = false;
+    runSession.canceling = false;
+    runSession.cancelNote = null;
+    runSession.hostedRun = false;
+    runSession.runId = null;
+    runSession.runAt = null;
+    runSession.runProgress = null;
+    // This POST response is authoritative for the completed run and reconciles
+    // any bounded-stream replay gap that happened while it was in flight.
+    runSession.runProgressStale = false;
     stopRunClock();
 
     if (!r.ok) {
+      if (r.error && r.error.code === 'context-changed') {
+        // The hash did its job: nothing was sent. Require a fresh Lens preview
+        // before the next click rather than retrying against unseen context.
+        invalidateRunContext(runSession);
+      }
       // A failed request is not an agent turn. It is reported as what it is.
-      S.chat.push({
-        who: 'agent', at: new Date(), agentId: S.agentId, model: S.model, effort: S.effort,
-        files: [], waiting: 0, applied: 0, log: '', note: `The run did not start: ${errText(r)}`,
+      const started = r.error && r.error.code === 'run-failed-after-start';
+      runSession.chat.push({
+        who: 'agent', at: new Date(), agentId: route.agentId, model: route.model, effort: route.effort,
+        files: [], waiting: 0, applied: 0, log: '',
+        note: started ? errText(r) : `The run did not start: ${errText(r)}`,
+        ...(started ? { tokenUsage: finalTokenUsage(route.agentId, null, null) } : {}),
       });
-      S.runs.push({ at: new Date(), task, ok: false, agentId: S.agentId, model: S.model, effort: S.effort, files: 0, waiting: 0, applied: 0, note: errText(r) });
+      runSession.runs.push({
+        at: new Date(), task, ok: false, agentId: route.agentId, model: route.model, effort: route.effort,
+        automatic: route.automatic, routeRationale: route.rationale,
+        files: 0, waiting: 0, applied: 0, note: errText(r),
+      });
       paintC();
       paintE();
       return;
@@ -2437,18 +4086,31 @@ export function initForge(section) {
 
     const d = r.data || {};
     const run = d.run || {};
+    if (d.context && typeof d.context === 'object') {
+      runSession.contextPreview = d.context;
+      runSession.contextPreviewKey = forgeContextKey(task, runSession.memoryEnabled, selectedSkillIds);
+      runSession.contextPreviewTask = task;
+    }
     const proposed = Array.isArray(d.proposed) ? d.proposed : [];
     const changed = Array.isArray(d.changed) ? d.changed : [];
+    const skipped = Array.isArray(d.skipped) ? d.skipped : [];
+    const tokenUsage = finalTokenUsage(
+      run.agentId || route.agentId,
+      run.tokensIn,
+      run.tokensOut,
+    );
 
     // The tool rows: the files the run really wrote. The line count comes from
     // the run's own output where the harness emitted it, and is simply absent
     // where it did not — an absent number is shown as an absent number.
     const emitted = parseEmittedLines(run.log);
     const byPath = new Map(proposed.map((p) => [p.path, p]));
+    const skippedByPath = new Map(skipped.map((item) => [item.path, item]));
     const files = changed.map((path) => ({
       path,
       lines: emitted.get(path) || 0,
       tier: (byPath.get(path) || {}).tier || '',
+      skipped: skippedByPath.get(path) || null,
     }));
 
     // `auto:true` means the kernel already committed and receipted that write —
@@ -2457,24 +4119,29 @@ export function initForge(section) {
     const applied = proposed.filter((p) => p && p.auto).length;
     const waiting = proposed.length - applied;
 
-    S.proposals = proposed;
-    S.chat.push({
+    runSession.proposals = proposed;
+    runSession.chat.push({
       who: 'agent',
       at: new Date(),
-      agentId: run.agentId || S.agentId,
-      model: run.model || S.model,
-      effort: run.effort || S.effort,
+      agentId: run.agentId || route.agentId,
+      model: run.model || route.model,
+      effort: run.effort || route.effort,
       files,
       waiting,
       applied,
       log: typeof run.log === 'string' ? run.log : '',
+      cancelled: run.cancelled === true,
+      tokenUsage,
       // run.ok:false is a plain statement, never dressed up as a partial success.
       note: run.ok === false ? (run.note || 'The agent did not complete this task.') : (run.note || ''),
     });
-    S.runs.push({
+    runSession.runs.push({
       at: new Date(), task, ok: run.ok === true,
-      agentId: run.agentId || S.agentId, model: run.model || S.model, effort: run.effort || S.effort,
+      agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
+      automatic: route.automatic, routeRationale: route.rationale,
       files: changed.length, waiting, applied,
+      cancelled: run.cancelled === true,
+      tokenUsage,
       note: run.ok === false ? (run.note || '') : '',
     });
 
@@ -2497,7 +4164,7 @@ export function initForge(section) {
   function parseEmittedLines(log) {
     const out = new Map();
     if (typeof log !== 'string' || log === '') return out;
-    const re = /===FILE:\s*(\S+)\s*===\r?\n([\s\S]*?)\r?\n===END===/g;
+    const re = /===FILE:[ \t]*([^\r\n]*?\S)[ \t]*===\r?\n([\s\S]*?)\r?\n===END===/g;
     let m;
     while ((m = re.exec(log)) !== null) {
       out.set(m[1].trim(), m[2].split(/\r?\n/).length);
@@ -2625,8 +4292,9 @@ export function initForge(section) {
 
   const VIEW_KEY = 'zeno.forge.view';
 
-  /** The capsule node for an action hash, built once and reused across repaints. */
+  /** The current capsule node and preview for each held action hash. */
   const gateNodes = new Map();
+  const gatePreviews = new Map();
   /** Hashes whose receipt has already been applied — applyReceipt is not idempotent. */
   const receiptApplied = new Set();
 
@@ -2656,15 +4324,31 @@ export function initForge(section) {
       const hash = p && typeof p.actionHash === 'string' ? p.actionHash : null;
       if (!hash) continue;
       live.add(hash);
-      if (gateNodes.has(hash)) continue;
+      const previous = gatePreviews.get(hash);
+      if (gateNodes.has(hash) && !pendingCapsuleNeedsRefresh(previous, p)) continue;
       // The payload travels with the preview precisely so the capsule can
       // re-hash it. Passing it is what makes Approve reachable at all.
       const node = renderCapsule(p, {
         payload: p.payload,
+        review: p.review,
         ownerToken: OWNER_TOKEN,
         endpoint: '/approvals',
       });
+      const oldNode = gateNodes.get(hash);
+      oldNode?.destroy?.();
       gateNodes.set(hash, node);
+      gatePreviews.set(hash, p);
+      const oldGate = S.gates.find((g) => g.hash === hash && !g.settled);
+      if (oldGate) {
+        // Same action, fresher observed review. `paintC()` below reattaches this
+        // node in the existing timeline position, so drift disables approval
+        // before the owner can click. Receipt events also resolve through the
+        // current gateNodes entry and therefore stay wired to this replacement.
+        oldGate.tier = p.tier;
+        oldGate.kind = (p.binding && p.binding.kind) || 'unknown-kind';
+        oldGate.summary = p.summary || '';
+        continue;
+      }
       S.gates.push({
         hash,
         at: new Date(),
@@ -2697,9 +4381,9 @@ export function initForge(section) {
 
   /**
    * One capsule in the thread, with a line above it saying where it came from
-   * and when. The capsule itself is the component from /capsule.js, built once
-   * and re-appended on every repaint — rebuilding it would restart its
-   * countdown and, worse, resurrect an Approve control that had been spent.
+   * and when. The capsule itself is the component from /capsule.js, retained
+   * across ordinary repaints and replaced only when `/state` refreshes its bound
+   * review. A settled node is never rebuilt, so a spent control stays spent.
    */
   function gateBlock(g) {
     const box = el('div', 'fgate');
@@ -2795,6 +4479,58 @@ export function initForge(section) {
     });
   }
 
+  /** Run ids and token facts use a separate owner-only stream. */
+  function openRunProgressStream() {
+    if (!OWNER_TOKEN || typeof EventSource !== 'function') return;
+    let es;
+    try {
+      es = new EventSource('/forge/run-progress');
+    } catch {
+      S.runProgressStreamDown = true;
+      return;
+    }
+    es.addEventListener('run-progress', (ev) => {
+      let progress = null;
+      try {
+        progress = JSON.parse(ev.data);
+      } catch {
+        progress = null;
+      }
+      const updatedId = progress ? applyRunProgress(S.sessions, progress) : null;
+      if (!updatedId) return;
+      const updatedSession = S.sessions.find((session) => session.id === updatedId);
+      if (shouldRepaintRunProgress(S.selectedSessionId, updatedId)) paintC();
+      else if (updatedSession) updateSessionTabProgress(updatedSession);
+    });
+    es.addEventListener('gap', () => {
+      const updatedIds = markRunProgressGap(S.sessions);
+      for (const id of updatedIds) {
+        const updatedSession = S.sessions.find((session) => session.id === id);
+        if (!updatedSession) continue;
+        if (shouldRepaintRunProgress(S.selectedSessionId, id)) paintC();
+        else updateSessionTabProgress(updatedSession);
+      }
+    });
+    es.addEventListener('open', () => {
+      if (S.runProgressStreamDown) {
+        S.runProgressStreamDown = false;
+        if (activeSession().running) paintC();
+        for (const session of S.sessions) {
+          if (session.running && session.id !== S.selectedSessionId) updateSessionTabProgress(session);
+        }
+      }
+    });
+    es.addEventListener('error', () => {
+      if (!S.runProgressStreamDown) {
+        S.runProgressStreamDown = true;
+        if (activeSession().running) paintC();
+        for (const session of S.sessions) {
+          if (session.running && session.id !== S.selectedSessionId) updateSessionTabProgress(session);
+        }
+      }
+    });
+  }
+
   /* ---- the two views ----------------------------------------------------- *
    * IDE — the five regions, unchanged.
    * AGENT — rgA, rgB and rgD collapse and rgC takes the whole window: one
@@ -2813,9 +4549,10 @@ export function initForge(section) {
     } catch {
       /* a browser that refuses storage simply does not remember the choice */
     }
+    syncPaneVisibility();
     paintC();
     paintE();
-    if (ed) requestAnimationFrame(() => ed.layout());
+    requestAnimationFrame(layoutEditors);
     if (S.view === 'agent') {
       const inp = rgC.querySelector('#zf-task');
       if (inp && !inp.disabled) inp.focus();
@@ -2831,54 +4568,91 @@ export function initForge(section) {
     }
     S.view = v === 'agent' ? 'agent' : 'ide';
     R.setAttribute('data-forge-view', S.view);
+    syncPaneVisibility();
   }
 
   /* ---- the run clock ----------------------------------------------------- *
-   * The one honest number available while a run is in flight. /forge/run is a
-   * single POST that returns at the END — the daemon streams no token, no step
-   * and no percentage — so the only thing this window can truthfully report is
-   * how long it has been waiting. It updates the one text node it owns rather
-   * than repainting the thread, so a run in flight does not fight the scroll. */
+   * Elapsed time complements the daemon's live five-step orchestration facts.
+   * Neither value estimates how far a provider is through generation. */
   let runClock = null;
 
-  function elapsedLabel() {
-    if (!S.runAt) return '0s';
-    const s = Math.max(0, Math.round((Date.now() - S.runAt.getTime()) / 1000));
+  function elapsedLabel(session = activeSession()) {
+    if (!session.runAt) return '0s';
+    const s = Math.max(0, Math.round((Date.now() - session.runAt.getTime()) / 1000));
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
   }
 
   function startRunClock() {
-    stopRunClock();
+    if (runClock !== null) return;
     runClock = setInterval(() => {
       const n = rgC.querySelector('.fgrun-el');
-      if (n) n.textContent = elapsedLabel();
+      if (n) n.textContent = elapsedLabel(activeSession());
     }, 1000);
   }
 
   function stopRunClock() {
+    if (S.sessions.some((session) => session.running)) return;
     if (runClock !== null) clearInterval(runClock);
     runClock = null;
   }
 
   /** The in-flight turn. Honest about what it does and does not know. */
   function runningBlock() {
+    const session = activeSession();
+    const progress = session.runProgress || initialRunProgress(
+      session.runId || 'pending', session.agentId, session.model || '',
+    );
     const m = el('div', 'msg me fgrunning');
     m.setAttribute('aria-live', 'polite');
     const who = el('div', 'who');
     add(who, el('span', null, 'Zeno Forge'));
-    add(who, el('span', 'mchip', `${S.agentId}${S.model ? ' · ' + S.model : ''}`));
+    add(who, el('span', 'mchip', `${progress.agentId}${progress.model ? ' · ' + progress.model : ''}`));
     add(m, who);
     const bub = el('div', 'bub');
     const row = el('div', 'fgrun');
-    const spin = el('span', 'fgspin');
+    const transport = runTransportState(session);
+    const spin = el('span', `fgspin${transport.terminal ? ` terminal ${transport.label}` : ''}`);
     spin.setAttribute('aria-hidden', 'true');
-    add(row, spin, el('span', 'fgrun-lb', 'running'), el('span', 'sp'), el('span', 'fgrun-el', elapsedLabel()));
+    const cancel = btn('btn sm ghost', transport.terminal ? 'Finished' : session.canceling ? 'Canceling…' : 'Cancel', () => void cancelRun(session));
+    cancel.disabled = !transport.canCancel;
+    cancel.title = transport.terminal
+      ? 'The provider ended; waiting for the authoritative run response.'
+      : session.canceling
+      ? 'Waiting for the agent process to stop and report any partial files.'
+      : 'Stop this agent process and all of its descendants.';
+    add(row, spin, el('span', 'fgrun-lb', transport.label), el('span', 'sp'), el('span', 'fgrun-el', elapsedLabel(session)), cancel);
     add(bub, row);
-    add(bub, el('div', null,
-      'The agent runs headless in a throwaway worktree and answers once, at the end. ' +
-      'The daemon streams no progress from it, so nothing here measures any — the clock is ' +
-      'wall time since the task was sent, and it is the only number this window actually has. ' +
-      'Anything the run stops to ask permission for appears below as a capsule the moment it is proposed.'));
+    add(bub, el('div', 'fgrun-phase', phaseLabel(progress)));
+    const track = el('div', 'fgrun-track');
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-label', 'Forge orchestration progress');
+    track.setAttribute('aria-valuemin', '0');
+    track.setAttribute('aria-valuemax', String(progress.total));
+    track.setAttribute('aria-valuenow', String(progress.completed));
+    const fill = el('span', 'fgrun-fill');
+    fill.style.width = `${progress.orchestrationPercent}%`;
+    add(track, fill);
+    add(bub, track);
+    add(bub, el('div', 'fgrun-facts',
+      `Orchestration: ${progress.completed} / ${progress.total} · ${progress.orchestrationPercent}%`));
+    add(bub, el('div', 'fgrun-tokens', tokenUsageLabel(progress.tokenUsage)));
+    if (S.runProgressStreamDown) {
+      add(bub, renderNote(
+        'Live orchestration updates are reconnecting. The final run response remains authoritative.',
+        'cy',
+      ));
+    }
+    if (session.runProgressStale) {
+      add(bub, renderNote(
+        'Some live progress events could not be replayed. This phase may be stale; the final run response will reconcile it.',
+        'cy',
+      ));
+    }
+    add(bub, el('div', null, transport.terminal
+      ? 'The provider has ended. Waiting for the authoritative run response and governed proposals.'
+      : 'The percentage covers Zeno’s orchestration milestones, not provider generation. Review proposed changes and permission requests here.'));
+    if (session.cancelNote) add(bub, renderNote(session.cancelNote, session.canceling ? 'cy' : 'rd'));
+    if (session.route && session.route.rationale) add(bub, renderNote(session.route.rationale, 'cy'));
     add(m, bub);
     return m;
   }
@@ -2896,8 +4670,10 @@ export function initForge(section) {
   paintE();
   void loadStatus();
   void loadAgents();
+  void loadContext();
   void syncGates();
   openStream();
+  openRunProgressStream();
 
   /* THE SHORTCUT. Registered on the document as well as inside the editor,
      because the editor is exactly the thing the agent-only view hides — a key
@@ -2906,7 +4682,25 @@ export function initForge(section) {
      it is inert while Command or Counsel is on screen. */
   document.addEventListener('keydown', (ev) => {
     if (section.hidden) return;
-    if (!(ev.ctrlKey || ev.metaKey) || !ev.shiftKey || ev.altKey) return;
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+    if (!ev.shiftKey && ev.key === '\\') {
+      ev.preventDefault();
+      setSplitEditor(!S.splitEditor);
+      return;
+    }
+    if (!ev.shiftKey && (ev.key === '1' || ev.key === '2')) {
+      if (ev.key === '2' && !S.splitEditor) return;
+      ev.preventDefault();
+      focusEditorGroup(ev.key === '2' ? 1 : 0);
+      if (ed) ed.focus();
+      return;
+    }
+    if (!ev.shiftKey && String(ev.key).toLowerCase() === 'w' && S.file) {
+      ev.preventDefault();
+      closeTab(S.focusedGroup, S.file);
+      return;
+    }
+    if (!ev.shiftKey) return;
     if (String(ev.key).toLowerCase() !== 'a') return;
     ev.preventDefault();
     setView(S.view === 'agent' ? 'ide' : 'agent');
@@ -2928,7 +4722,12 @@ export function initForge(section) {
      resized while it was hidden, and monaco measures itself against a box that
      had none. */
   section.addEventListener('zeno:surface-shown', () => {
-    if (ed) requestAnimationFrame(() => ed.layout());
+    requestAnimationFrame(layoutEditors);
+  });
+  window.addEventListener('beforeunload', (event) => {
+    if (dirtyPaths.size === 0) return;
+    event.preventDefault();
+    event.returnValue = '';
   });
 }
 

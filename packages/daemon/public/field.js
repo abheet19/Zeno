@@ -29,6 +29,8 @@
  * the whole surface can never disagree with itself.
  */
 
+import { pendingRepoEdge, ticketAction } from './field-model.js';
+
 const R = document.documentElement;
 
 // ---- auth: the same token the page was handed (empty for a read-only shell) --
@@ -246,7 +248,7 @@ function buildTopology(state, work, forge, mem, meetings, agents) {
   // 2 · the three products — real surfaces this daemon actually serves.
   nodes.push({ id: 'command', k: 'agent', l: 'Command', nav: 'command', d: 'The approval surface. Every consequential effect stops here for your yes, with its payload, tier and hash binding shown in full.' });
   nodes.push({ id: 'forge', k: 'agent', l: 'Forge', nav: 'forge', d: 'The governed coding surface over the sandbox repo. It can propose a change; it cannot approve its own output.' });
-  nodes.push({ id: 'counsel', k: 'agent', l: 'Counsel', nav: 'counsel', d: 'The consent-first meeting surface. Transcription stays local, and nothing leaves without a receipt.' });
+  nodes.push({ id: 'counsel', k: 'agent', l: 'Counsel', nav: 'counsel', d: 'The consent-first meeting surface. The desktop uses local Whisper when installed; browser fallback may send microphone audio to the browser speech provider. Saved transcript text stays on this machine and detected secrets are redacted first.' });
   edges.push(['core', 'command'], ['core', 'forge'], ['core', 'counsel']);
 
   // 3 · this machine — honestly, the one device that exists.
@@ -307,7 +309,8 @@ function buildTopology(state, work, forge, mem, meetings, agents) {
         : `${summary} — tier ${p.tier || '?'}, waiting for your approval. Opening it is not approving it.`,
     });
     edges.push(['core', id], ['command', id]);
-    if (g('repo')) edges.push([id, 'repo']);
+    const repoEdge = pendingRepoEdge(id, forge);
+    if (repoEdge) edges.push(repoEdge);
   });
 
   // 7 · the live backlog — real work items, each hung off the source it came from.
@@ -317,7 +320,7 @@ function buildTopology(state, work, forge, mem, meetings, agents) {
     const title = it.title || it.id || 'item';
     const age = minutesSince(it.updatedAt);
     nodes.push({
-      id, k: 'ticket', l: clip(title, 22), att: 'waiting',
+      id, k: 'ticket', l: clip(title, 22), att: 'waiting', work: true,
       ageMin: age == null ? undefined : age,
       d: `${title} — from ${it.source || 'the backlog'}${age == null ? '' : `, last touched ${ageStr(age)} ago`}. Assigned, not started: Zeno is holding it, not working it.`,
     });
@@ -374,7 +377,7 @@ function buildTopology(state, work, forge, mem, meetings, agents) {
     nodes.push({
       id, k: 'meet', l: clip(m.title || m.id || 'a meeting', 22),
       ageMin: age == null ? undefined : age,
-      d: `${m.title || m.id || 'A meeting'} — ${c.lines == null ? 'a recording' : `${c.lines} line${c.lines === 1 ? '' : 's'}`}${c.decisions ? `, ${c.decisions} decision${c.decisions === 1 ? '' : 's'}` : ''}${c.actions ? `, ${c.actions} action${c.actions === 1 ? '' : 's'}` : ''}${age == null ? '' : ` · ${ageStr(age)} ago`}. Recorded and summarised on this machine; every line was redacted before it was saved.`,
+      d: `${m.title || m.id || 'A meeting'} — ${c.lines == null ? 'a recording' : `${c.lines} line${c.lines === 1 ? '' : 's'}`}${c.decisions ? `, ${c.decisions} decision${c.decisions === 1 ? '' : 's'}` : ''}${c.actions ? `, ${c.actions} action${c.actions === 1 ? '' : 's'}` : ''}${age == null ? '' : ` · ${ageStr(age)} ago`}. Saved and summarised as local Markdown; credential-like secrets were redacted before persistence.`,
     });
     edges.push([id, 'counsel']);
   });
@@ -614,15 +617,36 @@ function draw() {
       const fs = (8.6 + 3.4 * d).toFixed(1);
       c.font = `500 ${fs}px "IBM Plex Mono",monospace`;
       const tw = c.measureText(txt).width;
-      let lx = n.sx + r + 8, ly = n.sy + 3.5;
-      if (lx + tw > F.W - 10) { lx = n.sx - r - 8 - tw; }
-      const hit = (y) => placed.some((b) => Math.abs(b.y - y) < 13 && lx < b.x + b.w + 7 && b.x < lx + tw + 7);
+      const rightX = n.sx + r + 8;
+      const leftX = n.sx - r - 8 - tw;
+      const preferRight = rightX + tw <= F.W - 10;
+      const xs = preferRight ? [rightX, leftX] : [leftX, rightX];
+      const offsets = [0, 15, -15, 30, -30, 45, -45];
+      const hit = (x, y) => placed.some((b) => (
+        Math.abs(b.y - y) < 13 && x < b.x + b.w + 7 && b.x < x + tw + 7
+      ));
+      let lx = xs[0];
+      let ly = n.sy + 3.5;
+      let clash = true;
+      for (const x of xs) {
+        for (const offset of offsets) {
+          const y = n.sy + 3.5 + offset;
+          if (x < 8 || x + tw > F.W - 8 || y < 12 || y > F.H - 8 || hit(x, y)) continue;
+          lx = x;
+          ly = y;
+          clash = false;
+          break;
+        }
+        if (!clash) break;
+      }
       const must = (sel || n.k === 'core');
-      let clash = hit(ly);
-      if (clash && !hit(ly + 15)) { ly += 15; clash = false; }
-      else if (clash && !hit(ly - 15)) { ly -= 15; clash = false; }
       if (!clash || must) {
-        if (clash) { ly += 15; }
+        // In the exceptionally dense case where even fourteen positions are
+        // occupied, the core/selected label stays visible in a bounded spot.
+        if (clash) {
+          lx = Math.max(8, Math.min(F.W - tw - 8, preferRight ? rightX : leftX));
+          ly = Math.max(12, Math.min(F.H - 8, n.sy + 18.5));
+        }
         /* a halo, not a box — labels stay legible over bright edges without boxing them in */
         c.globalAlpha = Math.min(1, 0.52 + 0.48 * d);
         c.shadowColor = lightTheme ? 'rgba(233,232,226,.95)' : 'rgba(10,12,14,.95)';
@@ -794,9 +818,8 @@ function renderNodeCard() {
        not have is the same failure as a number with no source, so it is named
        for what it actually does. Opening the receipt itself is one more click,
        on the row's own "receipt ›". */
-    act = n.receipt
-      ? '<button type="button" class="btn sm g" data-jump="timeline">Find it in the receipts</button>'
-      : '<button type="button" class="btn sm p" data-jump="pending">Go to approvals</button>';
+    const action = ticketAction(n);
+    act = `<button type="button" class="btn sm ${action.tone}" data-jump="${action.jump}">${action.label}</button>`;
     note = `<div class="ncnote">Status: <b>${esc(lbl)}</b>. Glowing means it wants your attention.</div>`;
   } else if (n.k === 'dev') {
     act = '<button type="button" class="btn sm g" data-jump="devices">Manage device</button>';
@@ -808,7 +831,7 @@ function renderNodeCard() {
       : '<div class="ncnote">A remembered fact, not a task. It is <b>not waiting on you</b>, and it can be cited — never obeyed.</div>';
   } else if (n.k === 'meet') {
     act = '<button type="button" class="btn sm p" data-go="counsel">Open Counsel</button>';
-    note = '<div class="ncnote">A recording you consented to, summarised on this machine. Every line was redacted before it was written to disk.</div>';
+    note = '<div class="ncnote">A recording you consented to, saved and summarised as local Markdown. Detected credential-like secrets were redacted before it was written to disk.</div>';
   } else if (n.k === 'runtime' || n.k === 'model') {
     act = '<button type="button" class="btn sm p" data-go="forge">Open Forge</button>';
     note = '<div class="ncnote">Runs on <b>this machine</b>, on 127.0.0.1. Nothing it is asked leaves here, which is why this link carries no ⚡.</div>';

@@ -94,6 +94,7 @@ test('a capped context ANNOUNCES the truncation instead of quietly dropping evid
   assert.equal(hits.length, 5);
   const p = buildAnswerPrompt('what is the budget?', hits, { maxChars: 500 });
   assert.match(p, /TRUNCATED: 1 of 5 matching meetings are shown above; 4 more were cut to fit/);
+  assert.match(p, /shown excerpt itself was shortened to fit the 500-character context cap/);
   assert.match(p, /If the answer might depend on a meeting not shown, say so/);
 });
 
@@ -102,11 +103,20 @@ test('an uncapped prompt does not claim truncation', () => {
   assert.doesNotMatch(p, /TRUNCATED/);
 });
 
-test('the first meeting is kept even when it alone blows the cap — one grounded meeting beats none', () => {
+test('the first meeting is shortened rather than allowed to blow the context cap', () => {
   const lib = new Meetings(memStore());
   lib.save(meeting('m-big', 'Budget', '2026-02-01T10:00:00.000Z', [u('owner', 'budget '.repeat(500))]));
   const p = buildAnswerPrompt('budget?', lib.recall('budget'), { maxChars: 10 });
-  assert.match(p, /MEETING m-big/, 'answering from a truncated meeting beats answering from nothing');
+  const excerpt = p.slice(p.indexOf('EXCERPTS\n\n') + 'EXCERPTS\n\n'.length, p.indexOf('\n\n(TRUNCATED:'));
+  assert.equal(excerpt.length, 10, 'the excerpt section itself stays inside the configured boundary');
+  assert.equal(excerpt, '--- MEETIN');
+  assert.match(p, /shown excerpt itself was shortened to fit the 10-character context cap/);
+});
+
+test('a zero context cap includes no excerpt and still announces every omitted hit', () => {
+  const p = buildAnswerPrompt('what did I commit to?', hitsFor('migration'), { maxChars: 0 });
+  assert.match(p, /\(none — retrieval found no meeting matching this question\)/);
+  assert.match(p, /TRUNCATED: 0 of 1 matching meetings are shown above; 1 more were cut to fit/);
 });
 
 // ── the check: fabrication is caught ─────────────────────────────────────────
@@ -126,6 +136,42 @@ test('a FABRICATED citation is caught and reported — this is the whole point',
   assert.equal(g.ok, false, 'a plausible-looking id for a meeting that never happened is not an answer');
   assert.deepEqual(g.fabricated, ['m-014/u7']);
   assert.deepEqual(g.citedIds, []);
+});
+
+test('a line id duplicated across retrieved meetings is ambiguous and rejected', () => {
+  const sharedId = 'u-shared';
+  const firstLine: Utterance = {
+    id: sharedId,
+    at: '2026-04-01T10:00:00.000Z',
+    speaker: 'owner',
+    text: 'Use Postgres for the archive.',
+  };
+  const secondLine: Utterance = {
+    id: sharedId,
+    at: '2026-04-02T10:00:00.000Z',
+    speaker: 'other',
+    text: 'Use SQLite for the prototype.',
+  };
+  const hits: Hit[] = [
+    {
+      meeting: meeting('m-first', 'Archive', firstLine.at, [firstLine]),
+      score: 1,
+      matched: ['archive'],
+      lines: [firstLine],
+    },
+    {
+      meeting: meeting('m-second', 'Prototype', secondLine.at, [secondLine]),
+      score: 1,
+      matched: ['prototype'],
+      lines: [secondLine],
+    },
+  ];
+
+  const g = groundedAnswer(`The storage choice was Postgres [${sharedId}].`, hits);
+  assert.equal(g.ok, false, 'an id that points at two different lines cannot ground a claim');
+  assert.deepEqual(g.citedIds, []);
+  assert.deepEqual(g.fabricated, [sharedId], 'ambiguous ids use the existing unsafe-citation channel');
+  assert.equal(g.uncited.length, 1);
 });
 
 test('a real citation next to a fabricated one still fails — one invented id spoils the answer', () => {

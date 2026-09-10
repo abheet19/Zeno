@@ -2,29 +2,19 @@
  * Zeno Voice — the voice front-end for the Zeno window. Two modes: push-to-talk
  * (the default) and an opt-in wake word.
  *
- * WHAT THIS IS, PLAINLY. Recognition here is the BROWSER'S built-in engine
- * (webkitSpeechRecognition / the Web Speech API). There is no on-device model in
- * this file, and — the honest part — the Web Speech API is NOT guaranteed to run
- * on your device: in most browsers (Chrome and Edge included, and Safari) it
- * streams your microphone audio to the browser maker's servers to transcribe. So
- * the panel tells the owner that plainly rather than implying the audio stays
- * local; a "local-first" system does not get to be vague about a cloud hop. When
- * the browser provides no engine at all, the panel disables itself instead of
- * pretending to listen.
+ * WHAT THIS IS, PLAINLY. In the desktop application the renderer captures mono
+ * PCM and hands bounded in-memory WAV segments through the context-isolated
+ * preload to a local whisper.cpp service. The model remains warm on the owner's
+ * GPU for low latency; no microphone audio is uploaded or written as a recording.
+ * A browser-only build can still use its Web Speech API, and the UI describes the
+ * provider hop instead of presenting that fallback as local.
  *
  * WHY WAKE MODE IS OPT-IN, AND WHAT IT COSTS. Push-to-talk opens the microphone
  * only while you hold a button. Wake mode holds it open until you switch it off,
- * which means every sound in the room is going to the browser maker to be turned
- * into text — not just the sentences you address to Zeno. That is a real cost and
- * the panel states it in full BEFORE the toggle can be turned on, behind a
- * deliberate confirmation. Zeno has no on-device wake model, so it cannot offer
- * the version of this feature that would keep the room on this machine, and it
- * does not pretend to. Acceptance criterion VOICE-AC-06 asks that untriggered
- * audio live only in a disclosed local ring buffer; with a cloud recogniser that
- * is NOT satisfiable, and the panel says so in those words rather than claiming
- * it. What IS bounded is Zeno's own retention: at most the last 15 seconds of
- * untriggered TRANSCRIPT, in memory, never written down, dropped on switch-off —
- * and the owner is shown exactly what is being held.
+ * which means it can hear every sound in the room. The panel states that before
+ * the toggle can be turned on. Local voice activity detection keeps only a short
+ * pre-roll and bounded utterance in memory; Zeno retains at most the last 15
+ * seconds of untriggered transcript and drops it on switch-off.
  *
  * WHAT SPEAKING DOES. Speech becomes a transcript, which is run through the SAME
  * pure wake + grammar logic the package tests run against — imported from the
@@ -71,7 +61,7 @@ function authHeaders(extra) {
   return h;
 }
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+import { SpeechRecognition, localSpeech, waitForSpeechIdle } from './whisper.js';
 
 // ---- the wake-mode preference, per device ----------------------------------
 // Stored with the version of the disclosure that was accepted. Bumping
@@ -79,17 +69,16 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 // what the microphone does is not consent to this one.
 
 const WAKE_PREF_KEY = 'zeno.voice.wake';
-// v2: the disclosure now also says that what the browser maker keeps of the audio
-// is outside Zeno's bound. That is material information the v1 text did not give,
-// so v1 consent is not consent to this — everyone is re-asked.
-const DISCLOSURE_VERSION = 2;
+// v3 replaces the Windows grammar recognizer with local Whisper and explicitly
+// describes its bounded in-memory PCM path. Earlier consent is re-requested.
+const DISCLOSURE_VERSION = 3;
 
 function readWakePref() {
   try {
     const raw = window.localStorage.getItem(WAKE_PREF_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    return parsed && parsed.on === true && parsed.disclosure === DISCLOSURE_VERSION;
+    return parsed && parsed.on === true && parsed.disclosure === DISCLOSURE_VERSION && (!localSpeech || parsed.engine === 'whisper');
   } catch {
     // Private mode, storage disabled, or corrupt JSON. Default to OFF — the
     // safe direction for a preference about an open microphone.
@@ -100,7 +89,7 @@ function readWakePref() {
 function writeWakePref(on) {
   try {
     if (on) {
-      window.localStorage.setItem(WAKE_PREF_KEY, JSON.stringify({ on: true, disclosure: DISCLOSURE_VERSION }));
+      window.localStorage.setItem(WAKE_PREF_KEY, JSON.stringify({ on: true, disclosure: DISCLOSURE_VERSION, engine: localSpeech ? 'whisper' : 'browser' }));
     } else {
       window.localStorage.removeItem(WAKE_PREF_KEY);
     }
@@ -117,7 +106,13 @@ function writeWakePref(on) {
 
 const DISCLOSURE_TITLE = 'Before you turn on “Listen for Zeno”, read this.';
 
-const DISCLOSURE_POINTS = [
+const DISCLOSURE_POINTS = localSpeech ? [
+  'The microphone stays on until you switch wake mode off. Zeno uses a local Whisper model on this PC and does not send microphone audio to a provider.',
+  'The recognizer hears the whole room. Only a recognized Zeno wake phrase opens a command window. Recognition can make mistakes: inspect every proposed action.',
+  'Voice activity detection keeps a short in-memory pre-roll and bounded speech segment. Zeno keeps up to 15 seconds of untriggered transcript, drops it on switch-off, and writes no audio recording.',
+  'Closing this window stops capture. If you leave wake mode on, this choice is remembered on this device and shown in the listening bar when you reopen Zeno.',
+  'Speaking proposes actions and never approves them. Use the Stop listening control at any time.',
+] : [
   'The microphone stays on. From the moment you switch this on, this page holds the microphone open and listens to the whole room — not only when you are speaking to Zeno.',
   'Your browser sends the audio away to be transcribed. Recognition is the browser’s Web Speech API. In Chrome, Edge and Safari it uploads what the microphone hears to the browser maker’s servers to turn it into text, so it is not on-device and it is not processed on this machine. Zeno has no on-device wake model, so it cannot offer this any other way — and it will not pretend the room stays local.',
   'It keeps listening until you switch it off. There is no timer and no auto-off. Closing this window closes the microphone — but the switch is remembered on this device, so opening Zeno again turns it back on. The bar at the top of the window says so whenever it is open, on every surface, and can switch it off from there.',
@@ -125,7 +120,9 @@ const DISCLOSURE_POINTS = [
   'Speaking still cannot approve anything. A wake word only starts a command; nothing is ever approved by voice, in either mode. Anything that needs your decision waits for your click in this window.',
 ];
 
-const RETENTION_LABEL =
+const RETENTION_LABEL = localSpeech
+  ? 'Local Whisper speech. Up to 15 seconds of untriggered transcript are held in memory and dropped on switch-off; no audio file or cloud upload.'
+  :
   'Retained by Zeno: at most the last ' +
   Math.round(RETENTION_MS / 1000) +
   ' seconds of untriggered transcript, in memory only, never written to disk, dropped when you switch off. This bounds what Zeno keeps, and only what Zeno keeps. It does not make the audio local — the audio already went to your browser maker to be transcribed, and what they keep of it is their policy, not Zeno’s to bound.';
@@ -280,7 +277,7 @@ function mountPanel() {
   ack.type = 'checkbox';
   ack.className = 'zv-ack-box';
   ack.style.cssText = 'margin-top:3px;flex:none';
-  ackLabel.append(ack, el('span', null, 'I understand the microphone stays on and my browser sends the audio to its maker to transcribe.'));
+  ackLabel.append(ack, el('span', null, (localSpeech ? 'I understand the microphone stays on and speech is recognized locally on this PC.' : 'I understand the microphone stays on and my browser sends the audio to its maker to transcribe.')));
 
   const dButtons = el('div', 'zv-disclosure-buttons');
   dButtons.style.cssText = 'display:flex;gap:10px;margin-top:10px;flex-wrap:wrap';
@@ -307,6 +304,7 @@ function mountPanel() {
   const plain = el(
     'p',
     'zv-plain',
+    localSpeech ? 'Speech recognition runs through a local Whisper model. No audio is uploaded. Speaking proposes; only your review can approve.' :
     'Recognition is your browser’s, not Zeno’s: it uploads your audio to the browser maker to be ' +
       'transcribed. Speaking only proposes — nothing is ever approved by voice.',
   );
@@ -324,6 +322,7 @@ function mountPanel() {
     // owner could read as "probably local, probably mine". Neither survives: the
     // engine is not Zeno's, and every browser that offers this API is one of the
     // three named, so there is no comfortable "most" to hide in.
+    localSpeech ? 'The desktop uses a local Whisper model accelerated by the available GPU. Push-to-talk listens while held; wake mode listens until switched off. No audio is recorded or uploaded. Review every proposed action.' :
     'Recognition is your browser’s Web Speech API, not a Zeno model. In the browsers that have ' +
       'it (Chrome, Edge, Safari) it uploads your audio to the browser maker’s servers to ' +
       'transcribe, so it is not on-device, and Zeno can neither see nor limit what they keep. ' +
@@ -455,6 +454,7 @@ const MIC = {
   RECONNECT_GRACE_MS: 1500,
   wakeState: 'off',     // 'off' | 'armed' | 'open', from the pure listener
   windowLeftMs: 0,
+  wakeStarting: false,
 };
 
 // Filled in by the two wiring functions below, so the bar's stop button can
@@ -462,6 +462,48 @@ const MIC = {
 let abortPtt = () => {};
 let abortWake = () => {};
 let turnWakeOff = () => {};
+
+/** Command owns its two recognizers internally. Any named capture owner is a
+ * different surface and blocks both PTT and wake mode. */
+function externalCaptureOwner() {
+  const owner = document.body.dataset.zenoCapture || '';
+  return owner !== '' && owner !== 'command' ? owner : null;
+}
+
+function captureOwnerLabel(owner) {
+  if (owner === 'counsel') return 'Counsel';
+  if (owner === 'ask') return 'Ask Zeno voice conversation';
+  return 'Another voice surface';
+}
+
+// Cross-surface handoff is an explicit UI request, not automatic meeting detection.
+// Native renderer 'end' can precede OS child shutdown, hence the second idle wait.
+window.addEventListener('zeno:release-command-voice', event => {
+  const requestedBy = event.detail?.requestedBy || 'another voice surface';
+  const waits = [turnWakeOff(`Command listening paused for ${requestedBy}.`), abortPtt()];
+  event.detail?.waiters?.push(Promise.all(waits).then(() => waitForSpeechIdle()));
+});
+
+function closeRecognizer(recognition, running) {
+  if (!running) return waitForSpeechIdle();
+  return new Promise(resolve => {
+    const previous = recognition.onend;
+    let settled = false;
+    let timer;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (recognition.onend === ended) recognition.onend = previous;
+      resolve();
+    };
+    const ended = event => { finish(); previous?.call(recognition, event); };
+    recognition.onend = ended;
+    timer = window.setTimeout(finish, 2000);
+    try { recognition.abort(); } catch { finish(); }
+  }).then(() => waitForSpeechIdle());
+}
+
 
 function mountLiveBar() {
   const bar = el('div', 'zv-live');
@@ -474,6 +516,10 @@ function mountLiveBar() {
     // the user-agent's `[hidden]{display:none}`, so the bar would be a
     // permanent empty stripe and `hidden` would mean nothing.
     'display:none', 'gap:10px', 'align-items:center', 'justify-content:center', 'flex-wrap:wrap',
+    // The bar overlaps the application header. Its status text must not make the
+    // navigation beneath it unclickable; only the explicit stop control owns a
+    // pointer target.
+    'pointer-events:none',
     'padding:8px 14px', 'background:var(--amber,#E0A128)', 'color:#12171A',
     'box-shadow:0 2px 10px rgba(0,0,0,.35)',
   ].join(';');
@@ -489,7 +535,7 @@ function mountLiveBar() {
   stop.style.cssText = [
     'margin-left:4px', 'padding:4px 12px', 'border-radius:999px',
     'border:1px solid #12171A', 'background:transparent', 'color:#12171A',
-    'font:700 11.5px system-ui,sans-serif', 'cursor:pointer',
+    'font:700 11.5px system-ui,sans-serif', 'cursor:pointer', 'pointer-events:auto',
   ].join(';');
   stop.addEventListener('click', () => {
     turnWakeOff('Wake mode off. The microphone is closed and the retained transcript was dropped.');
@@ -526,16 +572,22 @@ const FACES = {
   ptt: {
     glyph: '●',
     word: 'MICROPHONE OPEN',
-    detail: 'Push-to-talk. The microphone is open while you hold the button, and your browser is sending what it hears away to be transcribed.',
+    detail: localSpeech ? 'Push-to-talk. The microphone is open while held, and speech is recognized on this PC.' : 'Push-to-talk. The microphone is open while you hold the button, and your browser is sending what it hears away to be transcribed.',
   },
   armed: {
     glyph: '◉',
     word: 'LISTENING FOR “ZENO”',
     detail:
+      localSpeech ? 'The microphone is open. Whisper recognizes speech locally; say “Zeno” to open a command window.' :
       'The microphone is open and your browser is sending the room to its maker to be transcribed. Nothing becomes a command until you say “Zeno”.',
   },
   open: { glyph: '●', word: 'HEARD “ZENO”', detail: 'Command window open. Say your command.' },
 };
+
+function setNodeText(node, value) {
+  const text = String(value);
+  if (node.textContent !== text) node.textContent = text;
+}
 
 /** Draw the microphone's real state in both places. Called by everything that
  * can change it; it decides nothing itself. */
@@ -565,25 +617,30 @@ function paint() {
   live.bar.hidden = !showBar;
   live.bar.style.display = showBar ? 'flex' : 'none';
   if (open) {
-    live.word.textContent = 'MICROPHONE OPEN';
-    live.why.textContent = MIC.ptt
+    setNodeText(live.word, 'MICROPHONE OPEN');
+    setNodeText(live.why, MIC.ptt
       ? 'Push-to-talk is holding it open.'
       : MIC.wakeState === 'open'
         ? 'Wake mode heard “Zeno” — a command window is open.'
-        : 'Wake mode is listening to the whole room for “Zeno”. Your browser is sending what it hears away to be transcribed.';
-    live.glyph.textContent = '●';
+        : localSpeech ? 'Wake mode is listening for “Zeno” with local Whisper speech recognition.' : 'Wake mode is listening to the whole room for “Zeno”. Your browser is sending what it hears away to be transcribed.');
+    setNodeText(live.glyph, '●');
   } else if (MIC.wakeOn) {
-    live.word.textContent = 'WAKE MODE ON · RECONNECTING';
-    live.why.textContent = 'The browser’s recogniser stopped; the microphone reopens in a moment.';
-    live.glyph.textContent = '○';
+    setNodeText(live.word, MIC.wakeStarting ? 'STARTING LOCAL SPEECH' : 'WAKE MODE ON · RECONNECTING');
+    setNodeText(
+      live.why,
+      MIC.wakeStarting
+        ? 'Preparing the local recognizer; the microphone opens when it is ready.'
+        : 'The recognizer stopped; the microphone reopens in a moment.',
+    );
+    setNodeText(live.glyph, '○');
   }
-  live.stop.textContent = MIC.wakeOn ? 'Stop listening' : 'Close the microphone';
+  setNodeText(live.stop, MIC.wakeOn ? 'Stop listening' : 'Close the microphone');
 
   // -- the panel indicator, from the same state.
   const state = MIC.wakeOn ? MIC.wakeState : MIC.ptt ? 'ptt' : 'off';
   const face = FACES[state] || FACES.off;
-  ui.stateGlyph.textContent = face.glyph;
-  ui.stateWord.textContent = face.word;
+  setNodeText(ui.stateGlyph, face.glyph);
+  setNodeText(ui.stateWord, face.word);
 
   let detail = face.detail;
   if (state === 'open') {
@@ -593,9 +650,13 @@ function paint() {
     // showing "armed" while nothing is actually running. This is the one armed
     // moment when the microphone genuinely is not open, so it is also the one
     // moment the detail may say so.
-    detail = 'The browser’s recogniser stopped; reconnecting. The microphone reopens when it does.';
+    detail = MIC.wakeStarting
+      ? 'Preparing the local recognizer. The microphone opens when it is ready.'
+      : localSpeech
+        ? 'The local recognizer stopped; reconnecting. The microphone reopens when it does.'
+        : 'The browser’s recognizer stopped; reconnecting. The microphone reopens when it does.';
   }
-  ui.stateDetail.textContent = detail;
+  setNodeText(ui.stateDetail, detail);
 
   // Colour is an ADDITION to the glyph and the word, never the only signal.
   const tint =
@@ -656,6 +717,16 @@ function wireRecognition() {
   recognition.continuous = false;
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
+  // A held button is an explicit command capture, so local Whisper may use a
+  // short vocabulary hint for the product terms and grammar phrases that are
+  // otherwise easy to confuse (for example, "waiting" and "waving"). Wake
+  // listening stays neutral: biasing an always-open recognizer toward "Zeno"
+  // would increase the chance of a false activation from room audio.
+  if (localSpeech) {
+    recognition.initialPrompt =
+      'Zeno, what is waiting? Show pending items. Show receipts. Verify the ledger. ' +
+      'Open Command. Open Forge. Open Counsel. Add a task. Create a component. Build a feature.';
+  }
 
   let listening = false;
   let finalText = '';
@@ -667,13 +738,14 @@ function wireRecognition() {
   // A restart that fails immediately would spin. Two is enough to ride out a
   // silence timeout; beyond that something is actually wrong, so give up and say so.
   let restarts = 0;
+  let recognitionError = '';
 
   recognition.onresult = (event) => {
     let interim = '';
     finalText = '';
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+    for (let i = 0; i < event.results.length; i += 1) {
       const res = event.results[i];
-      if (res.isFinal) finalText += res[0].transcript;
+      if (res.isFinal) finalText += (finalText ? ' ' : '') + res[0].transcript;
       else interim += res[0].transcript;
     }
     if (interim) {
@@ -690,11 +762,19 @@ function wireRecognition() {
   };
 
   recognition.onerror = (event) => {
-    setStatus(`Recognition error: ${event.error}. Hold the button and try again.`);
+    recognitionError = event.error === 'network'
+      ? 'The browser speech service is unavailable. No transcript was received. Try again when it is reachable, or use typed Ask Zeno.'
+      : `Recognition error: ${event.error}. No transcript was received.`;
+    setStatus(recognitionError);
     // A refused microphone fails instantly and would fail again just as fast,
     // so stop treating the held finger as a reason to reopen. Without this the
     // restart in `onend` retries a permission the owner has already denied.
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') held = false;
+    // Service errors are not silence. Retrying immediately causes the capture
+    // indicator to flash, and cannot repair an unavailable speech backend.
+    if (event.error !== 'no-speech' && event.error !== 'aborted') {
+      held = false;
+      try { recognition.abort(); } catch { /* already stopped */ }
+    }
   };
 
   recognition.onend = () => {
@@ -723,7 +803,8 @@ function wireRecognition() {
     MIC.ptt = false;
     paint();
     ui.button.textContent = 'Hold to talk';
-    setStatus('Idle.');
+    setStatus(recognitionError || 'Idle.');
+    if (recognitionError) return;
     if (text) {
       handleTranscript(text);
     } else if (heardInterim) {
@@ -734,11 +815,18 @@ function wireRecognition() {
     }
   };
 
-  function start() {
+  async function start() {
+    const owner = externalCaptureOwner();
+    if (owner) {
+      held = false;
+      setOutcome(`${captureOwnerLabel(owner)} is using the microphone. Stop it before using Command voice.`, 'warn');
+      return;
+    }
     if (listening) return;
     listening = true;
     finalText = '';
     heardInterim = '';
+    recognitionError = '';
     setHeard('');
     setOutcome('');
     ui.button.textContent = 'Listening…';
@@ -751,9 +839,14 @@ function wireRecognition() {
     MIC.ptt = true;
     paint();
     try {
+      await waitForSpeechIdle();
+      if (!listening || !held) return;
       recognition.start();
     } catch {
-      // start() throws if called while already starting; ignore and let onend reset.
+      held = false; listening = false; MIC.ptt = false;
+      ui.button.textContent = 'Hold to talk';
+      setOutcome('The microphone did not become available. Stop other listening and retry.', 'warn');
+      paint();
     }
   }
 
@@ -771,15 +864,15 @@ function wireRecognition() {
   // finish and hand back a final result, which is right on button release and
   // wrong when the owner is saying "off".
   abortPtt = () => {
-    try {
-      recognition.abort();
-    } catch {
-      /* no-op */
-    }
+    held = false;
+    finalText = '';
+    heardInterim = '';
+    const closing = closeRecognizer(recognition, listening);
     listening = false;
     MIC.ptt = false;
     ui.button.textContent = 'Hold to talk';
     paint();
+    return closing;
   };
 
   // Push-to-talk: hold to talk, release to send.
@@ -809,6 +902,9 @@ function wireRecognition() {
     // `onend` reopens the microphone while the finger is still down. Releasing
     // is precisely the moment it no longer is.
     held = false;
+    if (listening && recognition.active === false) {
+      listening = false; MIC.ptt = false; ui.button.textContent = 'Hold to talk'; paint();
+    }
     try {
       if (e && e.pointerId !== undefined && ui.button.hasPointerCapture(e.pointerId)) {
         ui.button.releasePointerCapture(e.pointerId);
@@ -826,6 +922,20 @@ function wireRecognition() {
   // nothing — and an open microphone is never the failure mode.
   window.addEventListener('pointerup', release);
   window.addEventListener('pointercancel', release);
+  ui.button.addEventListener('keydown', (e) => {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    if (e.repeat || held || ui.button.disabled) return;
+    held = true;
+    restarts = 0;
+    start();
+  });
+  ui.button.addEventListener('keyup', (e) => {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    release();
+  });
+  ui.button.addEventListener('blur', () => { if (held) abortPtt(); });
 }
 
 // ---- wake mode: opt-in, disclosed, and always visible while it runs ---------
@@ -848,6 +958,7 @@ function wireWake() {
   let restartTimer = null;  // pending auto-restart
   let uiTimer = null;       // the countdown / retention refresher
   let consecutiveFailures = 0;
+  let starting = false;
 
   // -- rendering ---------------------------------------------------------------
 
@@ -859,6 +970,7 @@ function wireWake() {
     MIC.wakeOn = wakeOn;
     const wasUp = MIC.wakeEngineUp;
     MIC.wakeEngineUp = wakeOn && engineUp;
+    MIC.wakeStarting = wakeOn && starting;
     if (wasUp && !MIC.wakeEngineUp) MIC.engineDownAt = Date.now();
     if (MIC.wakeEngineUp) MIC.engineDownAt = 0;
     MIC.wakeState = wakeOn ? listener.state : 'off';
@@ -866,7 +978,7 @@ function wireWake() {
     paint();
 
     ui.wakeToggle.setAttribute('aria-pressed', wakeOn ? 'true' : 'false');
-    ui.wakeToggle.textContent = wakeOn ? 'Stop listening for “Zeno”' : 'Listen for “Zeno”';
+    setNodeText(ui.wakeToggle, wakeOn ? 'Stop listening for “Zeno”' : 'Listen for “Zeno”');
     ui.wakeToggle.style.color = wakeOn ? 'var(--ink,#ECEBE6)' : 'var(--ink-2,#9AA1AC)';
     ui.wakeToggle.style.borderColor = wakeOn ? 'var(--cyan-dim,#1E6B76)' : 'var(--rule-2,#2C353B)';
 
@@ -874,7 +986,7 @@ function wireWake() {
     // The machine already dropped the buffer on disarm; blank the rendered copy
     // too, so a hidden node can never still be holding the words on screen.
     const held = wakeOn ? listener.retained(Date.now()) : '';
-    ui.retentionText.textContent = held ? `Holding now: “${held}”` : 'Holding now: nothing.';
+    setNodeText(ui.retentionText, held ? `Holding now: “${held}”` : 'Holding now: nothing.');
 
     // One microphone at a time. While wake mode is on, the hold button would be
     // a second recogniser fighting the first, so it is disabled and says why.
@@ -888,6 +1000,7 @@ function wireWake() {
 
   function startEngine() {
     if (!wakeOn || engineUp) return;
+    starting = true;
     // Claim the microphone BEFORE asking for it, and keep the claim if start()
     // throws. The only throw a browser raises here is "already started", which
     // means the engine is running and the room is going out — so treating the
@@ -911,6 +1024,7 @@ function wireWake() {
   }
 
   recognition.onstart = () => {
+    starting = false;
     if (!wakeOn) {
       // THE RACE THAT LISTENS SILENTLY. `start()` is asynchronous: the engine is
       // "starting" for as long as it takes to reach the recognition service, and
@@ -935,6 +1049,7 @@ function wireWake() {
   };
 
   recognition.onend = () => {
+    starting = false;
     engineUp = false;
     render();
     // Browsers end a continuous session periodically (silence timeouts, tab
@@ -958,7 +1073,13 @@ function wireWake() {
       return;
     }
     if (err === 'no-speech' || err === 'aborted') return; // ordinary in a continuous session
-    setStatus(`Recognition error: ${err}. Wake mode will keep trying.`);
+    // A successful onstart is not a successful transcription. Electron can
+    // emit start -> network error -> end forever; resetting its restart count
+    // on start hid that failure and made the whole voice UI flicker. Stop on a
+    // service failure and require an intentional retry.
+    turnOff(err === 'network'
+      ? 'The browser speech service is unavailable. Wake mode is off and the microphone is closed. Use typed Ask Zeno or retry when the speech service is reachable.'
+      : `Recognition error: ${err}. Wake mode is off and the microphone is closed.`);
   };
 
   recognition.onresult = (event) => {
@@ -974,6 +1095,9 @@ function wireWake() {
       const text = res[0] ? res[0].transcript : '';
       apply(listener.hear(text, Boolean(res.isFinal), now));
     }
+    // WakeListener owns the disclosed short retention window. The native
+    // Web-Speech-shaped adapter must not keep a second cumulative room transcript.
+    if (localSpeech) recognition.clearResults?.();
     render();
   };
 
@@ -1009,12 +1133,19 @@ function wireWake() {
 
   // -- the switch, and the gate in front of it --------------------------------
 
-  function turnOn() {
+  async function turnOn() {
+    const owner = externalCaptureOwner();
+    if (owner) {
+      setOutcome(`${captureOwnerLabel(owner)} is using the microphone. Stop it before enabling Listen for Zeno.`, 'warn');
+      return;
+    }
     wakeOn = true;
+    starting = true;
     consecutiveFailures = 0;
     listener.arm();
     writeWakePref(true);
     setStatus(
+      localSpeech ? 'Wake mode on. The microphone stays open and Whisper recognizes speech locally until you switch it off.' :
       'Wake mode on. The microphone stays open — and your browser keeps sending the room to its ' +
         'maker to be transcribed — until you switch it off.',
     );
@@ -1024,7 +1155,12 @@ function wireWake() {
     // the instant wake mode is being turned on — a held button, or a second
     // pointer, leaves a push-to-talk session open underneath the wake session,
     // and the indicator would then describe only one of the two.
-    abortPtt();
+    render();
+    try { await abortPtt(); await waitForSpeechIdle(); } catch {
+      turnOff('The previous microphone session did not close. Retry after stopping other capture.');
+      return;
+    }
+    if (!wakeOn) return;
     if (uiTimer === null) uiTimer = window.setInterval(pulse, 200);
     startEngine();
     render();
@@ -1032,6 +1168,7 @@ function wireWake() {
 
   function turnOff(reason) {
     wakeOn = false;
+    starting = false;
     listener.disarm(); // drops the retained transcript
     writeWakePref(false);
     if (restartTimer !== null) {
@@ -1049,23 +1186,20 @@ function wireWake() {
     // there is no half-sentence worth keeping from a microphone someone just
     // closed. It also settles the start/stop race: `abort()` ends a session that
     // is still coming up, which `stop()` does not reliably do.
-    try {
-      recognition.abort();
-    } catch {
-      /* no-op */
-    }
+    const closing = closeRecognizer(recognition, engineUp);
     engineUp = false;
     setHeard('');
     setStatus('Idle.');
     if (reason) setOutcome(reason, 'warn');
     render();
+    return closing;
   }
 
   // The bar outside the surface, and a page teardown, need to reach this mode's
   // switch. Published here rather than exported so there is still exactly one
   // implementation of "off".
   turnWakeOff = (reason) => {
-    if (wakeOn) turnOff(reason);
+    return wakeOn ? turnOff(reason) : waitForSpeechIdle();
   };
   abortWake = () => {
     try {
@@ -1081,6 +1215,30 @@ function wireWake() {
   function pulse() {
     apply(listener.tick(Date.now()));
     render();
+  }
+
+  /**
+   * Handle the wake CTA through one named boundary. Counsel or Ask voice can own
+   * the microphone, so reach turnOn's ownership guard before drawing the wake
+   * disclosure over the active surface.
+   */
+  function toggleWake() {
+    if (wakeOn) {
+      // Turning OFF is one click, always. Only turning ON is gated.
+      turnOff(
+        localSpeech
+          ? 'Wake mode off. The microphone is closed and the retained transcript was dropped. No microphone audio was uploaded.'
+          : 'Wake mode off. The microphone is closed and the transcript Zeno held was dropped. Audio ' +
+            'your browser already sent to be transcribed is not Zeno’s to take back.',
+      );
+      return;
+    }
+    if (externalCaptureOwner()) {
+      void turnOn();
+      return;
+    }
+    if (ui.disclosure.hidden) openDisclosure();
+    else closeDisclosure();
   }
 
   function openDisclosure() {
@@ -1126,21 +1284,7 @@ function wireWake() {
   // button, and that stays disabled until the box is ticked.
   ui.backdrop.addEventListener('click', () => closeDisclosure());
 
-  ui.wakeToggle.addEventListener('click', () => {
-    if (wakeOn) {
-      // Turning OFF is one click, always. Only turning ON is gated.
-      // Switching off is the moment an owner is most likely to read "closed and
-      // dropped" as "undone". It is not: what already went to be transcribed is
-      // gone from Zeno's reach, and saying so here costs one clause.
-      turnOff(
-        'Wake mode off. The microphone is closed and the transcript Zeno held was dropped. Audio ' +
-          'your browser already sent to be transcribed is not Zeno’s to take back.',
-      );
-      return;
-    }
-    if (ui.disclosure.hidden) openDisclosure();
-    else closeDisclosure();
-  });
+  ui.wakeToggle.addEventListener('click', toggleWake);
 
   ui.ack.addEventListener('change', () => {
     ui.confirm.disabled = !ui.ack.checked;
@@ -1190,6 +1334,16 @@ function handleOutcome(result, spoken) {
     case 'add_task':
       setOutcome(`Task heard: “${intent.title}”. (Add-task wiring is a later slice.)`, 'ok');
       break;
+    case 'navigate': {
+      const destination = document.querySelector(`[data-nav="${intent.target}"]`);
+      if (!destination || destination.tagName !== 'BUTTON' || typeof destination.click !== 'function') {
+        setOutcome(`Could not open ${intent.target}; its navigation control is unavailable.`, 'warn');
+        break;
+      }
+      destination.click();
+      setOutcome(`Opened ${intent.target[0].toUpperCase()}${intent.target.slice(1)}.`, 'ok');
+      break;
+    }
     case 'delegate':
       delegateTask(intent);
       break;

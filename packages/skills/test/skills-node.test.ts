@@ -11,11 +11,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { loadLibrary, nodeSkillReader, SKILL_FILE } from '../src/index.js';
+import { loadLibrary, MAX_SKILL_SOURCE_BYTES, nodeSkillReader, SKILL_FILE } from '../src/index.js';
 
 /** The library `npx skills add` writes into, four levels up from dist/test. */
 const INSTALLED = fileURLToPath(new URL('../../../../.agents/skills', import.meta.url));
@@ -85,6 +85,44 @@ test('a SKILL.md that cannot be read fails that skill alone', () => {
     assert.match(library.failed[0]?.reason ?? '', /could not be read/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an oversized SKILL.md fails that skill before its contents are allocated', () => {
+  const dir = tempLibrary({ good: '---\nname: good\ndescription: d\n---\nBody.\n' });
+  try {
+    mkdirSync(join(dir, 'huge'), { recursive: true });
+    const path = join(dir, 'huge', SKILL_FILE);
+    writeFileSync(path, '---\nname: huge\ndescription: d\n---\n', 'utf8');
+    truncateSync(path, MAX_SKILL_SOURCE_BYTES + 1);
+    const library = loadLibrary(nodeSkillReader(dir));
+    assert.deepEqual(library.skills.map((skill) => skill.id), ['good']);
+    assert.deepEqual(library.failed.map((failure) => failure.id), ['huge']);
+    assert.match(library.failed[0]?.reason ?? '', /limit/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a SKILL.md link or reparse point cannot escape the library', (t) => {
+  const dir = tempLibrary({ good: '---\nname: good\ndescription: d\n---\nBody.\n' });
+  const outside = mkdtempSync(join(tmpdir(), 'zeno-skills-outside-'));
+  try {
+    writeFileSync(join(outside, SKILL_FILE), '---\nname: escaped\ndescription: private\n---\nMust not load.\n', 'utf8');
+    mkdirSync(join(dir, 'escaped'), { recursive: true });
+    try {
+      symlinkSync(join(outside, SKILL_FILE), join(dir, 'escaped', SKILL_FILE), 'file');
+    } catch (error) {
+      t.skip(`links unavailable on this machine: ${(error as Error).message}`);
+      return;
+    }
+    const library = loadLibrary(nodeSkillReader(dir));
+    assert.deepEqual(library.skills.map((skill) => skill.id), ['good']);
+    assert.deepEqual(library.failed.map((failure) => failure.id), ['escaped']);
+    assert.match(library.failed[0]?.reason ?? '', /outside the library/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
