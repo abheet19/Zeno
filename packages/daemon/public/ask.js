@@ -181,8 +181,8 @@ function mountPanel() {
     'p',
     'za-privacy',
     localSpeech
-      ? 'Voice input uses local Whisper. Replies use the selected system voice. Voice can ask and delegate, but it can never confirm hosted work or approve a capsule.'
-      : 'Voice input falls back to the browser speech service, which may send microphone audio to the browser maker. Replies use the selected system/browser voice. Voice never confirms or approves.',
+      ? 'Voice input uses local Whisper. Zeno does not identify who is speaking; while voice conversation is on, any clear speech near the microphone can become a turn. Replies use the selected system voice. Voice can ask and delegate, but it can never confirm hosted work or approve a capsule.'
+      : 'Voice input falls back to the browser speech service, which may send microphone audio to the browser maker. Zeno does not identify who is speaking; while voice conversation is on, any clear speech near the microphone can become a turn. Replies use the selected system/browser voice. Voice never confirms or approves.',
   );
   privacy.style.cssText = [
     'margin:0', 'padding:0 12px 10px', 'font-size:11px', 'line-height:1.45',

@@ -163,7 +163,7 @@ Three rules fall out of that, and they are the whole product:
 | **◎ Counsel** | meeting notes where every item cites its source line | Working |
 | **Local models** | drives [Ollama](https://ollama.com) over loopback — offline, $0 | Working · best-effort |
 | **Mesh** · 2nd device | pairing, sealed envelopes, convergent replication | Protocol core · no phone app yet |
-| **Voice** | push-to-talk + wake phrase; local Whisper in the desktop when separately installed, Web Speech fallback in a browser; no utterance can approve | Early |
+| **Voice** | push-to-talk + wake phrase + turn-based talk-back; reports a spoken Work item as added only after the daemon proves storage; no utterance can approve | Early |
 
 <sub>Honest status, not a roadmap promise. The unglamorous edges are in [what it doesn't do yet](#-what-it-doesnt-do-yet).</sub>
 

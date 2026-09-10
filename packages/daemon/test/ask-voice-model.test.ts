@@ -119,6 +119,8 @@ test('Ask voice wiring cannot approve and hosted work remains click-confirmed', 
   assert.match(source, /speechSynthesis/);
   assert.match(source, /dataset\.zenoCapture = 'ask'/);
   assert.match(source, /Voice cannot approve/);
+  assert.match(source, /Zeno does not identify who is speaking/);
+  assert.match(source, /any clear speech near the microphone can become a turn/);
 });
 
 test('Command voice yields to every external microphone owner', () => {
@@ -127,6 +129,16 @@ test('Command voice yields to every external microphone owner', () => {
   assert.match(source, /owner !== '' && owner !== 'command'/);
   assert.match(source, /if \(externalCaptureOwner\(\)\)/);
   assert.match(source, /requestedBy/);
+});
+
+test('Command voice adds a spoken task only after the Work API proves the stored item', () => {
+  const source = readFileSync(new URL('../../public/voice.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /Add-task wiring is a later slice/);
+  assert.match(source, /case 'add_task':\s+void addTask\(intent\)/);
+  assert.match(source, /async function addTask\(intent\)[\s\S]*fetch\('\/work'/);
+  assert.match(source, /headers: authHeaders\(\{ 'content-type': 'application\/json' \}\)/);
+  assert.match(source, /String\(item\?\.title \|\| ''\) !== title/);
+  assert.match(source, /new CustomEvent\('zeno:state'/);
 });
 
 test('Counsel only answers from saved meetings after active capture ends', () => {

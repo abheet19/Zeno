@@ -172,13 +172,16 @@ Test local Whisper and browser Web Speech as separate products; never merge thei
 ### Push-to-talk
 
 1. Hold the microphone control, say a navigation command, then release.
-2. Repeat with a proposal command and a delegation command.
-3. Release early, cancel, deny microphone permission and unplug/switch the input device.
+2. Repeat with a proposal command, a delegation command, and `Zeno, add a task to review release`.
+3. Confirm the new Work item appears once with the exact title, then exercise a daemon refusal and
+   an unauthenticated/read-only window; neither failure may claim that the task was added.
+4. Release early, cancel, deny microphone permission and unplug/switch the input device.
 
-Pass criteria: the microphone is open only while held, the active recognizer is named, recognized
-text is shown for correction, and every consequential result is a proposal. The voice module has no
-approval route. A spoken file request currently creates a reviewable scaffold rather than finished
-implementation; `add_task` is explicitly not wired.
+Pass criteria: the microphone is open only while held, the active recognizer is named, and recognized
+text is shown for correction. File changes remain reviewable proposals. A backlog addition is reported
+as successful only after authenticated `/work` returns a non-empty id and the exact spoken title. The
+voice module has no approval route, and a spoken file request creates a reviewable scaffold rather than
+finished implementation.
 
 ### Wake mode
 

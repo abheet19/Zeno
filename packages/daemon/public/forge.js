@@ -533,6 +533,21 @@ export function initForge(section) {
     if (input) input.focus();
   }
 
+  function closeActiveSession() {
+    const session = activeSession();
+    if (!session || session.running || session.routing || S.sessions.length <= 1) return;
+    const index = S.sessions.indexOf(session);
+    if (index < 0) return;
+    const hasUnsavedState = session.draft.trim() || session.hostedConfirmation
+      || session.chat.length || session.runs.length || session.proposals.length;
+    if (hasUnsavedState
+      && !window.confirm(`Close ${session.name}?\n\nIts unsent task, in-window chat, and run history will be removed. Files, approvals, and receipts remain.`)) return;
+    S.sessions.splice(index, 1);
+    S.selectedSessionId = S.sessions[Math.min(index, S.sessions.length - 1)].id;
+    paintC();
+    paintE();
+  }
+
   const firstSession = createSession();
   S.sessions.push(firstSession);
   S.selectedSessionId = firstSession.id;
@@ -2445,6 +2460,15 @@ export function initForge(section) {
     addAgent.title = 'New agent session';
     addAgent.disabled = S.sessions.length >= 8;
     add(sessions, addAgent);
+    const closeAgent = btn('fgsession-add', '×', closeActiveSession);
+    closeAgent.setAttribute('aria-label', 'Close selected agent session');
+    closeAgent.disabled = S.sessions.length <= 1 || session.running || session.routing;
+    closeAgent.title = S.sessions.length <= 1
+      ? 'Forge keeps one agent session open.'
+      : session.running || session.routing
+        ? 'Stop or wait for this agent session before closing it.'
+        : `Close ${session.name}`;
+    add(sessions, closeAgent);
     if (S.streamDown) {
       const chip = el('span', 'chip');
       chip.dataset.state = 'warn';

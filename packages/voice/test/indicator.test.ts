@@ -234,27 +234,48 @@ interface Panel {
   arm(): Promise<void>;
 }
 
+interface FetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+  cache?: string;
+  body?: string;
+}
+
+interface FetchResponse {
+  ok: boolean;
+  status: number;
+  json(): Promise<unknown>;
+}
+
+type Fetcher = (input: string, init?: FetchInit) => Promise<FetchResponse>;
+
+interface MountOptions {
+  token?: string;
+  fetcher?: Fetcher;
+}
+
 let loads = 0;
 
 /**
  * Install the stub, load the shipped panel into it, and hand back the handles
  * the assertions need. Each call is a fresh page.
  */
-async function mount(pref?: string): Promise<Panel> {
+async function mount(pref?: string, options: MountOptions = {}): Promise<Panel> {
   FakeRecognition.made = [];
   FakeRecognition.dropStopWhileStarting = true;
   const body = createElement('body');
   const store = new Map<string, string>();
   if (pref !== undefined) store.set('zeno.voice.wake', pref);
 
+  const tokenMeta = createElement('meta');
+  tokenMeta.setAttribute('content', options.token ?? '');
   const documentStub = {
     body,
     createElement,
     querySelector(sel: string): Node | null {
-      // The panel asks for two things that do not exist in this stub: the token
-      // meta tag (absent means "cannot propose", which is fine here) and its
-      // mount point (absent means it mounts on <body>, which is the fallback
-      // the real shell also relies on).
+      if (sel === 'meta[name="zeno-token"]') return options.token ? tokenMeta : null;
+      // The mount point does not exist in this stub, so the panel uses <body>,
+      // which is the fallback the real shell also relies on.
       if (!sel.startsWith('.')) return null;
       return byClass(body, sel.slice(1))[0] ?? null;
     },
@@ -275,10 +296,20 @@ async function mount(pref?: string): Promise<Panel> {
     setInterval: (fn: () => void, ms: number) => setInterval(fn, ms),
     clearInterval: (h: NodeJS.Timeout) => clearInterval(h),
     addEventListener: () => {},
+    dispatchEvent: () => true,
   };
   const g = globalThis as unknown as Record<string, unknown>;
   g['document'] = documentStub;
   g['window'] = windowStub;
+  g['fetch'] = options.fetcher ?? (async () => { throw new Error('unexpected network request'); });
+  g['CustomEvent'] = class {
+    type: string;
+    detail: unknown;
+    constructor(type: string, init?: { detail?: unknown }) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  };
 
   // A fresh query string forces a fresh module evaluation: the panel does its
   // whole setup at import time, so "reload the page" is "import it again".
@@ -338,6 +369,14 @@ function countTextWrites(node: Node): () => number {
 
 const tick = (ms: number): Promise<void> => new Promise((r) => void setTimeout(r, ms));
 
+async function speakFinal(panel: Panel, transcript: string): Promise<void> {
+  panel.one('zv-ptt').fire('pointerdown');
+  await tick(30);
+  panel.ptt.say(transcript, true);
+  panel.one('zv-ptt').fire('pointerup');
+  await tick(40);
+}
+
 /* ---- 1. push-to-talk ------------------------------------------------------ */
 
 test('SILENT LISTENING — holding the talk button is never described as a closed microphone', async (t) => {
@@ -368,6 +407,83 @@ test('SILENT LISTENING — holding the talk button is never described as a close
   await tick(40);
   assert.equal(p.micOpen(), false, 'releasing the button should close the microphone');
   assert.equal(p.barShown(), false, 'and the bar should go with it');
+});
+
+test('voice add-task posts the exact title and reports success only after the daemon proves storage', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const calls: Array<{ input: string; init?: FetchInit }> = [];
+  let finishRequest!: (response: FetchResponse) => void;
+  const response = new Promise<FetchResponse>((resolve) => { finishRequest = resolve; });
+  const p = await mount(undefined, {
+    token: 'owner-token',
+    fetcher: async (input, init) => {
+      calls.push(init === undefined ? { input } : { input, init });
+      return response;
+    },
+  });
+
+  await speakFinal(p, 'Zeno, add a task to review release');
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.input, '/work');
+  assert.equal(calls[0]?.init?.method, 'POST');
+  assert.equal(calls[0]?.init?.headers?.['x-zeno-token'], 'owner-token');
+  assert.deepEqual(JSON.parse(calls[0]?.init?.body ?? ''), { title: 'review release' });
+  assert.doesNotMatch(text(p.body), /Added “review release”/, 'success must wait for daemon proof');
+
+  finishRequest({ ok: true, status: 200, json: async () => ({ item: { id: 'work-7', title: 'review release' } }) });
+  await tick(40);
+  assert.match(text(p.body), /Added “review release” to Work \(work-7\)\./);
+});
+
+test('voice add-task refuses an unauthenticated window without making a request', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  let requests = 0;
+  const p = await mount(undefined, {
+    fetcher: async () => {
+      requests += 1;
+      throw new Error('must not be called');
+    },
+  });
+
+  await speakFinal(p, 'Zeno, add a task to review release');
+
+  assert.equal(requests, 0);
+  assert.match(text(p.body), /cannot add work \(no token was injected\)/);
+});
+
+test('voice add-task surfaces a daemon refusal without claiming success', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount(undefined, {
+    token: 'owner-token',
+    fetcher: async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: { message: 'Work is unavailable.', resolve: 'Retry later.' } }),
+    }),
+  });
+
+  await speakFinal(p, 'Zeno, add a task to review release');
+
+  assert.match(text(p.body), /Could not add the task: Work is unavailable\. Retry later\./);
+  assert.doesNotMatch(text(p.body), /Added “review release”/);
+});
+
+test('voice add-task rejects a mismatched success response as unproven', async (t) => {
+  if (!AVAILABLE) return t.skip('no served panel');
+  const p = await mount(undefined, {
+    token: 'owner-token',
+    fetcher: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ item: { id: 'work-8', title: 'different task' } }),
+    }),
+  });
+
+  await speakFinal(p, 'Zeno, add a task to review release');
+
+  assert.match(text(p.body), /without proving it stored this exact task/);
+  assert.doesNotMatch(text(p.body), /Added “review release”/);
 });
 
 /* ---- 2. the bar cannot be hidden by a surface ----------------------------- */
@@ -533,7 +649,7 @@ test('SILENT LISTENING — a remembered switch reopens the microphone with the b
   // is a microphone opening without a gesture, on whatever surface the shell
   // restores — so the bar has to be up from the first paint, not once the owner
   // navigates back to the surface the panel lives on.
-  const p = await mount(JSON.stringify({ on: true, disclosure: 3 }));
+  const p = await mount(JSON.stringify({ on: true, disclosure: 4 }));
 
   assert.equal(p.micOpen(), true, 'a remembered switch should re-arm');
   assert.equal(p.barShown(), true, 'and it must announce itself before anything else is shown');

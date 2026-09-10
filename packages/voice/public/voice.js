@@ -20,11 +20,12 @@
  * pure wake + grammar logic the package tests run against — imported from the
  * compiled module, not re-implemented here. That is why wake matching in this
  * file is `detectWake` inside `WakeListener` and not a regex written for the
- * browser. A recognised command becomes a PROPOSAL: for a `propose_write` it
- * calls POST /previews. It NEVER calls /approvals, in either mode. Approving a
- * proposal — the one act that turns it into an effect — happens with your eyes
- * and your click in this window. Voice cannot approve. That is the whole safety
- * story, and it is structural: this file has no code path to /approvals.
+ * browser. A recognised `add_task` creates a low-risk backlog record through
+ * authenticated POST /work and is announced only after the daemon proves the
+ * exact stored id and title. File changes remain proposals: `propose_write`
+ * calls POST /previews. This file NEVER calls /approvals, in either mode.
+ * Approving a proposal happens with your eyes and your click in this window.
+ * Voice cannot approve; that boundary is structural.
  *
  * WHAT SPEAKING A JOB DOES. A `delegate` command ("build me a slugify utility")
  * asks POST /delegate, and a coding agent runs headless in a throwaway copy of
@@ -69,9 +70,9 @@ import { SpeechRecognition, localSpeech, waitForSpeechIdle } from './whisper.js'
 // what the microphone does is not consent to this one.
 
 const WAKE_PREF_KEY = 'zeno.voice.wake';
-// v3 replaces the Windows grammar recognizer with local Whisper and explicitly
-// describes its bounded in-memory PCM path. Earlier consent is re-requested.
-const DISCLOSURE_VERSION = 3;
+// v4 discloses that voice can create a Work item directly. Earlier consent,
+// including v3 consent to the local Whisper path, is re-requested.
+const DISCLOSURE_VERSION = 4;
 
 function readWakePref() {
   try {
@@ -108,16 +109,16 @@ const DISCLOSURE_TITLE = 'Before you turn on “Listen for Zeno”, read this.';
 
 const DISCLOSURE_POINTS = localSpeech ? [
   'The microphone stays on until you switch wake mode off. Zeno uses a local Whisper model on this PC and does not send microphone audio to a provider.',
-  'The recognizer hears the whole room. Only a recognized Zeno wake phrase opens a command window. Recognition can make mistakes: inspect every proposed action.',
+  'The recognizer hears the whole room. Only a recognized Zeno wake phrase opens a command window. Recognition can make mistakes: inspect every transcript and result.',
   'Voice activity detection keeps a short in-memory pre-roll and bounded speech segment. Zeno keeps up to 15 seconds of untriggered transcript, drops it on switch-off, and writes no audio recording.',
   'Closing this window stops capture. If you leave wake mode on, this choice is remembered on this device and shown in the listening bar when you reopen Zeno.',
-  'Speaking proposes actions and never approves them. Use the Stop listening control at any time.',
+  'Speaking can navigate, read state, and add a Work item directly. File changes remain proposals and voice never approves them. Use the Stop listening control at any time.',
 ] : [
   'The microphone stays on. From the moment you switch this on, this page holds the microphone open and listens to the whole room — not only when you are speaking to Zeno.',
   'Your browser sends the audio away to be transcribed. Recognition is the browser’s Web Speech API. In Chrome, Edge and Safari it uploads what the microphone hears to the browser maker’s servers to turn it into text, so it is not on-device and it is not processed on this machine. Zeno has no on-device wake model, so it cannot offer this any other way — and it will not pretend the room stays local.',
   'It keeps listening until you switch it off. There is no timer and no auto-off. Closing this window closes the microphone — but the switch is remembered on this device, so opening Zeno again turns it back on. The bar at the top of the window says so whenever it is open, on every surface, and can switch it off from there.',
   'What Zeno itself keeps is bounded — and only that. At most the last 15 seconds of untriggered transcript, held in memory, never written to disk, and dropped the instant you switch off. You can see exactly what is being held while it is on. That is a bound on Zeno’s retention, not on the audio: the audio has already left this machine, and how long your browser maker keeps it is their policy, which Zeno cannot see, limit or delete.',
-  'Speaking still cannot approve anything. A wake word only starts a command; nothing is ever approved by voice, in either mode. Anything that needs your decision waits for your click in this window.',
+  'Speaking can navigate, read state, and add a Work item directly. File changes remain proposals. A wake word only starts a command; nothing is ever approved by voice, in either mode. Anything that needs your decision waits for your click in this window.',
 ];
 
 const RETENTION_LABEL = localSpeech
@@ -304,9 +305,9 @@ function mountPanel() {
   const plain = el(
     'p',
     'zv-plain',
-    localSpeech ? 'Speech recognition runs through a local Whisper model. No audio is uploaded. Speaking proposes; only your review can approve.' :
+    localSpeech ? 'Speech recognition runs through a local Whisper model. No audio is uploaded. Voice can add a Work item directly; file changes wait for your review; voice never approves.' :
     'Recognition is your browser’s, not Zeno’s: it uploads your audio to the browser maker to be ' +
-      'transcribed. Speaking only proposes — nothing is ever approved by voice.',
+      'transcribed. Voice can add a Work item directly; file changes wait for your review; nothing is ever approved by voice.',
   );
   plain.style.cssText = 'margin:0;font-size:11.5px;line-height:1.5;color:var(--ink-2,#9AA1AC)';
 
@@ -322,11 +323,11 @@ function mountPanel() {
     // owner could read as "probably local, probably mine". Neither survives: the
     // engine is not Zeno's, and every browser that offers this API is one of the
     // three named, so there is no comfortable "most" to hide in.
-    localSpeech ? 'The desktop uses a local Whisper model accelerated by the available GPU. Push-to-talk listens while held; wake mode listens until switched off. No audio is recorded or uploaded. Review every proposed action.' :
+    localSpeech ? 'The desktop uses a local Whisper model accelerated by the available GPU. Push-to-talk listens while held; wake mode listens until switched off. No audio is recorded or uploaded. A spoken add-task command creates a Work item directly and reports success only after the daemon proves the exact stored item. File changes wait for review; voice cannot approve.' :
     'Recognition is your browser’s Web Speech API, not a Zeno model. In the browsers that have ' +
       'it (Chrome, Edge, Safari) it uploads your audio to the browser maker’s servers to ' +
       'transcribe, so it is not on-device, and Zeno can neither see nor limit what they keep. ' +
-      'Speaking only proposes — nothing is ever approved by voice; anything that needs ' +
+      'A spoken add-task command creates a Work item directly and reports success only after the daemon proves the exact stored item. File changes wait for review; nothing is ever approved by voice. Anything that needs ' +
       'your decision waits for your click in this window. Push-to-talk opens the microphone only ' +
       'while you hold the button; wake mode holds it open until you switch it off.',
   );
@@ -1315,6 +1316,50 @@ function handleTranscript(text) {
   handleOutcome(interpret(text), text);
 }
 
+/** Add the spoken item to the backlog, then prove the daemon stored this item. */
+async function addTask(intent) {
+  const title = String(intent?.title || '').trim();
+  if (!title) {
+    setOutcome('The task had no title, so nothing was added.', 'warn');
+    return;
+  }
+  if (!OWNER_TOKEN) {
+    setOutcome('This browser cannot add work (no token was injected). Open the window the daemon serves.', 'warn');
+    return;
+  }
+
+  setOutcome(`Adding task: “${title}”…`);
+  try {
+    const res = await fetch('/work', {
+      method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }),
+      cache: 'no-store',
+      body: JSON.stringify({ title }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = (data && data.error) || {};
+      const reason = String(err.message || res.status).trim();
+      const resolution = String(err.resolve || '').trim();
+      const separator = resolution && /[.!?]$/.test(reason) ? ' ' : '. ';
+      setOutcome(`Could not add the task: ${reason}${resolution ? `${separator}${resolution}` : ''}`, 'warn');
+      return;
+    }
+
+    const item = data && data.item;
+    const itemId = String(item?.id || '').trim();
+    if (!itemId || String(item?.title || '') !== title) {
+      setOutcome('The daemon answered without proving it stored this exact task. Refresh Work before retrying.', 'warn');
+      return;
+    }
+
+    window.dispatchEvent(new CustomEvent('zeno:state', { detail: { source: 'voice-add-task', itemId } }));
+    setOutcome(`Added “${title}” to Work (${itemId}).`, 'ok');
+  } catch (error) {
+    setOutcome(`Network error while adding the task: ${error?.message || error}`, 'warn');
+  }
+}
+
 /**
  * Act on one Outcome. Both modes land here, so a command means the same thing
  * whether it was pushed-to-talk or woken — including the refusal that says
@@ -1332,7 +1377,7 @@ function handleOutcome(result, spoken) {
       proposeWrite(intent);
       break;
     case 'add_task':
-      setOutcome(`Task heard: “${intent.title}”. (Add-task wiring is a later slice.)`, 'ok');
+      void addTask(intent);
       break;
     case 'navigate': {
       const destination = document.querySelector(`[data-nav="${intent.target}"]`);

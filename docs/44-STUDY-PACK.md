@@ -397,7 +397,8 @@ evidence gaps remain in [Acceptance evidence](43-ACCEPTANCE-EVIDENCE.md).
   at most two seconds.
 - Counsel uses meeting-window-title presence and microphone capture only. It has no system audio,
   remote-speaker channel, proof of participation or automatic diarization.
-- Voice `propose_write` creates a scaffold; voice `add_task` is not wired.
+- Voice `propose_write` creates a reviewable scaffold. Voice `add_task` creates a Work item directly
+  through authenticated `/work` and claims success only after the exact id and title are returned.
 - Local model file edits are best-effort and must pass the strict output parser. A model can answer
   successfully with no file changes when the task is chat-only.
 - Forge has no VSIX/Marketplace extension host, snippet injection, CI runner, debugger or persistent

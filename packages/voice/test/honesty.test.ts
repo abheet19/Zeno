@@ -68,10 +68,22 @@ test('HONESTY — the panel owns the cloud hop in words the owner can read', () 
 
 test('HONESTY — the structural safety claim still stands beside the locality caveat', () => {
   // The locality fix must not have quietly dropped the true, load-bearing claim
-  // that voice only proposes and never approves.
+  // that voice never approves a proposal.
   assert.ok(
     lower.includes('nothing is ever approved by voice'),
     'the note must still say nothing is ever approved by voice',
+  );
+});
+
+test('HONESTY — the disclosure names direct Work creation instead of calling every command a proposal', () => {
+  assert.ok(
+    lower.includes('add a work item directly'),
+    'the always-visible disclosure must name the durable add-task effect',
+  );
+  assert.equal(
+    lower.includes('speaking only proposes'),
+    false,
+    'the disclosure must not imply a spoken add-task command waits as a proposal',
   );
 });
 
@@ -160,10 +172,9 @@ test('WAKE — the law is structural: the front-end has no path to /approvals', 
   // microphone in EITHER mode. The simplest possible proof is that the endpoint
   // does not appear in the shipped file at all.
   //
-  // The panel reaches three routes now — /previews for a single file, /delegate
-  // for a job, /forge/run for a hosted job the owner confirmed — and every one
-  // of them produces capsules that WAIT. Not one of them can apply a change, and
-  // the route that could is still absent from this file entirely.
+  // The panel can create a low-risk /work backlog record directly. File changes
+  // still use /previews, and /delegate plus /forge/run preserve the hosted-run
+  // boundary. The route that can approve a proposal remains absent entirely.
   assert.equal(
     code.includes('approvals'),
     false,
