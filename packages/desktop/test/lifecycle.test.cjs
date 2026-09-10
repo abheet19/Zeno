@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { readFileSync } = require('node:fs');
+const { readFileSync, readdirSync } = require('node:fs');
 const { join } = require('node:path');
 const {
   claimDesktopInstance,
@@ -230,4 +230,46 @@ test('the packaged app includes every local module required by the desktop entry
       requiredFile + ' is required by main.cjs and must be present in portable and NSIS builds',
     );
   }
+});
+
+test('the packaged daemon closes over every runtime workspace dependency', () => {
+  const repoRoot = join(__dirname, '..', '..', '..');
+  const packagesRoot = join(repoRoot, 'packages');
+  const builder = JSON.parse(readFileSync(join(repoRoot, 'electron-builder.json'), 'utf8'));
+  const resources = new Map(builder.extraResources.map(resource => [resource.to, resource]));
+  const workspaces = new Map();
+
+  for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const packageFile = join(packagesRoot, entry.name, 'package.json');
+    let manifest;
+    try { manifest = JSON.parse(readFileSync(packageFile, 'utf8')); } catch { continue; }
+    workspaces.set(manifest.name, { directory: entry.name, manifest });
+  }
+
+  const visited = new Set();
+  const verify = name => {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const workspace = workspaces.get(name);
+    assert.ok(workspace, name + ' must resolve to a workspace package');
+    const destination = 'node_modules/' + name;
+    const resource = resources.get(destination);
+    assert.ok(resource, name + ' must be copied into the packaged runtime');
+    assert.equal(resource.from, 'packages/' + workspace.directory);
+    for (const required of ['package.json', 'dist/**/*']) {
+      assert.ok(resource.filter.includes(required), name + ' must package ' + required);
+    }
+    for (const dependency of Object.keys(workspace.manifest.dependencies || {})) {
+      if (dependency.startsWith('@abheet19/zeno-')) verify(dependency);
+    }
+  };
+
+  const daemon = JSON.parse(readFileSync(join(packagesRoot, 'daemon', 'package.json'), 'utf8'));
+  for (const dependency of Object.keys(daemon.dependencies || {})) {
+    if (dependency.startsWith('@abheet19/zeno-')) verify(dependency);
+  }
+
+  const browse = resources.get('node_modules/@abheet19/zeno-browse');
+  assert.ok(browse.filter.includes('session-main.cjs'), 'Browse must package its Electron session entry point');
 });

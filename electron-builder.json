@@ -55,6 +55,23 @@
       ]
     },
     {
+      "from": "packages/browse",
+      "to": "node_modules/@abheet19/zeno-browse",
+      "filter": [
+        "package.json",
+        "dist/**/*",
+        "session-main.cjs"
+      ]
+    },
+    {
+      "from": "packages/chrome-bridge",
+      "to": "node_modules/@abheet19/zeno-chrome",
+      "filter": [
+        "package.json",
+        "dist/**/*"
+      ]
+    },
+    {
       "from": "packages/intake",
       "to": "node_modules/@abheet19/zeno-intake",
       "filter": [
