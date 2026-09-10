@@ -75,19 +75,6 @@ const speechEngine = createWhisperEngine(resolveWhisperRuntime());
 const stopSpeech = installWhisperSpeech(ipcMain, () => win, ORIGIN, speechEngine);
 
 /**
- * Give the local recognizer a short head start before the owner can press a
- * voice control. The two-second ceiling keeps a missing/broken runtime from
- * delaying the desktop; the ordinary capture path still reports that failure.
- */
-async function warmSpeech(maxMs = 2_000) {
-  if (!speechEngine.available()) return;
-  await Promise.race([
-    speechEngine.ready().catch(() => {}),
-    new Promise(resolve => setTimeout(resolve, maxMs)),
-  ]);
-}
-
-/**
  * Find the daemon entry point. Packaged, it sits beside the app resources;
  * from source, it is the compiled output in the workspace.
  */
@@ -282,10 +269,6 @@ function createWindow() {
 if (ownsDesktopInstance) registerSecondInstanceFocus(app, () => win);
 
 if (ownsDesktopInstance) app.whenReady().then(async () => {
-  // Load the local model alongside the daemon so the first press does not lose
-  // the beginning of a sentence while Whisper boots. `ready()` is idempotent;
-  // a missing runtime remains a visible, handled capture failure in the UI.
-  const speechWarm = warmSpeech();
   try {
     launchUrl = await startDaemon();
   } catch (err) {
@@ -293,7 +276,6 @@ if (ownsDesktopInstance) app.whenReady().then(async () => {
     app.quit();
     return;
   }
-  await speechWarm;
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

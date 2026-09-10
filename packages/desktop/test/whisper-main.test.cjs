@@ -46,6 +46,7 @@ function harness(t, overrides = {}) {
     overrides.platform || 'win32',
     event => diagnostics.push(event),
     overrides.closeTimeoutMs,
+    overrides.engineIdleTimeoutMs,
   );
   const event = { sender, senderFrame: frame };
   t.after(dispose);
@@ -63,6 +64,16 @@ function harness(t, overrides = {}) {
     idle: (from = event) => handlers.get('zeno:speech:idle')(from),
   };
 }
+
+test('Whisper starts on first use and releases the engine after an idle session', async t => {
+  const h = harness(t, { engineIdleTimeoutMs: 5 });
+  assert.equal(h.calls.length, 0, 'installing speech does not warm the model');
+  assert.equal(await h.start(), true);
+  assert.equal(h.calls.filter(call => call[0] === 'ready').length, 1);
+  assert.equal(await h.stop(), true);
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.equal(h.calls.filter(call => call[0] === 'engine-stop').length, 1);
+});
 
 test('local Whisper text cleaning drops common silence hallucinations and bounds output', () => {
   assert.equal(cleanTranscript('  hello\n world  '), 'hello world');

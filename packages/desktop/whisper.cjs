@@ -283,6 +283,8 @@ function wavBuffer(value) {
 }
 
 /** One renderer-owned microphone session and one bounded local inference queue. */
+const ENGINE_IDLE_TIMEOUT_MS = 120_000;
+
 function installWhisperSpeech(
   ipcMain,
   getWindow,
@@ -291,8 +293,29 @@ function installWhisperSpeech(
   platform = process.platform,
   diagnostic = () => {},
   closeTimeoutMs = CLOSE_TIMEOUT_MS,
+  engineIdleTimeoutMs = ENGINE_IDLE_TIMEOUT_MS,
 ) {
   let active = null;
+  let engineIdleTimer = null;
+
+  function cancelEngineIdle() {
+    if (!engineIdleTimer) return;
+    clearTimeout(engineIdleTimer);
+    engineIdleTimer = null;
+  }
+
+  function scheduleEngineIdle() {
+    cancelEngineIdle();
+    if (!Number.isFinite(engineIdleTimeoutMs) || engineIdleTimeoutMs <= 0) return;
+    engineIdleTimer = setTimeout(() => {
+      engineIdleTimer = null;
+      if (active) return;
+      void engine.stop().catch(error => {
+        diagnostic({ kind: 'idle-stop-error', code: publicErrorCode(error) });
+      });
+    }, engineIdleTimeoutMs);
+    engineIdleTimer.unref?.();
+  }
 
   function trusted(event) {
     const window = getWindow();
@@ -308,6 +331,7 @@ function installWhisperSpeech(
     session.sender.removeListener('destroyed', session.onGone);
     if (active === session) active = null;
     session.resolveClosed();
+    scheduleEngineIdle();
   }
 
   async function close(session, abort) {
@@ -349,6 +373,7 @@ function installWhisperSpeech(
       (request.prompt !== undefined && (typeof request.prompt !== 'string' || request.prompt.length > MAX_INITIAL_PROMPT_CHARS || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(request.prompt)))
     ) return false;
     if (active) return false;
+    cancelEngineIdle();
     const session = {
       id: request.id,
       lang: request.lang,
@@ -431,13 +456,16 @@ function installWhisperSpeech(
   });
 
   return async () => {
+    cancelEngineIdle();
     await close(active, true);
+    cancelEngineIdle();
     await engine.stop();
   };
 }
 
 module.exports = {
   CLOSE_TIMEOUT_MS,
+  ENGINE_IDLE_TIMEOUT_MS,
   INFERENCE_TIMEOUT_MS,
   MAX_INITIAL_PROMPT_CHARS,
   MAX_WAV_BYTES,

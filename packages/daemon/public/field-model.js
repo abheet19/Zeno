@@ -19,3 +19,11 @@ export function ticketAction(node) {
   }
   return { jump: 'pending', label: 'Go to approvals', tone: 'p' };
 }
+
+/** Decide whether the canvas may consume animation frames in the current shell. */
+export function shouldAnimateField({ surface, visibilityState, fieldList, motion }) {
+  return visibilityState !== 'hidden'
+    && (!surface || surface === 'command')
+    && !fieldList
+    && Boolean(motion);
+}

@@ -29,7 +29,7 @@
  * the whole surface can never disagree with itself.
  */
 
-import { pendingRepoEdge, ticketAction } from './field-model.js';
+import { pendingRepoEdge, shouldAnimateField, ticketAction } from './field-model.js';
 
 const R = document.documentElement;
 
@@ -72,7 +72,8 @@ function motionOn() {
 }
 
 const S = { motion: true, sel: null, lock: false, fieldList: false };
-const F = { c: null, x: null, rot: 0.62, tilt: 0.34, tilt0: 0.34, drag: 0, raf: 0, hov: null, W: 0, H: 0, mx: 0, my: 0, ro: null, init: 0, _m: 0 };
+const FIELD_FRAME_MS = 1000 / 30;
+const F = { c: null, x: null, rot: 0.62, tilt: 0.34, tilt0: 0.34, drag: 0, raf: 0, lastFrame: 0, hov: null, W: 0, H: 0, mx: 0, my: 0, ro: null, init: 0, _m: 0 };
 
 /* Settle the attribute ONCE at boot from the stored choice, falling back to the
    OS. Without this the control started life claiming aria-pressed="false" —
@@ -676,14 +677,36 @@ function wrapText(c, text, x, y, maxW, lh) {
   lines.forEach((l, i) => c.fillText(l, x, startY + i * lh));
 }
 
-/* ---- animation + sizing (the prototype's, verbatim) ----------------------- */
-function loop() {
-  if (!F.c || !F.c.isConnected) { F.raf = 0; return; }
-  if (!F.drag && S.motion) { F.rot += 0.0016; F.tilt = F.tilt0 + Math.sin(performance.now() / 6400) * 0.055; }
-  draw(); F.raf = requestAnimationFrame(loop);
+/* ---- animation + sizing ---------------------------------------------------- */
+function fieldSurfaceVisible() {
+  return shouldAnimateField({
+    surface: R.getAttribute('data-zeno-surface'),
+    visibilityState: document.visibilityState,
+    fieldList: false,
+    motion: true,
+  });
 }
-function stopF() { if (F.raf) { cancelAnimationFrame(F.raf); F.raf = 0; } if (F.init) { clearTimeout(F.init); F.init = 0; } }
-function startF() { if (!F.raf && F.c && F.c.isConnected && S.motion) F.raf = requestAnimationFrame(loop); }
+function fieldShouldAnimate() {
+  return shouldAnimateField({
+    surface: R.getAttribute('data-zeno-surface'),
+    visibilityState: document.visibilityState,
+    fieldList: S.fieldList,
+    motion: S.motion,
+  });
+}
+function loop(now) {
+  if (!F.c || !F.c.isConnected || !fieldShouldAnimate()) { F.raf = 0; F.lastFrame = 0; return; }
+  const elapsed = F.lastFrame ? now - F.lastFrame : FIELD_FRAME_MS;
+  if (elapsed >= FIELD_FRAME_MS) {
+    const bounded = Math.min(elapsed, 100);
+    F.lastFrame = now;
+    if (!F.drag) { F.rot += 0.0016 * bounded / (1000 / 60); F.tilt = F.tilt0 + Math.sin(now / 6400) * 0.055; }
+    draw();
+  }
+  F.raf = requestAnimationFrame(loop);
+}
+function stopF() { if (F.raf) { cancelAnimationFrame(F.raf); F.raf = 0; } F.lastFrame = 0; if (F.init) { clearTimeout(F.init); F.init = 0; } }
+function startF() { if (!F.raf && F.c && F.c.isConnected && fieldShouldAnimate()) F.raf = requestAnimationFrame(loop); }
 function size() {
   if (!F.c || !F.c.isConnected) return;
   const host = F.c.parentElement; if (!host) return;
@@ -710,7 +733,7 @@ function fieldOn() {
       F.ro.observe(el.parentElement);
     }
   } catch { /* the observer is an optimisation, never a dependency */ }
-  if (S.motion) F.raf = requestAnimationFrame(loop); else draw();
+  if (fieldShouldAnimate()) startF(); else draw();
 }
 function pick(x, y) { let b = null, bd = 20; N.forEach((n) => { const d = Math.hypot(n.sx - x, n.sy - y); if (d < bd) { bd = d; b = n; } }); return b; }
 
@@ -1111,13 +1134,21 @@ export function init(section) {
 
   /* refresh on the daemon's own stream signal, with a slow poll as a floor */
   window.addEventListener('zeno:state', () => refresh(listEl).catch(() => {}));
-  setInterval(() => { if (document.visibilityState === 'visible') refresh(listEl).catch(() => {}); }, 15000);
+  setInterval(() => { if (fieldSurfaceVisible()) refresh(listEl).catch(() => {}); }, 15000);
 
   /* A tab that comes back from the background has a cancelled rAF chain and a
      canvas painted from old state. Restart it rather than leaving a frozen picture. */
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !S.fieldList) { size(); startF(); if (!F.raf) draw(); }
+    if (fieldShouldAnimate()) { size(); startF(); if (!F.raf) draw(); }
+    else stopF();
   });
+
+  /* The shell hides Command without navigating. Stop its canvas when Forge or
+     Counsel owns the window, then resume from fresh state when Command returns. */
+  new MutationObserver(() => {
+    if (fieldShouldAnimate()) { size(); startF(); if (!F.raf) draw(); }
+    else stopF();
+  }).observe(R, { attributes: true, attributeFilter: ['data-zeno-surface'] });
 
   /* keep motion honest if the OS setting changes mid-session — but only while
      the owner has made no explicit choice of their own. */
