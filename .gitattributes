@@ -1,0 +1,2 @@
+# Hash-pinned snapshots must be byte-stable across Windows and POSIX checkouts.
+packages/daemon/assets/glass/tokens.css text eol=lf
