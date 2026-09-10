@@ -145,7 +145,60 @@ const NAVIGATE = /^(?:open|go to|show|switch to)\s+(?:the\s+)?(command|forge|por
 const READ_PENDING = /^(?:what(?:'s| is| are)?\s+waiting|what(?:'s| is)?\s+pending|what(?:'s| is)?\s+(?:in\s+the\s+)?queue|what(?:'s| is)?\s+in\s+my\s+queue|what\s+needs\s+approval|what\s+is\s+awaiting(?:\s+approval)?|anything\s+waiting|show(?:\s+me)?\s+(?:the\s+)?(?:pending\s+)?approvals?|show(?:\s+me)?\s+(?:the\s+)?queue)[.!?]?$/i;
 const READ_RECEIPTS = /^(?:read\s+(?:my\s+|the\s+)?receipts|show(?:\s+me)?\s+(?:the\s+|my\s+)?receipts|list\s+(?:the\s+|my\s+)?receipts|show\s+receipts|what\s+have\s+you\s+done)[.!?]?$/i;
 const READ_CHAIN = /^(?:verify(?:\s+the)?\s+(?:chain|ledger)|check(?:\s+the)?\s+(?:chain|ledger)|audit(?:\s+the)?\s+(?:chain|ledger)|is\s+the\s+(?:chain|ledger)\s+(?:intact|ok|okay|valid|good))[.!?]?$/i;
-const ADD_TASK = /^(?:remind me(?:\s+to)?|remember to|note to self(?:\s+to)?|add(?:\s+a)?\s+task(?:\s+to)?|new task(?:\s+to)?|create a task(?:\s+to)?|make a task(?:\s+to)?|add a reminder(?:\s+to)?|add a to-?do(?:\s+to)?)\s+(.+?)[.!]?$/i;
+// Longest forms come first. Splitting an explicit prefix avoids regex
+// backtracking turning an interrupted "remind me to…" into the title "to…".
+const TASK_PREFIXES = [
+    'add a reminder to',
+    'create a task to',
+    'note to self to',
+    'add a to-do to',
+    'add a todo to',
+    'add a task to',
+    'make a task to',
+    'remember to',
+    'remind me to',
+    'add task to',
+    'new task to',
+    'add a reminder',
+    'create a task',
+    'note to self',
+    'add a to-do',
+    'add a todo',
+    'add a task',
+    'make a task',
+    'remind me',
+    'add task',
+    'new task',
+];
+function taskTail(command) {
+    const lower = command.toLowerCase();
+    for (const prefix of TASK_PREFIXES) {
+        if (!lower.startsWith(prefix))
+            continue;
+        const tail = command.slice(prefix.length);
+        // Keep attached technical-name separators in the file-proposal grammar.
+        // This also lets a shorter prefix preserve a title such as "to-do" after
+        // the longer optional-"to" prefix declines its "-do" continuation.
+        if (/^[._/\\-]+[\p{L}\p{N}]/u.test(tail))
+            continue;
+        // A letter or number immediately after the prefix means it was only the
+        // start of another word ("taskbar", "tomorrow"), not a task boundary.
+        if (tail === '' || !/^[\p{L}\p{N}]/u.test(tail))
+            return tail;
+    }
+    return null;
+}
+function taskTitle(tail) {
+    const separatedBySpace = /^\s/u.test(tail);
+    let title = tail.trimStart();
+    // Without whitespace, punctuation is the dictated sentence boundary. With
+    // whitespace, keep punctuation attached to a technical title such as .NET,
+    // .env or !important; strip it only when another space follows it.
+    title = separatedBySpace
+        ? title.replace(/^\p{P}+\s+/u, '')
+        : title.replace(/^\p{P}+\s*/u, '');
+    return title.replace(/[.!?\u2026\u3002\uff01\uff1f]+$/u, '').trim();
+}
 // "<verb> a <name> component/file [that ...]" — the primary shape.
 const PROPOSE_NAME_FIRST = /^(?:create|add|write|make|new|build|generate|scaffold)\s+(?:a|an|the)?\s*(.+?)\s+(component|file)(?:\s+(?:that|which|to|for|so that)\s+(.+?))?[.!]?$/i;
 // "<verb> a component/file called <name> [that ...]" — the "called/named" shape.
@@ -268,11 +321,12 @@ export function parseCommand(command) {
         return { kind: 'read', what: 'receipts' };
     if (READ_CHAIN.test(cmd))
         return { kind: 'read', what: 'chain' };
-    const task = ADD_TASK.exec(cmd);
-    if (task) {
-        const title = (task[1] ?? '').trim();
-        if (title.length > 0)
+    const tail = taskTail(cmd);
+    if (tail !== null) {
+        const title = taskTitle(tail);
+        if (/[\p{L}\p{N}]/u.test(title))
             return { kind: 'add_task', title };
+        return unrecognized(cmd, NOT_A_COMMAND);
     }
     const nameFirst = PROPOSE_NAME_FIRST.exec(cmd);
     if (nameFirst) {

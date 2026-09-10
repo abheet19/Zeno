@@ -65,11 +65,84 @@ test('add_task — "add a task ..." and "new task ..." phrasings', () => {
   assert.equal(expectKind(parseCommand('remember to renew the domain'), 'add_task').title, 'renew the domain');
 });
 
+test('add_task — Whisper punctuation between the command and title is accepted', () => {
+  assert.equal(
+    expectKind(parseCommand('add task. Verify packaged voice persistence.'), 'add_task').title,
+    'Verify packaged voice persistence',
+  );
+  assert.equal(expectKind(parseCommand('new task: book the flights'), 'add_task').title, 'book the flights');
+  assert.equal(expectKind(parseCommand('add task . Verify the package'), 'add_task').title, 'Verify the package');
+});
+
+test('add_task — interrupted or punctuation-only titles are rejected', () => {
+  const prefixes = [
+    'remind me', 'remind me to', 'remember to', 'note to self', 'note to self to',
+    'add task', 'add task to', 'add a task', 'add a task to', 'new task', 'new task to',
+    'create a task', 'create a task to', 'make a task', 'make a task to',
+    'add a reminder', 'add a reminder to', 'add a to-do', 'add a to-do to',
+    'add a todo', 'add a todo to',
+  ];
+  for (const prefix of prefixes) {
+    for (const suffix of ['', '.', '!', '?', '...', '…', '。', '！', '？', '—']) {
+      const phrase = prefix + suffix;
+      const intent = expectKind(parseCommand(phrase), 'unrecognized');
+      assert.equal(intent.reason, NOT_A_COMMAND, phrase);
+    }
+  }
+});
+
+test('add_task — punctuation that belongs to a technical title is preserved', () => {
+  assert.equal(expectKind(parseCommand('add task .NET upgrade'), 'add_task').title, '.NET upgrade');
+  assert.equal(expectKind(parseCommand('add task .env cleanup'), 'add_task').title, '.env cleanup');
+  assert.equal(expectKind(parseCommand('add task !important audit'), 'add_task').title, '!important audit');
+  assert.equal(expectKind(parseCommand('create a task。检查构建'), 'add_task').title, '检查构建');
+});
+
 test('add_task WINS over propose_write when both could match', () => {
   // Ends in the word "component", but the explicit "task" keyword means the
   // owner wants a task, not a file proposal.
   const i = expectKind(parseCommand('add a task to build a login component'), 'add_task');
   assert.equal(i.title, 'build a login component');
+});
+
+test('propose_write keeps an attached extension out of the task grammar', () => {
+  const intent = expectKind(parseCommand('create a task.json file'), 'propose_write');
+  assert.equal(intent.relPath, 'src/task-json.ts');
+  assert.equal(
+    expectKind(parseCommand('create a task-json file'), 'propose_write').relPath,
+    'src/task-json.ts',
+  );
+  assert.equal(
+    expectKind(parseCommand('make a task_json file'), 'propose_write').relPath,
+    'src/task-json.ts',
+  );
+  assert.equal(
+    expectKind(parseCommand('add a task-runner component'), 'propose_write').relPath,
+    'src/components/TaskRunner.tsx',
+  );
+  for (const [phrase, relPath] of [
+    ['create a task..json file', 'src/task-json.ts'],
+    ['make a task__json file', 'src/task-json.ts'],
+    ['add a task//json file', 'src/task-json.ts'],
+    ['create a task._检查 file', 'src/task.ts'],
+  ] as const) {
+    assert.equal(expectKind(parseCommand(phrase), 'propose_write').relPath, relPath, phrase);
+  }
+});
+
+test('add_task preserves title words that begin with to plus a separator', () => {
+  assert.equal(
+    expectKind(parseCommand('add task to-do list migration'), 'add_task').title,
+    'to-do list migration',
+  );
+  assert.equal(
+    expectKind(parseCommand('remind me to-do review'), 'add_task').title,
+    'to-do review',
+  );
+  assert.equal(
+    expectKind(parseCommand('new task to_do cleanup'), 'add_task').title,
+    'to_do cleanup',
+  );
 });
 
 test('read — the three targets from natural phrasings', () => {
