@@ -1,14 +1,10 @@
 <!doctype html>
 <!--
-  No data-theme here on purpose. The window follows the machine: /glass/tokens.css
-  carries the light palette on bare :root and the dark palette under both
-  `@media (prefers-color-scheme: dark)` and `:root[data-theme="dark"]`.
-
-  Setting data-theme="light" or "dark" on this element is the explicit override,
-  and it wins over the system preference in either direction. Nothing in the
-  shipped window sets it; it is the contract a theme control would use.
+  Graphite is the first-run theme. theme-boot.js runs before the palette is
+  parsed so an existing System, Graphite, or Glass Dawn preference still wins
+  without a light-to-dark flash. Theme choices remain local to this profile.
 -->
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -50,6 +46,10 @@
      browser as unable to approve or propose, and say so, rather than posting an
      empty token. -->
 <meta name="zeno-token" content="">
+
+<!-- Apply an existing per-device choice before either palette is parsed. The
+     root attribute above remains the no-preference, first-run default. -->
+<script src="/theme-boot.js"></script>
 
 <!--
   Zeno Glass tokens, inlined as a FALLBACK ONLY, and deliberately placed BEFORE
