@@ -6,6 +6,11 @@ const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 const { inspectProject, readProjectPreference, writeProjectPreference } = require('../project.cjs');
 
+test('switching projects does not start speech or reference the removed eager warm path', () => {
+  const main = readFileSync(join(__dirname, '..', 'main.cjs'), 'utf8');
+  assert.doesNotMatch(main, /\bwarmSpeech\b/);
+});
+
 test('folder selection resolves a subfolder to the Git repository root without a shell', () => {
   let invocation;
   const result = inspectProject('C:\\repo\\src', (command, args, options) => {

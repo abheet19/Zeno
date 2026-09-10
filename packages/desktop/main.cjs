@@ -203,7 +203,6 @@ ipcMain.handle('zeno:project:choose', async (event) => {
         await stopSpeech();
         await stopDaemon();
         launchUrl = await startDaemon();
-        await warmSpeech();
         if (win && !win.isDestroyed()) await win.loadURL(launchUrl);
       } catch (error) {
         sessionProject = previous.ok ? previous.path : null;
