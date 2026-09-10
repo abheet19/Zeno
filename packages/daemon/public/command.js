@@ -336,15 +336,26 @@ async function refresh() {
 /* ---- boot ------------------------------------------------------------------ */
 
 let started = false;
+function deskVisible() {
+  const command = document.querySelector('[data-surface="command"]');
+  const disclosure = document.getElementById('cmd-desk');
+  return document.visibilityState === 'visible'
+    && !command?.hidden
+    && command?.dataset.commandPanel === 'cmd-hero'
+    && Boolean(disclosure?.open);
+}
+
 export function init() {
   if (started) return; started = true;
   if (!mountEl()) return;
   paintUnread();
-  refresh();
+  if (deskVisible()) refresh();
 
   // The same signal field.js listens for, with the same slow poll as a floor.
-  window.addEventListener('zeno:state', () => { refresh(); });
-  setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 15000);
+  window.addEventListener('zeno:state', () => { if (deskVisible()) refresh(); });
+  window.addEventListener('zeno:command-panel', () => { if (deskVisible()) refresh(); });
+  document.getElementById('cmd-desk')?.addEventListener('toggle', () => { if (deskVisible()) refresh(); });
+  setInterval(() => { if (deskVisible()) refresh(); }, 15000);
 
   // Masked mode changes what may be shown, not what is true. Repaint from the
   // state already in hand — this never re-reads and never re-counts.

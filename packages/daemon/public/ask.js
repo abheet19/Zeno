@@ -64,8 +64,9 @@ function mountPanel() {
 
   const panel = el('section', 'za-panel');
   panel.setAttribute('aria-label', 'Ask Zeno conversation');
+  panel.dataset.hasTurns = 'false';
   panel.style.cssText = [
-    'display:flex', 'flex-direction:column', 'min-height:430px', 'max-height:min(680px,78vh)',
+    'display:flex', 'flex-direction:column', 'min-height:0', 'max-height:min(680px,78vh)',
     'border:1px solid var(--rule,#242C31)', 'border-radius:12px', 'overflow:hidden',
     'background:var(--g3,#151A1D)', 'color:var(--ink,#ECEBE6)',
     'font:13px/1.5 system-ui,sans-serif',
@@ -99,7 +100,7 @@ function mountPanel() {
   thread.setAttribute('aria-label', 'Ask Zeno conversation');
   thread.setAttribute('aria-live', 'polite');
   thread.style.cssText = [
-    'flex:1 1 auto', 'min-height:210px', 'overflow:auto', 'padding:14px 13px',
+    'flex:1 1 auto', 'min-height:0', 'overflow:auto', 'padding:14px 13px',
     'display:flex', 'flex-direction:column', 'gap:12px', 'background:var(--g2,#101416)',
   ].join(';');
 
@@ -250,6 +251,7 @@ function updateMode() {
       : voiceModeOn
         ? 'Stop voice'
         : 'Start voice';
+  ui.voiceSelect.hidden = !voiceModeOn;
   ui.send.disabled = dispatchGate.busy();
   ui.send.style.opacity = dispatchGate.busy() ? '0.55' : '1';
 }
@@ -261,6 +263,9 @@ function trimThread() {
 
 function appendTurn(role, text, options) {
   ui.empty.hidden = true;
+  ui.panel.dataset.hasTurns = 'true';
+  ui.panel.style.minHeight = 'min(430px,70vh)';
+  ui.thread.style.minHeight = '210px';
   turnCount += 1;
   const turn = el('article', 'za-turn za-' + role);
   turn.dataset.turn = String(turnCount);
@@ -294,6 +299,37 @@ function appendTurn(role, text, options) {
   return { turn, body };
 }
 
+/**
+ * A collapsible execution trace, not hidden model reasoning. It reports only
+ * observable stages the UI can prove while the single daemon request runs.
+ */
+function appendActivity() {
+  const details = el('details', 'za-thinking');
+  details.open = true;
+  const summary = el('summary');
+  const pulse = el('span', 'za-thinking-pulse', '•••');
+  pulse.setAttribute('aria-hidden', 'true');
+  const label = el('span', null, 'Working…');
+  summary.append(pulse, label);
+  const log = el(
+    'p',
+    'za-thinking-log',
+    'Reading the current local context and checking the response. Hosted work and approvals still wait for an explicit click.',
+  );
+  details.append(summary, log);
+  ui.thread.appendChild(details);
+  ui.thread.scrollTop = ui.thread.scrollHeight;
+  const startedAt = Date.now();
+  return {
+    finish(text, detail) {
+      pulse.remove();
+      label.textContent = text + ' · ' + Math.max(0, Date.now() - startedAt) + ' ms';
+      log.textContent = detail;
+      details.open = false;
+    },
+  };
+}
+
 function appendMeta(turn, text, tone) {
   const meta = el('p', 'za-meta', text);
   meta.style.cssText = [
@@ -318,6 +354,8 @@ function makeAction(label, tone) {
 }
 
 function openPending() {
+  window.ZenoNav?.show('command');
+  window.ZenoCommandPanels?.show('pending', { focus: true });
   const pending = document.getElementById('pending') || document.querySelector('[data-mount="pending"]');
   if (pending && typeof pending.scrollIntoView === 'function') {
     pending.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -788,6 +826,7 @@ async function submit(rawQuestion, options) {
   await releaseRecognition();
   stopSpeaking();
   appendTurn('user', question, { voice: options?.voice === true });
+  const activity = appendActivity();
   ui.input.value = '';
   updateMode();
   setStatus('Thinking… a local delegation may run, while hosted work still waits for a click.');
@@ -806,15 +845,22 @@ async function submit(rawQuestion, options) {
       const message =
         'Could not ask: ' + (error.message || response.status) + (error.resolve ? '. ' + error.resolve : '');
       appendTurn('assistant', message, { tone: 'warn' });
+      activity.finish('Request stopped', 'The daemon returned an error. No action was approved or applied.');
       setStatus(message, 'warn');
       payload = { note: message };
     } else {
+      window.dispatchEvent(new CustomEvent('zeno:runtime-refresh', { detail: { source: 'ask' } }));
+      activity.finish(
+        payload.answer ? 'Grounded response returned' : payload.flagged ? 'Grounding check flagged the reply' : 'No grounded answer returned',
+        'The daemon finished its local context and grounding checks. This trace contains execution facts, not private model reasoning.',
+      );
       renderResponse(payload);
       setStatus(payload.note ? String(payload.note) : 'Answer received.', payload.answer ? 'ok' : 'warn');
     }
   } catch (error) {
     const message = 'Network error: ' + (error?.message || error) + '. Your Zeno state is unaffected.';
     appendTurn('assistant', message, { tone: 'warn' });
+    activity.finish('Request stopped', 'The daemon request did not complete. Zeno state was not changed.');
     setStatus(message, 'warn');
     payload = { note: message };
   } finally {
@@ -873,8 +919,11 @@ ui.mic.addEventListener('click', () => {
   }
 });
 ui.clear.addEventListener('click', () => {
-  for (const turn of ui.thread.querySelectorAll('.za-turn')) turn.remove();
+  for (const turn of ui.thread.querySelectorAll('.za-turn,.za-thinking')) turn.remove();
   ui.empty.hidden = false;
+  ui.panel.dataset.hasTurns = 'false';
+  ui.panel.style.minHeight = '0';
+  ui.thread.style.minHeight = '0';
   setStatus('Conversation cleared from this renderer. Nothing was deleted from Vault because raw chat was never stored there.', 'ok');
 });
 

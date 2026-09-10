@@ -141,6 +141,7 @@ function el(tag, cls, text) {
 
 function mountPanel() {
   const host = document.querySelector('[data-mount="voice"]') || document.body;
+  const outerDisclosure = host.closest?.('.cmd-voice-more') || null;
   const panel = el('section', 'zv-panel');
   panel.setAttribute('aria-label', 'Zeno voice');
   // COMPACT BY DEFAULT. On a dashboard this is a control, not an essay: two
@@ -397,7 +398,7 @@ function mountPanel() {
     disclosure, backdrop, ack, confirm, cancel,
     delegate, delegateTask, delegateAgent, delegateWhy, delegateState,
     delegateButtons, delegateRun, delegateSkip, delegateLink,
-    plain, how,
+    plain, how, outerDisclosure,
   };
 }
 
@@ -415,6 +416,11 @@ const ui = mountPanel();
  */
 ui.how.addEventListener('toggle', () => {
   if (ui.how.dataset.armed === '1' && !ui.how.open) ui.how.open = true;
+});
+ui.outerDisclosure?.addEventListener('toggle', () => {
+  if (ui.outerDisclosure.dataset.armed === '1' && !ui.outerDisclosure.open) {
+    ui.outerDisclosure.open = true;
+  }
 });
 
 // ---- the live-microphone bar: one truth, outside every surface --------------
@@ -609,6 +615,10 @@ function paint() {
   const armed = open || MIC.wakeOn;
   ui.how.dataset.armed = armed ? '1' : '0';
   if (armed) ui.how.open = true;
+  if (ui.outerDisclosure) {
+    ui.outerDisclosure.dataset.armed = armed ? '1' : '0';
+    if (armed) ui.outerDisclosure.open = true;
+  }
 
   // -- the bar. Shown whenever a microphone is open, and also while wake mode
   // is on but the engine is down: "on, reopening in a moment" is still a room

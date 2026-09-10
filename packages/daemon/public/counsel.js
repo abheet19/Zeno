@@ -251,15 +251,14 @@ const CSS = `
   display:flex; flex-direction:column;
 }
 .cn::before{
-  content:""; position:absolute; inset:-12%; pointer-events:none; filter:blur(30px);
+  /* The gradients already have soft edges. Keeping this layer static avoids a
+     full-window filtered repaint while somebody reads a long transcript. */
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.72;
   background:
     radial-gradient(34% 30% at 50% 12%,color-mix(in srgb,var(--cyan) 22%,transparent),transparent 72%),
     radial-gradient(30% 26% at 26% 58%,color-mix(in srgb,var(--gold) 15%,transparent),transparent 74%),
     radial-gradient(30% 26% at 76% 46%,color-mix(in srgb,var(--green) 11%,transparent),transparent 74%);
-  animation:cnamb 34s ease-in-out infinite alternate;
 }
-@keyframes cnamb{ 0%{ transform:translate3d(0,0,0) scale(1) } 100%{ transform:translate3d(2.4%,-2%,0) scale(1.07) } }
-:root[data-reduce="1"] .cn::before{ animation:none }
 .cn>*{ position:relative; z-index:1 }
 
 /* ---------- the prototype's utilities ----------------------------------------
@@ -499,6 +498,17 @@ const CSS = `
 .ovnote[data-tone="warn"]{ border-left-color:var(--amber) }
 .ovnote[data-tone="error"]{ border-left-color:var(--red); color:var(--ink) }
 
+/* At 320 CSS pixels and at 200% desktop zoom the preflight facts need their
+   own lines; squeezing the value beside a fixed label made both unreadable. */
+@media (max-width:420px){
+  .pre{ padding:13px; max-height:calc(100vh - 24px) }
+  .prow{ flex-direction:column; gap:2px }
+  .prow .pl{ flex:auto }
+  .prow .pv{ text-align:left }
+  .ov{ top:48px; max-height:calc(100vh - 60px) }
+  .spk{ flex-wrap:wrap }
+}
+
 .cn-sr{ position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0 }
 `;
 
@@ -563,13 +573,12 @@ export function initCounsel(section) {
     el(
       'p',
       'surface-sub',
-      'Your past calls, each summarised into decisions, action items and open questions that cite the ' +
-        'transcript line they came from — and a chat that answers only from those calls. It records when ' +
-        'you start a call, shows a recording light for as long as it is on, and never speaks for you.',
+      'Consent-first meeting notes with cited decisions and actions. Ask from the saved transcript after ' +
+        'the call; live answers stay off.',
     ),
   );
   const headActs = el('div', 'acts');
-  const startBtn = btn('btn p', 'Start a call', openPreflight);
+  const startBtn = btn('btn p', 'Record a meeting', openPreflight);
   add(headActs, startBtn);
   add(head, headText, headActs);
 
@@ -990,7 +999,7 @@ export function initCounsel(section) {
 
   function renderAsk() {
     clear(panelAsk);
-    add(panelAsk, el('p', 'k', 'Ask about your calls'));
+    add(panelAsk, el('p', 'k', 'Ask after the meeting'));
 
     const bd = el('div', 'cnpanel-bd');
     add(panelAsk, bd);
@@ -1886,7 +1895,7 @@ export function initCounsel(section) {
       bd,
       el(
         'p',
-        'hint one',
+        'hint',
         'Live Q&A is off while this meeting is active. End and save the transcript first; then ask from the cited notes in Counsel chat.',
       ),
     );

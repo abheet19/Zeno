@@ -315,7 +315,7 @@ body{
   transition:background .18s ease,color .18s ease;
 }
 .rail-n:hover{ background:var(--wash-2); color:var(--ink); }
-.rail-n[aria-current="true"]{ background:var(--wash-2); color:var(--ink); box-shadow:inset 0 1px 0 var(--wash-hi); }
+.rail-n[aria-current]{ background:var(--wash-2); color:var(--ink); box-shadow:inset 0 1px 0 var(--wash-hi); }
 /* The live count. Empty renders NOTHING — a zero badge would claim a queue
    that does not exist. field.js writes the number or clears the element. */
 .rail-n .n{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
@@ -326,12 +326,15 @@ body{
 .legend .lg::before{ content:""; width:8px; height:8px; border-radius:2px; background:currentColor; }
 .lg-green{ color:var(--green); } .lg-amber{ color:var(--amber); } .lg-red{ color:var(--red); }
 
-.cmdduo{ display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:14px; align-items:start; }
+.cmdduo{
+  display:flex; flex-direction:column; gap:10px; align-items:stretch;
+  width:min(900px,100%); margin:0 auto;
+}
 .cmdmain{ overflow:auto; min-height:0; padding:16px 18px 30px; min-width:0; position:relative; display:flex; flex-direction:column; gap:16px; }
 
 /* ---- the hero: the field IS the ground, the masthead sits on it ----------- */
 .hero{
-  position:relative; height:clamp(430px,64vh,660px);
+  position:relative; height:clamp(250px,36vh,340px);
   margin:-16px -18px 6px; overflow:hidden;
   border-bottom:1px solid var(--gl-edge); flex:none;
 }
@@ -630,6 +633,58 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .zv-how > summary:hover{ color:var(--ink-2); }
 .zv-how > summary:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
 
+/* Command opens as one calm prompt surface. The full wake-word controls stay
+   available, but do not compete with the orb and typed composer at rest. */
+.cmd-voice-more{
+  border:1px solid var(--rule); border-radius:10px; background:var(--g2);
+  color:var(--ink-2); overflow:hidden;
+}
+.cmd-voice-more > summary{
+  min-height:38px; box-sizing:border-box; padding:9px 11px; cursor:pointer;
+  list-style:none; display:flex; align-items:center; gap:7px;
+  font:600 11px/1.4 var(--font-mono); letter-spacing:.035em;
+}
+.cmd-voice-more > summary::-webkit-details-marker{ display:none; }
+.cmd-voice-more > summary::before{ content:"▸"; color:var(--ink-3); }
+.cmd-voice-more[open] > summary::before{ content:"▾"; }
+.cmd-voice-more[open] > summary{ border-bottom:1px solid var(--rule); }
+.cmd-voice-more > summary:hover{ color:var(--ink); background:var(--wash); }
+.cmd-voice-more > summary:focus-visible{ outline:2px solid var(--focus); outline-offset:-2px; }
+.cmd-voice-more .cmd-voice{ padding:10px; }
+
+.cmd-secondary{
+  width:min(900px,100%); margin:0 auto; border-top:1px solid var(--rule);
+  color:var(--ink-2);
+}
+.cmd-secondary > summary{
+  min-height:38px; box-sizing:border-box; cursor:pointer; list-style:none;
+  display:flex; align-items:center; gap:7px; padding:9px 2px;
+  font:600 10.5px/1.4 var(--font-mono); letter-spacing:.035em;
+}
+.cmd-secondary > summary::-webkit-details-marker{ display:none; }
+.cmd-secondary > summary::before{ content:"▸"; color:var(--ink-3); }
+.cmd-secondary[open] > summary::before{ content:"▾"; }
+.cmd-secondary > summary:hover{ color:var(--ink); }
+.cmd-secondary > summary:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; border-radius:3px; }
+.cmd-secondary-body{ display:flex; flex-direction:column; gap:16px; padding:4px 0 8px; }
+
+/* Ask reports a small, owner-toggleable execution trace. It contains only
+   observable stages and timings; it never exposes private model reasoning. */
+.za-thinking{ padding:8px 0; border-bottom:1px solid var(--rule); color:var(--ink-2); }
+.za-thinking > summary{
+  cursor:pointer; list-style:none; display:flex; align-items:center; gap:7px;
+  font:600 10.5px/1.4 var(--font-mono);
+}
+.za-thinking > summary::-webkit-details-marker{ display:none; }
+.za-thinking > summary::before{ content:"▸"; color:var(--ink-3); }
+.za-thinking[open] > summary::before{ content:"▾"; }
+.za-thinking > summary:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; border-radius:3px; }
+.za-thinking-pulse{ color:var(--cyan); letter-spacing:.08em; animation:za-pulse 900ms ease-in-out infinite alternate; }
+.za-thinking-log{ margin:7px 0 0 17px; color:var(--ink-3); font-size:11px; line-height:1.5; }
+@keyframes za-pulse{ from{ opacity:.32 } to{ opacity:1 } }
+:root[data-reduce="1"] .za-thinking-pulse{ animation:none; opacity:1; }
+@media (prefers-reduced-motion:reduce){ .za-thinking-pulse{ animation:none; opacity:1; } }
+
 /* ---- the approval capsule and the receipt timeline, restyled ---------------
    Their DOM, their states and every one of their honesty rules are untouched:
    the capsule still owns POST /approvals and still draws the seal only from a
@@ -659,9 +714,20 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   .rail-n{ white-space:nowrap; flex:none; width:auto; padding:5px 10px; font-size:11.5px; background:var(--g3); border:1px solid var(--rule); }
   .rail .legend{ display:none; }
   .cmdmain{ padding:16px; }
-  .hero{ margin:-16px -16px 6px; height:clamp(360px,52vh,520px); }
+  .hero{ margin:-16px -16px 6px; height:clamp(240px,36vh,310px); }
   .heromast{ left:18px; right:18px; max-width:none; }
   .nodecard{ width:auto; right:12px; }
+}
+@media (max-width:420px){
+  .cmdmain{ padding:12px 10px 22px; gap:10px; }
+  .hero{ margin:-12px -10px 2px; height:clamp(230px,35vh,280px); }
+  .heromast{ left:14px; right:14px; }
+  .hero-cap{ max-width:28ch; }
+  .cmdduo{ width:100%; }
+  .za-head{ align-items:flex-start !important; }
+  .za-title{ flex-basis:100%; }
+  .za-tools{ align-items:stretch !important; }
+  .za-voice-select{ flex:1 1 100%; max-width:none !important; }
 }
 .chip{
   display:inline-flex; align-items:center; gap:6px;
@@ -1867,7 +1933,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
          /state, /work and /forge/status — the resting state says "nothing is
          waiting on you", it never invents a queue to look busy.
          ==================================================================== -->
-    <section class="hero" tabindex="-1">
+    <section class="hero" id="cmd-hero" tabindex="-1">
       <div class="fieldbox">
         <div class="field-atmos" aria-hidden="true"></div>
         <!-- field.js puts its <canvas id="field"> here. -->
@@ -1902,6 +1968,22 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
       <!-- field.js fills this when a node is selected, and empties it otherwise. -->
       <div data-mount="node-card"></div>
     </section><!-- /.hero -->
+
+    <!-- The primary Command action stays beside the field in the first
+         viewport. Typed chat is always available; wake-word and command voice
+         controls are an explicit disclosure and reopen automatically while a
+         microphone session is armed. -->
+    <section class="cmdduo" id="voice" tabindex="-1" aria-label="Ask Zeno">
+      <div class="cmd-ask" data-mount="ask"></div>
+      <details class="cmd-voice-more">
+        <summary>Voice commands &amp; wake word</summary>
+        <div class="cmd-voice" data-mount="voice"></div>
+      </details>
+    </section>
+
+    <details class="cmd-secondary" id="cmd-status">
+      <summary>System status and counts</summary>
+      <div class="cmd-secondary-body">
 
     <!-- The live readouts that used to sit in the hero column. They belong with
          the section heading, under the field: the field says WHAT wants you, and
@@ -1968,28 +2050,8 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
       </div>
     </div>
 
-    <!-- voice.js mounts its voice panel here. Push-to-talk ("Hold to talk") is
-         the default and opens the microphone only while you hold the button. An
-         opt-in "Listen for Zeno" mode holds it open until switched off; it is
-         gated behind a disclosure, because recognition is the browser's cloud
-         Web Speech API and the room is streamed to the browser maker to be
-         transcribed — it is not on-device. Either way speech becomes a PROPOSAL
-         (POST /previews) and can never approve; that stays your click below.
-         With no Web Speech API the panel disables both and says so. -->
-      <div class="cmdduo">
-    <div class="cmd-voice" data-mount="voice" tabindex="-1"></div>
-
-    <!-- ask.js mounts the typed half of Ask Zeno here. One question over POST
-         /assistant/ask: a local model reads a snapshot of your own Zeno and every
-         claim it makes is checked against that snapshot before you see it, so an
-         ungrounded reply is shown as one rather than as an answer. An answer may
-         suggest a file to write, or DELEGATE a job to a coding agent — a local
-         agent runs here on this machine, a hosted one does not run until you
-         click, because it costs money and sends your code off the machine.
-         Either way what comes back is changes WAITING for your approval below;
-         nothing on this panel is ever applied. -->
-    <div class="cmd-ask" data-mount="ask" tabindex="-1"></div>
-      </div><!-- /.cmdduo -->
+      </div>
+    </details>
 
     <!-- An honest place for a real transport failure: a dropped stream, or the
          daemon's "gap" event when a reconnect cannot be replayed. app.js writes
@@ -2103,6 +2165,9 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
          would be a claim about a daemon this page has not yet spoken to, but
          "not loaded". command.js writes "nothing is on the desk" only after a
          read succeeds. -->
+    <details class="cmd-secondary" id="cmd-desk">
+      <summary>Backlog and workstation activity</summary>
+      <div class="cmd-secondary-body">
     <section class="plane" id="desk" tabindex="-1" aria-labelledby="desk-h">
       <div class="plane-head">
         <h2 class="plane-h" id="desk-h">On the desk</h2>
@@ -2130,6 +2195,8 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
         </div>
       </div>
     </section>
+      </div>
+    </details>
 
     <!-- ============================ workstation =========================== -->
     <!-- The rail's "Workstation" destination. sections.js replaces the children
@@ -2370,6 +2437,9 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 <script type="module" src="/command.js"></script>
 <!-- The nav shell: shows/hides surfaces, remembers the last, lazily inits the others. -->
 <script type="module" src="/nav.js"></script>
+<!-- Command's progressive navigation: one rail destination at a time, with
+     the orb and Ask composer as the calm default workspace. -->
+<script type="module" src="/command-panels.js"></script>
 <!-- Push-to-talk for Command. Mounts into [data-mount="voice"]; disables itself,
      with a note, when the browser has no Web Speech API. -->
 <script type="module" src="/voice.js"></script>

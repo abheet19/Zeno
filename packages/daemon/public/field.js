@@ -679,7 +679,8 @@ function wrapText(c, text, x, y, maxW, lh) {
 
 /* ---- animation + sizing ---------------------------------------------------- */
 function fieldSurfaceVisible() {
-  return shouldAnimateField({
+  const hero = document.getElementById('cmd-hero');
+  return (!hero || !hero.hidden) && shouldAnimateField({
     surface: R.getAttribute('data-zeno-surface'),
     visibilityState: document.visibilityState,
     fieldList: false,
@@ -687,7 +688,8 @@ function fieldSurfaceVisible() {
   });
 }
 function fieldShouldAnimate() {
-  return shouldAnimateField({
+  const hero = document.getElementById('cmd-hero');
+  return (!hero || !hero.hidden) && shouldAnimateField({
     surface: R.getAttribute('data-zeno-surface'),
     visibilityState: document.visibilityState,
     fieldList: S.fieldList,
@@ -708,6 +710,11 @@ function loop(now) {
 function stopF() { if (F.raf) { cancelAnimationFrame(F.raf); F.raf = 0; } F.lastFrame = 0; if (F.init) { clearTimeout(F.init); F.init = 0; } }
 function startF() { if (!F.raf && F.c && F.c.isConnected && fieldShouldAnimate()) F.raf = requestAnimationFrame(loop); }
 function size() {
+  if (!fieldSurfaceVisible()) {
+    if (F.init) clearTimeout(F.init);
+    F.init = 0;
+    return;
+  }
   if (!F.c || !F.c.isConnected) return;
   const host = F.c.parentElement; if (!host) return;
   const w = host.clientWidth, h = host.clientHeight;
@@ -1135,7 +1142,14 @@ export function init(section) {
   });
 
   /* refresh on the daemon's own stream signal, with a slow poll as a floor */
-  window.addEventListener('zeno:state', () => refresh(listEl).catch(() => {}));
+  window.addEventListener('zeno:state', () => {
+    if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
+  });
+  window.addEventListener('zeno:runtime-refresh', () => {
+    agentsRead = false;
+    agentsAt = 0;
+    if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
+  });
   setInterval(() => { if (fieldSurfaceVisible()) refresh(listEl).catch(() => {}); }, 15000);
 
   /* A tab that comes back from the background has a cancelled rAF chain and a
@@ -1145,12 +1159,24 @@ export function init(section) {
     else stopF();
   });
 
-  /* The shell hides Command without navigating. Stop its canvas when Forge or
-     Counsel owns the window, then resume from fresh state when Command returns. */
-  new MutationObserver(() => {
+  /* The shell and Command panels can both hide the field. Stop its canvas in
+     either case and resume only when the field is actually visible again. A
+     return from Forge also re-checks the running local runtime passively. */
+  let lastSurface = R.getAttribute('data-zeno-surface');
+  const visibilityObserver = new MutationObserver(() => {
+    const surface = R.getAttribute('data-zeno-surface');
+    if (surface === 'command' && lastSurface !== 'command') {
+      agentsRead = false;
+      agentsAt = 0;
+      if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
+    }
+    lastSurface = surface;
     if (fieldShouldAnimate()) { size(); startF(); if (!F.raf) draw(); }
     else stopF();
-  }).observe(R, { attributes: true, attributeFilter: ['data-zeno-surface'] });
+  });
+  visibilityObserver.observe(R, { attributes: true, attributeFilter: ['data-zeno-surface'] });
+  const hero = document.getElementById('cmd-hero');
+  if (hero) visibilityObserver.observe(hero, { attributes: true, attributeFilter: ['hidden'] });
 
   /* keep motion honest if the OS setting changes mid-session — but only while
      the owner has made no explicit choice of their own. */
@@ -1247,11 +1273,12 @@ function wireRail(cmd) {
      and the selected state is the only thing on the rail that says where you
      are. Nothing else in this file touches aria-current on a .rail-n. */
   const select = (id) => {
+    const railId = id === 'desk' ? 'cmd-hero' : id;
     let hit = null;
     btns.forEach((x) => {
-      const on = x.getAttribute('data-jump') === id;
+      const on = x.getAttribute('data-jump') === railId;
       if (on) hit = x;
-      if (on) x.setAttribute('aria-current', 'true');
+      if (on) x.setAttribute('aria-current', 'page');
       else x.removeAttribute('aria-current');
     });
     /* Under 820px the rail is a horizontally scrolling strip and the item you

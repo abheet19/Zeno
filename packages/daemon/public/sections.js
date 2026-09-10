@@ -1071,10 +1071,18 @@ function repaintAndFocusSearch() {
   }
 }
 
-/* /forge/agents makes the daemon poke Ollama, so it is asked at boot, on an
-   explicit re-check, and at most once a minute after that. Every other read is
-   a cheap local one and polls with the rest of the surface. */
+/* Related Command panels inspect installed agents through the passive route
+   only while visible. Rendering or re-checking Integrations must never start
+   Ollama; an explicit local-model execution owns that choice. */
 const AGENTS_MIN_MS = 60000;
+const SECTION_PANELS = new Set(['sec-workstation', 'sec-vault', 'sec-integrations', 'sec-settings']);
+
+function sectionsVisible() {
+  const command = document.querySelector('[data-surface="command"]');
+  return document.visibilityState === 'visible'
+    && !command?.hidden
+    && SECTION_PANELS.has(command?.dataset.commandPanel || '');
+}
 
 let reading = false;
 let queued = null;   // a click that arrived mid-poll — dropped, it would look like the click did nothing
@@ -1096,7 +1104,7 @@ async function refresh(opts) {
       api('/brief'),
       api('/work'),
       api('/state'),
-      wantAgents ? api('/forge/agents') : Promise.resolve(S.agents),
+      wantAgents ? api('/forge/agents?passive=1') : Promise.resolve(S.agents),
       api('/skills'),
     ]);
     // Each read is settled on its own: a vault that is not enabled must not
@@ -1219,10 +1227,13 @@ export function init() {
   ensureSettingsDialog();
   repaint();                            // the honest "not loaded" state, first
   wire();
-  refresh();
+  if (sectionsVisible()) refresh();
 
-  window.addEventListener('zeno:state', () => { refresh(); });
-  setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 15000);
+  window.addEventListener('zeno:state', () => { if (sectionsVisible()) refresh(); });
+  window.addEventListener('zeno:command-panel', event => {
+    if (SECTION_PANELS.has(event.detail?.id || '')) refresh();
+  });
+  setInterval(() => { if (sectionsVisible()) refresh(); }, 15000);
 
   // Masking changes what may be shown, not what is true: repaint from state
   // already in hand. This never re-reads and never re-counts.
