@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "package": "@abheet19/glass",
+  "version": "0.1.0",
+  "repository": "https://github.com/abheet19/glass",
+  "revision": "01d13024133272b130231de0b9fa160ea05c7c4f",
+  "path": "src/tokens.css",
+  "sha256": "9bc0c3bd2e92015c1a1eb28ca9f743bc41898e89f95b88c0edec2855468663fe"
+}

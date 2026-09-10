@@ -64,16 +64,15 @@
    ============================================================================= */
 
 /* =============================================================================
-   REAL DEPENDENCY: @abheet19/glass.
+   PINNED DESIGN-SYSTEM SNAPSHOT: @abheet19/glass.
 
-   packages/daemon/package.json depends on @abheet19/glass via a local
-   `file:` reference (the zero-external-runtime-deps CI check in
-   .github/workflows/ci.yml already allow-lists any `@abheet19/*` package
-   name, so this is not an external dependency by that check's own
-   definition — verified by re-running the check after adding it).
-   scripts/sync-glass.mjs vendors the installed package's tokens.css into
-   ./vendor/glass-base.css at build time, byte-identical, so this static
-   file (served with no bundler) can @import a same-origin copy of it.
+   packages/daemon/assets/glass/tokens.css is a reviewed snapshot of Glass.
+   Its repository, revision, source path and SHA-256 digest are committed in
+   provenance.json. scripts/sync-glass.mjs verifies that digest before it
+   publishes the source bytes into ./vendor/glass-base.css, so this static UI
+   has no CDN, registry or sibling-repository dependency. A clean checkout is
+   deterministic, while a changed snapshot fails instead of being served with
+   stale provenance.
 
    THIS IS AN OVERRIDE, NOT A REPLACEMENT. Every custom property below that
    also exists in glass's base grammar (--r-1/2/3, --ease, --t-fast/base/slow,
