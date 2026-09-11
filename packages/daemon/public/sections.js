@@ -83,6 +83,29 @@ async function api(path) {
   };
 }
 
+/* The only NON-GET call this file makes: the owner writing their own memory note.
+   Same token, same origin. POST /memory is owner-authorised and not gated — the
+   owner IS the approval authority, so it is not a proposal (memory-routes.ts). An
+   agent's memory still arrives as a capsule; this is only the owner's own note. */
+async function apiWrite(path, payload) {
+  const t = token();
+  const headers = { accept: 'application/json', 'content-type': 'application/json' };
+  if (t) headers['x-zeno-token'] = t;
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', headers, cache: 'no-store', credentials: 'same-origin', body: JSON.stringify(payload) });
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: { message: (err && err.message) || 'the daemon could not be reached' } };
+  }
+  const data = await res.json().catch(() => null);
+  return {
+    ok: res.ok,
+    status: res.status,
+    data,
+    error: res.ok ? null : ((data && data.error) || { message: `The daemon answered ${res.status}.` }),
+  };
+}
+
 /* ---- text ------------------------------------------------------------------
    Every string that reaches innerHTML goes through esc() first. Branch names,
    file paths, note bodies, commit summaries and source details are all data
@@ -179,6 +202,14 @@ const CSS = `
   border:1px solid var(--rule-2,#2C363B); background:var(--g2,#0F1214); color:var(--ink,#ECEBE6);
 }
 .zs-find input::placeholder{ color:var(--ink-3,#6C7480); }
+.zs-add{ display:flex; gap:7px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+.zs-add input{
+  flex:1; min-width:180px; font:inherit; font-size:12px;
+  padding:7px 10px; border-radius:var(--r-1,6px);
+  border:1px solid var(--rule-2,#2C363B); background:var(--g2,#0F1214); color:var(--ink,#ECEBE6);
+}
+.zs-add input::placeholder{ color:var(--ink-3,#6C7480); }
+.zs-add-status{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10.5px; color:var(--ink-3,#6C7480); }
 .zs-more{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10px; color:var(--ink-3,#6C7480); padding-left:2px; }
 .zs-hr{ height:1px; background:var(--rule,#242C31); border:0; margin:2px 0; }
 
@@ -513,6 +544,12 @@ function renderVault(mem, brief, query) {
     + '<button type="button" class="btn sm p" data-vault-find="1">Search</button>'
     + (searching ? '<button type="button" class="btn sm g" data-vault-clear="1">Clear</button>' : '')
     + '</div>'
+    + (token()
+      ? '<div class="zs-add"><input type="text" id="zs-add-note" maxlength="400" '
+        + 'placeholder="Remember something — a decision, a preference, a fact" aria-label="Add a memory note">'
+        + '<button type="button" class="btn sm p" data-vault-remember="1">Remember</button>'
+        + '<span class="zs-add-status" id="zs-add-status" role="status"></span></div>'
+      : '')
     + note('The query goes to this daemon on 127.0.0.1 and nowhere else. Recall is a plain term match, '
       + 'so every result shows the terms it matched on and its score — a memory you cannot trace is a '
       + 'rumour, and the Vault does not deal in rumours.', 'cy');
@@ -1134,6 +1171,21 @@ function wire() {
       return;
     }
 
+    if (t.closest('[data-vault-remember]')) {
+      const input = document.getElementById('zs-add-note');
+      const status = document.getElementById('zs-add-status');
+      const text = input ? String(input.value || '').trim() : '';
+      if (!text) { if (status) status.textContent = 'Type the note first.'; return; }
+      if (status) status.textContent = 'Saving…';
+      // The owner's own note: title is a short handle, body is the full text.
+      // The daemon sanitizes every field for secrets before it reaches Vault.
+      apiWrite('/memory', { kind: 'fact', title: text.slice(0, 120), body: text, tags: [] })
+        .then((r) => {
+          if (r.ok) { if (input) input.value = ''; if (status) status.textContent = 'Remembered.'; refresh(); }
+          else if (status) status.textContent = 'Not saved: ' + ((r.error && r.error.message) || 'the daemon refused it');
+        });
+      return;
+    }
     if (t.closest('[data-vault-find]')) {
       const input = document.getElementById('zs-vq');
       S.query = input ? String(input.value || '').trim() : '';
