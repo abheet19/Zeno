@@ -44,6 +44,7 @@
  */
 
 import { interpret } from './session.js';
+import { EMPTY_COMMAND } from './grammar.js';
 import { WakeListener, WAKE_WINDOW_MS, RETENTION_MS } from './listen.js';
 
 // ---- the owner token, read the same way the rest of the window reads it -----
@@ -1370,6 +1371,20 @@ async function addTask(intent) {
   }
 }
 
+/* A greeting or a bare wake ("Zeno", "Zeno, are you there?") is the owner asking
+ * for Zeno with no command yet. Bring the one composer forward — switch to
+ * Command and focus its input — instead of reporting a non-command as a failure.
+ * Wake mode is already listening; push-to-talk leaves the composer ready. */
+function summonCommand(note) {
+  const nav = document.querySelector('[data-nav="command"]');
+  if (nav && nav.tagName === 'BUTTON' && typeof nav.click === 'function') nav.click();
+  const composer = document.querySelector('[data-surface="command"] .za-input');
+  if (composer && typeof composer.focus === 'function') {
+    try { composer.focus({ preventScroll: true }); } catch { composer.focus(); }
+  }
+  setOutcome(note, 'ok');
+}
+
 /**
  * Act on one Outcome. Both modes land here, so a command means the same thing
  * whether it was pushed-to-talk or woken — including the refusal that says
@@ -1408,10 +1423,21 @@ function handleOutcome(result, spoken) {
     case 'cancel':
       setOutcome('Cancelled.', 'ok');
       break;
+    case 'acknowledge':
+      // The owner addressed Zeno by name with no command (a greeting, "are you
+      // there?"). Summon Command and keep listening rather than answering with an
+      // error — the microphone stays open for the sentence that follows.
+      summonCommand('Listening — Command is ready. Say what you need, or type it here.');
+      break;
     case 'unrecognized':
-      // This is also where a spoken "approve it" lands — with the reason that
-      // approval is by hand. Voice cannot approve, in either mode, and this is
-      // where it says so.
+      // A bare wake with nothing after it is a summons too, not a mistake, so it
+      // also brings Command forward. Every OTHER unrecognized outcome — the spoken
+      // "approve it" among them — states its reason and does nothing, because voice
+      // cannot approve, in either mode, and this is where it says so.
+      if (intent.reason === EMPTY_COMMAND) {
+        summonCommand('Listening — Command is ready. Say what you need, or type it here.');
+        break;
+      }
       setOutcome(intent.reason, 'warn');
       break;
     default:
