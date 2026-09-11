@@ -13,6 +13,7 @@ function one(selector) {
 
 const groups = new Map([
   ['cmd-hero', [one('.hero'), one('.home-starters'), one('.cmdduo'), one('#cmd-status'), one('#cmd-desk')]],
+  ['chats', [one('#chats')]],
   ['pending', [one('#pending')]],
   ['timeline', [one('#timeline')]],
   ['sec-workstation', [one('#sec-workstation')]],

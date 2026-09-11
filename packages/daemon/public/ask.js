@@ -920,6 +920,21 @@ ui.clear.addEventListener('click', () => {
   setStatus('Conversation cleared from this renderer. Nothing was deleted from Vault because raw chat was never stored there.', 'ok');
 });
 
+// Chats reopens a saved conversation into this thread so it continues here, with
+// the same live composer and the same gate. The turns are re-rendered from the
+// local snapshot; nothing is re-sent to the daemon until you type again.
+window.addEventListener('zeno:restore-chat', (event) => {
+  const turns = event.detail && Array.isArray(event.detail.turns) ? event.detail.turns : [];
+  for (const turn of ui.thread.querySelectorAll('.za-turn,.za-thinking')) turn.remove();
+  ui.empty.hidden = false;
+  ui.panel.dataset.hasTurns = 'false';
+  for (const t of turns) {
+    if (t && t.text) appendTurn(t.role === 'user' ? 'user' : 'assistant', String(t.text));
+  }
+  if (turns.length) setStatus('Reopened a saved conversation. Continue it here — it keeps saving to Chats.', 'ok');
+  ui.input.focus({ preventScroll: true });
+});
+
 ui.voiceSelect.addEventListener('change', () => {
   saveVoice(ui.voiceSelect.value);
   const selected = installedVoices.find(voice => voice.voiceURI === ui.voiceSelect.value);
