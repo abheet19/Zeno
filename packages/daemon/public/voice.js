@@ -138,6 +138,184 @@ function el(tag, cls, text) {
   return n;
 }
 
+// ---- voice adaptation: local, opt-in, push-to-talk only ---------------------
+// The owner's own list of terms and corrections. It biases ONLY the local
+// push-to-talk recognizer's vocabulary hint — it never touches the always-open
+// wake recognizer (biasing that toward room audio is how false activations
+// happen), never learns from Counsel participants or ambient audio, and never
+// leaves this machine: it lives in this browser's localStorage and nowhere else.
+const VOCAB_KEY = 'zeno-voice-vocab-v1';
+
+function loadVocab() {
+  try {
+    const raw = localStorage.getItem(VOCAB_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((x) => x && typeof x.term === 'string' && x.term.trim() !== '') : [];
+  } catch {
+    return []; // private mode / blocked storage: adaptation is simply empty
+  }
+}
+
+function saveVocab(list) {
+  try {
+    localStorage.setItem(VOCAB_KEY, JSON.stringify(list));
+    return true;
+  } catch {
+    return false; // storage unavailable: the caller says so rather than pretend it saved
+  }
+}
+
+/** The extra vocabulary hint appended to the local recognizer's prompt. Empty
+ * when the owner has added nothing, so the default behaviour is unchanged. */
+function vocabPromptExtra() {
+  const terms = loadVocab().map((v) => String(v.term).trim()).filter(Boolean);
+  return terms.length ? ` The speaker often says: ${terms.join(', ')}.` : '';
+}
+
+/** The opt-in adaptation panel: a local list of terms the owner reviews, with
+ * Add / remove / Inspect / Export / Reset. Self-contained — it owns its own
+ * localStorage state and re-renders itself; wireRecognition just reads the
+ * vocab through vocabPromptExtra(). */
+function mountAdaptPanel() {
+  const wrap = el('details', 'zv-adapt');
+  wrap.style.cssText = 'border:1px solid var(--rule-2,#2C353B);border-radius:10px;background:var(--g2,#101416)';
+  const sum = el('summary', 'zv-adapt-sum', 'Voice adaptation — local & opt-in');
+  sum.style.cssText = 'cursor:pointer;padding:10px 12px;font:600 12px system-ui,sans-serif;color:var(--ink,#ECEBE6)';
+  const body = el('div');
+  body.style.cssText = 'padding:0 12px 12px;display:flex;flex-direction:column;gap:9px';
+  wrap.append(sum, body);
+
+  const note = el('p', null,
+    'Opt-in and local. Terms you add here go into the vocabulary hint your PUSH-TO-TALK recognizer sees, so it '
+    + 'hears the words you actually use. It never learns from wake-word room audio or from Counsel participants, it '
+    + 'only takes effect while local (Whisper) speech recognition is on, and nothing here is sent anywhere — it lives '
+    + 'in this browser and nowhere else.');
+  note.style.cssText = 'margin:0;font-size:11.5px;line-height:1.55;color:var(--ink-2,#9AA1AC)';
+
+  const form = el('div');
+  form.style.cssText = 'display:flex;gap:7px;flex-wrap:wrap';
+  const input = el('input');
+  input.type = 'text';
+  input.maxLength = 60;
+  input.placeholder = 'A word or name Zeno mishears — e.g. “Qwen”, “Abheet”';
+  input.setAttribute('aria-label', 'Add a vocabulary term');
+  input.style.cssText = 'flex:1;min-width:180px;font:inherit;font-size:12px;padding:7px 10px;border-radius:8px;border:1px solid var(--rule-2,#2C353B);background:var(--g1,#0A0C0E);color:var(--ink,#ECEBE6)';
+  const addBtn = el('button', null, 'Add');
+  addBtn.type = 'button';
+  addBtn.style.cssText = 'flex:none;padding:7px 14px;border-radius:8px;border:1px solid var(--cyan-dim,#1E6B76);background:transparent;color:var(--cyan,#38C3D6);font:600 12px system-ui,sans-serif;cursor:pointer';
+  form.append(input, addBtn);
+
+  const status = el('p', 'zv-adapt-status');
+  status.setAttribute('role', 'status');
+  status.style.cssText = 'margin:0;font-size:10.5px;color:var(--ink-3,#6C7480);min-height:12px';
+
+  const listEl = el('div');
+  listEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
+
+  const footer = el('div');
+  footer.style.cssText = 'display:flex;gap:7px;flex-wrap:wrap;margin-top:2px';
+  const inspectBtn = el('button', null, 'Inspect');
+  const exportBtn = el('button', null, 'Export');
+  const resetBtn = el('button', null, 'Reset all');
+  for (const b of [inspectBtn, exportBtn, resetBtn]) {
+    b.type = 'button';
+    b.style.cssText = 'padding:5px 11px;border-radius:7px;border:1px solid var(--rule-2,#2C353B);background:transparent;color:var(--ink-2,#9AA1AC);font:600 11px system-ui,sans-serif;cursor:pointer';
+  }
+  footer.append(inspectBtn, exportBtn, resetBtn);
+
+  const inspectOut = el('pre', 'zv-adapt-inspect');
+  inspectOut.hidden = true;
+  inspectOut.style.cssText = 'margin:0;white-space:pre-wrap;font:11px/1.5 ui-monospace,Consolas,monospace;color:var(--ink-2,#9AA1AC);background:var(--g1,#0A0C0E);border:1px solid var(--rule,#242C31);border-radius:8px;padding:8px 10px;overflow:auto;max-height:140px';
+
+  body.append(note, form, status, listEl, footer, inspectOut);
+
+  const setStatus = (t) => { status.textContent = t || ''; };
+
+  function render() {
+    const list = loadVocab();
+    listEl.replaceChildren();
+    if (list.length === 0) {
+      const empty = el('span', null, 'Nothing added yet — Zeno uses its built-in hints only.');
+      empty.style.cssText = 'font-size:11px;color:var(--ink-3,#6C7480)';
+      listEl.append(empty);
+    } else {
+      for (const item of list) {
+        const chip = el('span');
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:4px 6px 4px 10px;border-radius:999px;border:1px solid var(--rule-2,#2C353B);background:var(--g3,#151A1D);font:11px ui-monospace,Consolas,monospace;color:var(--ink,#ECEBE6)';
+        const x = el('button', null, '✕');
+        x.type = 'button';
+        x.setAttribute('aria-label', `Remove ${item.term}`);
+        x.style.cssText = 'border:0;background:transparent;color:var(--ink-3,#6C7480);cursor:pointer;font:10px ui-monospace,Consolas,monospace;padding:2px 5px;border-radius:999px';
+        x.addEventListener('click', () => {
+          saveVocab(loadVocab().filter((v) => !(v.term === item.term && v.at === item.at)));
+          setStatus(`Removed “${item.term}”.`);
+          render();
+        });
+        chip.append(el('span', null, item.term), x);
+        listEl.append(chip);
+      }
+    }
+    inspectOut.hidden = true;
+  }
+
+  function addTerm() {
+    const term = String(input.value || '').trim();
+    if (!term) { setStatus('Type a term first.'); return; }
+    const list = loadVocab();
+    if (list.some((v) => v.term.toLowerCase() === term.toLowerCase())) { setStatus('That term is already in your list.'); input.value = ''; return; }
+    list.push({ term, at: Date.now() });
+    const ok = saveVocab(list);
+    input.value = '';
+    setStatus(ok ? `Added “${term}”. It applies to your next hold-to-talk.` : 'Storage is unavailable in this window, so it was not saved.');
+    render();
+  }
+  addBtn.addEventListener('click', addTerm);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addTerm(); } });
+
+  inspectBtn.addEventListener('click', () => {
+    const extra = vocabPromptExtra();
+    inspectOut.textContent = extra
+      ? `Added to the local recognizer's vocabulary hint:\n${extra.trim()}`
+      : 'Your list is empty, so nothing is added to the recognizer hint.';
+    inspectOut.hidden = false;
+  });
+  exportBtn.addEventListener('click', () => {
+    const list = loadVocab();
+    try {
+      const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = el('a');
+      a.href = url;
+      a.download = 'zeno-voice-vocabulary.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      setStatus(`Exported ${list.length} term${list.length === 1 ? '' : 's'} to a file.`);
+    } catch {
+      setStatus('The browser blocked the download; nothing was saved.');
+    }
+  });
+  resetBtn.addEventListener('click', () => {
+    if (resetBtn.dataset.armed === '1') {
+      saveVocab([]);
+      resetBtn.dataset.armed = '0';
+      resetBtn.textContent = 'Reset all';
+      setStatus('Cleared every term.');
+      render();
+      return;
+    }
+    resetBtn.dataset.armed = '1';
+    resetBtn.textContent = 'Clear everything?';
+    window.setTimeout(() => {
+      if (resetBtn.dataset.armed === '1') { resetBtn.dataset.armed = '0'; resetBtn.textContent = 'Reset all'; }
+    }, 3500);
+  });
+
+  render();
+  return wrap;
+}
+
 // ---- the panel --------------------------------------------------------------
 
 function mountPanel() {
@@ -388,12 +566,13 @@ function mountPanel() {
   ].join(';');
   delegate.append(delegateTask, delegateAgent, delegateWhy, delegateState, delegateButtons, delegateLink);
 
-  panel.append(row, indicator, line, delegate, retention, disclosure, plain, how);
+  const adapt = mountAdaptPanel();
+  panel.append(row, indicator, line, delegate, retention, disclosure, plain, how, adapt);
   // The backdrop hangs off the panel too, so tearing the panel down takes it.
   panel.appendChild(backdrop);
   host.appendChild(panel);
   return {
-    panel, button, wakeToggle, status, heard, outcome,
+    panel, button, wakeToggle, status, heard, outcome, adapt,
     stateGlyph, stateWord, stateDetail,
     retention, retentionText,
     disclosure, backdrop, ack, confirm, cancel,
@@ -770,11 +949,11 @@ function wireRecognition() {
   // otherwise easy to confuse (for example, "waiting" and "waving"). Wake
   // listening stays neutral: biasing an always-open recognizer toward "Zeno"
   // would increase the chance of a false activation from room audio.
-  if (localSpeech) {
-    recognition.initialPrompt =
-      'Zeno, what is waiting? Show pending items. Show receipts. Verify the ledger. ' +
-      'Open Command. Open Forge. Open Counsel. Add a task. Create a component. Build a feature.';
-  }
+  const BASE_PTT_PROMPT =
+    'Zeno, what is waiting? Show pending items. Show receipts. Verify the ledger. ' +
+    'Open Command. Open Forge. Open Counsel. Add a task. Create a component. Build a feature.';
+  // Set per-start (below), not once here, so a term the owner adds in the
+  // adaptation panel applies to the very next hold-to-talk without a reload.
 
   let listening = false;
   let finalText = '';
@@ -889,6 +1068,9 @@ function wireRecognition() {
     try {
       await waitForSpeechIdle();
       if (!listening || !held) return;
+      // Local recognizer only: fold in the owner's opt-in vocabulary now, so the
+      // hint reflects the current list. The browser recognizer ignores prompts.
+      if (localSpeech) recognition.initialPrompt = BASE_PTT_PROMPT + vocabPromptExtra();
       recognition.start();
     } catch {
       held = false; listening = false; MIC.ptt = false;
