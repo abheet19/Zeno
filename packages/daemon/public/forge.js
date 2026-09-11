@@ -3025,14 +3025,27 @@ export function initForge(section) {
 
   function codeBlock(text, lang, label) {
     const box = el('div', 'fgcode');
-    if (label) {
-      const h = el('div', 'fgcode-h');
-      add(h, el('span', 'fgcode-p', label));
-      if (lang) add(h, el('span', 'fgcode-l', lang));
-      add(box, h);
-    }
+    const code = String(text).replace(/\s+$/, '');
+    const h = el('div', 'fgcode-h');
+    add(h, el('span', 'fgcode-p', label || lang || 'text'));
+    // The language chip is redundant when the label already IS the language (a
+    // fenced ```lang block, where label and lang are the same tag).
+    if (lang && lang.toLowerCase() !== String(label || '').toLowerCase()) add(h, el('span', 'fgcode-l', lang));
+    // Copy the exact bytes shown. The clipboard API can be absent (insecure
+    // context) or denied; the label reports that instead of silently failing.
+    const copy = btn('fgcode-copy', 'Copy', () => {
+      const done = (ok) => {
+        copy.textContent = ok ? 'Copied' : 'Copy unavailable';
+        setTimeout(() => { copy.textContent = 'Copy'; }, 1400);
+      };
+      if (!navigator.clipboard || !navigator.clipboard.writeText) { done(false); return; }
+      navigator.clipboard.writeText(code).then(() => done(true), () => done(false));
+    });
+    copy.setAttribute('aria-label', 'Copy this block to the clipboard');
+    add(h, copy);
+    add(box, h);
     const pre = el('pre');
-    pre.textContent = String(text).replace(/\s+$/, '');
+    pre.textContent = code;
     add(box, pre);
     const m = monacoIfLoaded();
     // colorizeElement reads the node's own textContent, tokenises it and writes

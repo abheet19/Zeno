@@ -1478,8 +1478,13 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   border-bottom:1px solid var(--rule); background:var(--g3);
   font-family:var(--font-mono); font-size:9.5px; color:var(--ink-2);
 }
-.forge .fgcode-h .fgcode-p{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.forge .fgcode-h .fgcode-l{ margin-left:auto; color:var(--ink-3); flex:none; }
+.forge .fgcode-h .fgcode-p{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.forge .fgcode-h .fgcode-l{ color:var(--ink-3); flex:none; }
+.forge .fgcode-copy{
+  flex:none; font:9.5px/1 var(--font-mono); color:var(--ink-3); cursor:pointer;
+  background:none; border:1px solid var(--rule); border-radius:5px; padding:3px 7px;
+}
+.forge .fgcode-copy:hover{ color:var(--ink); border-color:var(--rule-2); background:var(--g4); }
 .forge .fgcode pre{
   margin:0; padding:9px 11px; font-family:var(--font-mono); font-size:11px; line-height:1.6;
   color:var(--ink); overflow-x:auto; max-height:44vh; overflow-y:auto; white-space:pre;
