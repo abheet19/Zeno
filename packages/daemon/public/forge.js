@@ -2777,10 +2777,14 @@ export function initForge(section) {
         ));
         return wrap;
       }
-      if (S.chat.length === 0 && S.gates.length === 0) {
+      // The agent view's landing vs. active-conversation layout is CSS-owned:
+      // one root attribute, mirroring data-forge-view (see index.html agent block).
+      const isEmpty = S.chat.length === 0 && S.gates.length === 0;
+      R.setAttribute('data-forge-agent-empty', isEmpty ? '1' : '0');
+      if (isEmpty) {
         const empty = el('div', 'fgempty');
         add(empty, glyph('✦', 'fgempty-mark'), el('h2', null, 'What should Zeno work on?'),
-          el('p', null, 'Describe a task below. Forge will show the current state and next action here.'));
+          el('p', null, 'Describe a task below. Forge works in an isolated worktree and shows the current state and next action here.'));
         const starters = el('div', 'fgempty-starters');
         const seed = (label, task) => {
           const button = btn(null, label, () => {
@@ -2798,6 +2802,23 @@ export function initForge(section) {
         seed('Find failing checks', 'Run the repository checks and explain any failures.');
         seed('Plan a change', 'Help me plan a bounded change in this repository.');
         add(empty, starters);
+        // Recent sessions — the other in-window conversations that already hold a
+        // turn, newest first. Sessions are in-memory only, so this is the live set,
+        // not a persisted history; clicking one switches to it.
+        const recents = S.sessions.filter((s) => s.id !== S.selectedSessionId && s.chat.length > 0).reverse();
+        if (recents.length) {
+          const list = el('div', 'fgrecent');
+          add(list, el('div', 'fgrecent-h', 'Recent sessions'));
+          for (const s of recents.slice(0, 6)) {
+            const first = s.chat.find((t) => t.who === 'you');
+            const label = first && first.text ? first.text : s.name;
+            const row = btn('fgrecent-row', null, () => { S.selectedSessionId = s.id; paintC(); paintE(); });
+            add(row, el('span', 'fgrecent-t', label.length > 64 ? `${label.slice(0, 63)}…` : label),
+              el('span', 'fgrecent-m', `${s.chat.length} ${s.chat.length === 1 ? 'message' : 'messages'} · ${s.name}`));
+            add(list, row);
+          }
+          add(empty, list);
+        }
         const safety = el('details', 'fgempty-details');
         add(safety, el('summary', null, 'How changes and approvals work'),
           el('p', null, 'Runs use an isolated worktree. File changes become governed proposals, and non-routine effects wait in approval capsules.'));

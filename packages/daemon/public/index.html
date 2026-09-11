@@ -1295,6 +1295,18 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   color:var(--ink-2); font:11.5px/1.2 var(--font-ui); cursor:pointer;
 }
 .forge .fgempty-starters button:hover{ border-color:var(--rule-2); color:var(--ink); background:var(--g4); }
+/* Agent-view landing (Devin-style): centre the empty state and its recent-session
+   list instead of top-anchoring it. Scoped to the empty attribute so an active
+   conversation is untouched. */
+:root[data-forge-view="agent"][data-forge-agent-empty="1"] .fgtranscript{ display:flex; flex-direction:column; align-items:center; justify-content:center; }
+:root[data-forge-view="agent"][data-forge-agent-empty="1"] .fgempty{ text-align:center; padding-block:12px; }
+:root[data-forge-view="agent"][data-forge-agent-empty="1"] .fgempty-starters{ justify-content:center; }
+.forge .fgrecent{ width:100%; max-width:520px; margin-top:22px; display:flex; flex-direction:column; gap:3px; text-align:left; }
+.forge .fgrecent-h{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); padding:0 2px 5px; }
+.forge .fgrecent-row{ display:flex; flex-direction:column; gap:2px; align-items:flex-start; width:100%; padding:9px 11px; border:1px solid var(--rule); border-radius:9px; background:var(--g2); color:var(--ink-2); cursor:pointer; }
+.forge .fgrecent-row:hover{ border-color:var(--rule-2); color:var(--ink); background:var(--wash); }
+.forge .fgrecent-t{ font-size:13px; color:var(--ink); }
+.forge .fgrecent-m{ font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
 .forge .fghosted{
   flex:none; margin:8px 9px 0; padding:10px 11px; border:1px solid color-mix(in srgb, var(--amber) 55%, var(--rule));
   border-radius:9px; background:var(--g3); color:var(--ink-2); font-size:11px; line-height:1.5;
