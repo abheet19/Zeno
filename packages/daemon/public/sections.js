@@ -723,6 +723,12 @@ function renderVault(mem, brief, query, pending) {
         + 'placeholder="Remember something — a decision, a preference, a fact" aria-label="Add a memory note">'
         + '<button type="button" class="btn sm p" data-vault-remember="1">Remember</button>'
         + '<span class="zs-add-status" id="zs-add-status" role="status"></span></div>'
+        // Move memory in and out. Import sanitizes every field before it writes and
+        // says what it redacted; export hands the owner a JSON file of what is loaded.
+        + '<div class="zs-add"><input type="file" id="zs-import-file" accept="application/json,.json" style="display:none">'
+        + '<button type="button" class="btn sm g" data-vault-import="1">⬆ Import notes</button>'
+        + '<button type="button" class="btn sm g" data-vault-export-all="1">⬇ Export all</button>'
+        + '<span class="zs-add-status" id="zs-import-status" role="status"></span></div>'
       : '')
     + note('The query goes to this daemon on 127.0.0.1 and nowhere else. Recall is a plain term match, '
       + 'so every result shows the terms it matched on and its score — a memory you cannot trace is a '
@@ -1454,6 +1460,19 @@ function wire() {
       apiDelete('/memory/' + encodeURIComponent(id)).then(() => refresh());
       return;
     }
+    if (t.closest('[data-vault-import]')) {
+      const file = document.getElementById('zs-import-file');
+      if (file) file.click(); // the hidden file input; its change handler does the work
+      return;
+    }
+    if (t.closest('[data-vault-export-all]')) {
+      const notes = (S.mem && S.mem.ok && S.mem.data && Array.isArray(S.mem.data.notes)) ? S.mem.data.notes : [];
+      const status = document.getElementById('zs-import-status');
+      if (!notes.length) { if (status) status.textContent = 'Nothing to export yet.'; return; }
+      const ok = downloadJson('zeno-memory-export.json', notes);
+      if (status) status.textContent = ok ? `Exported ${notes.length} note${notes.length === 1 ? '' : 's'}.` : 'The browser blocked the download.';
+      return;
+    }
     if (t.closest('[data-vault-find]')) {
       const input = document.getElementById('zs-vq');
       S.query = input ? String(input.value || '').trim() : '';
@@ -1496,6 +1515,38 @@ function wire() {
       paint('sec-settings', renderSettings(S.state));
       paintSettingsDialog({ force: true, snapshot: focusKey ? { key: focusKey } : null });
     }
+  });
+
+  // The Vault import file input. Reading the file is local; only the parsed notes
+  // are POSTed, and the daemon sanitizes every field before it writes. The result
+  // is stated plainly — imported, redacted, skipped — never a silent success.
+  document.addEventListener('change', (e) => {
+    const input = e.target;
+    if (!input || input.id !== 'zs-import-file') return;
+    const status = document.getElementById('zs-import-status');
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => { if (status) status.textContent = 'That file could not be read.'; };
+    reader.onload = () => {
+      let parsed;
+      try { parsed = JSON.parse(String(reader.result || '')); } catch {
+        if (status) status.textContent = 'That is not valid JSON. Export a Vault file, or an array of notes.';
+        input.value = '';
+        return;
+      }
+      const notes = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.notes) ? parsed.notes : null);
+      if (!notes) { if (status) status.textContent = 'No notes array found in that file.'; input.value = ''; return; }
+      if (status) status.textContent = `Importing ${notes.length}…`;
+      apiWrite('/memory/import', { notes }).then((r) => {
+        input.value = '';
+        if (!r.ok) { if (status) status.textContent = 'Import failed: ' + ((r.error && r.error.message) || 'the daemon refused it'); return; }
+        const d = r.data || {};
+        if (status) status.textContent = `Imported ${d.imported || 0}` + (d.redacted ? ` · ${d.redacted} secret-like value${d.redacted === 1 ? '' : 's'} redacted` : '') + (d.skipped ? ` · ${d.skipped} skipped` : '') + '.';
+        refresh();
+      });
+    };
+    reader.readAsText(file);
   });
 
   // Search is entirely local: values never leave the page and every keystroke

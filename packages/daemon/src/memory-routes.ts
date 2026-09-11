@@ -303,6 +303,45 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
       return { status: 200, body: { pending: [...pending.values()].map((p) => ({ preview: p.preview, payload: p.payload })) } };
     }
 
+    /**
+     * The owner bringing their OWN notes in — an export from another Zeno, or a
+     * hand-written list. Owner-only, and the owner is the write authority, so it
+     * is not a proposal. Every field of every note is sanitized before it is
+     * stored (a pasted export can carry a secret the same as a spoken line), and
+     * the reply says exactly what happened: how many were written, how many
+     * secret-like values were redacted first, and how many were skipped as
+     * invalid — never a silent "done".
+     */
+    if (method === 'POST' && path === '/memory/import') {
+      if (role !== 'owner') return ownerOnly('import memory');
+      const body = await readBody();
+      const raw = Array.isArray(body['notes']) ? (body['notes'] as unknown[]) : null;
+      if (raw === null) return bad('An import needs a notes array.', 'POST {"notes":[{"description"|"title","body","tags","kind"}]}.');
+      if (raw.length > 500) return bad('That is too many notes for one import.', 'Import at most 500 notes at a time.');
+      let imported = 0;
+      let skipped = 0;
+      let redacted = 0;
+      const entries: ReturnType<typeof wire>[] = [];
+      for (const item of raw) {
+        if (typeof item !== 'object' || item === null) { skipped += 1; continue; }
+        const rec = item as Record<string, unknown>;
+        const descClean = sanitize(str(rec, 'description') ?? str(rec, 'title') ?? '');
+        const bodyClean = sanitize(str(rec, 'body') ?? '');
+        redacted += descClean.findings.length + bodyClean.findings.length;
+        const checked = validateMemoryInput({
+          kind: (str(rec, 'kind') ?? 'fact') as MemoryInput['kind'],
+          description: descClean.clean,
+          body: bodyClean.clean,
+          source: 'import',
+          tags: scrubTags(rec['tags']),
+        });
+        if (!checked.ok) { skipped += 1; continue; }
+        entries.push(wire(applyMemoryWrite(deps.memory, checked.payload)));
+        imported += 1;
+      }
+      return { status: 200, body: { imported, skipped, redacted, total: raw.length, entries } };
+    }
+
     if (method === 'DELETE' && path.startsWith('/memory/')) {
       if (role !== 'owner') return ownerOnly('delete memory');
       const id = decodeURIComponent(path.slice('/memory/'.length));
@@ -318,7 +357,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         error: {
           code: 'not-found',
           message: `No memory route for ${method} ${path}.`,
-          resolve: 'GET /memory, GET /memory/recall?q=, GET /memory/context?task=, POST /memory, POST /memory/propose, POST /memory/approvals, DELETE /memory/<id>.',
+          resolve: 'GET /memory, GET /memory/recall?q=, GET /memory/context?task=, POST /memory, POST /memory/propose, POST /memory/approvals, POST /memory/import, DELETE /memory/<id>.',
         },
       },
     };
