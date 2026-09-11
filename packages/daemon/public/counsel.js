@@ -761,6 +761,73 @@ export function initCounsel(section) {
     renderCall();
   }
 
+  /* Hand the owner a file of their own call. Built here, client-side, from the
+     same record already on screen — it goes to the owner's disk on this machine
+     and nowhere else. The page starts the download; if the environment blocks a
+     page-initiated save, we say so rather than pretend it saved. */
+  function downloadFile(filename, text, mime) {
+    try {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function slugify(s) {
+    return String(s || 'call').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'call';
+  }
+
+  /* The call as Markdown: the same four cited sections the panel shows, then the
+     full transcript, then a provenance line. Nothing is invented — an item that
+     had no owner/date/citation says so here exactly as it does on screen. */
+  function callMarkdown(m) {
+    const out = [];
+    const utter = new Map((m.utterances || []).map((u) => [u.id, u]));
+    const cited = (cites) => (cites || []).map((id) => {
+      const u = utter.get(id);
+      return u ? `\n  > [${id}] ${u.text}` : `\n  > [missing line ${id}]`;
+    }).join('');
+    out.push(`# ${m.title || 'Untitled call'}`, '');
+    out.push(`- **When:** ${fmtDate(m.startedAt)} → ${fmtDate(m.endedAt)}`);
+    out.push(`- **Participants:** ${(m.participants || []).join(', ') || 'none named'}`);
+    out.push(`- **Lines:** ${(m.utterances || []).length}`);
+    out.push(`- **Record id:** ${m.id}`, '');
+    const sum = m.summary || {};
+    const section = (label, items, fmt) => {
+      out.push(`## ${label}`);
+      if (!items || items.length === 0) out.push(`_Nothing in this call was extracted as ${label.toLowerCase()}._`);
+      else for (const it of items) out.push(fmt(it));
+      out.push('');
+    };
+    section('Decisions', sum.decisions, (d) => `- (${d.lifecycle}) ${d.text}${cited(d.cites)}`);
+    section('Action items', sum.actions, (a) => `- ${a.text} — owner: ${a.owner || 'nobody named'}; due: ${a.due || 'no date said'}${cited(a.cites)}`);
+    section('Open questions', sum.questions, (q) => `- ${q.text}${cited(q.cites)}`);
+    section('Key points', sum.keyPoints, (k) => `- ${k.text}${cited(k.cites)}`);
+    out.push('## Transcript');
+    for (const u of (m.utterances || [])) out.push(`- **${u.speaker || 'unknown'}** [${u.id}]: ${u.text}`);
+    out.push('', `> Exported from Zeno Counsel — generated locally on this machine; nothing left it.`);
+    return out.join('\n');
+  }
+
+  function exportCall(m, format) {
+    const base = `${slugify(m.title)}-${String(m.id || '').slice(0, 8)}`;
+    const ok = format === 'json'
+      ? downloadFile(`${base}.json`, JSON.stringify(m, null, 2), 'application/json')
+      : downloadFile(`${base}.md`, callMarkdown(m), 'text/markdown');
+    announce(ok
+      ? `Exported this call as ${format === 'json' ? 'JSON' : 'Markdown'} to your downloads.`
+      : 'The browser blocked the download. Nothing was saved — try again, or copy the notes by hand.');
+  }
+
   function renderCall() {
     clear(panelCall);
     add(panelCall, el('p', 'k', 'The call'));
@@ -810,6 +877,16 @@ export function initCounsel(section) {
     title.style.fontSize = '18px';
     title.style.color = 'var(--ink)';
     add(h, title, el('span', 'sp'));
+    // Export the owner's own record — Markdown to read, JSON to keep. Client-side,
+    // to this machine's disk only (see downloadFile). Owner-gated like delete: a
+    // read-only page cannot save what it was never trusted to hold.
+    if (OWNER_TOKEN) {
+      const mdBtn = btn('btn sm g', '↓ Markdown', () => { exportCall(m, 'md'); });
+      mdBtn.title = 'Save this call as a Markdown file on this machine';
+      const jsonBtn = btn('btn sm g', '↓ JSON', () => { exportCall(m, 'json'); });
+      jsonBtn.title = 'Save this call as a JSON record on this machine';
+      add(h, mdBtn, jsonBtn);
+    }
     const delBtn = btn(
       'btn sm g',
       S.deleting === m.id ? 'Click again to delete for good' : 'Delete this call',
