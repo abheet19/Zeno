@@ -441,8 +441,10 @@ function projPt(px, py, pz) {
 function proj(n) { return projPt(n.x, n.y, n.z); }
 function lay(t) {
   const wide = F.W > 820;
-  const pad = Math.min(F.W * (wide ? 0.27 : 0.34), F.H * (wide ? 0.88 : 0.72));
-  const cx = F.W * (wide ? 0.655 : 0.50), cy = F.H * (wide ? 0.51 : 0.48);
+  // The masthead now sits BELOW the field, so the orb is centred on both axes
+  // instead of being pushed right to clear a left-hand headline.
+  const pad = Math.min(F.W * (wide ? 0.34 : 0.36), F.H * (wide ? 0.80 : 0.72));
+  const cx = F.W * 0.50, cy = F.H * 0.49;
   F._pad = pad; F._cx = cx; F._cy = cy;
   const breathe = S.motion ? (t || 0) : 0;
   N.forEach((n) => {
@@ -841,13 +843,13 @@ function renderNodeCard() {
     const a2 = attOf(n);
     let lbl = { needs: 'needs you', blocked: 'blocked', active: 'in progress', verified: 'verified', error: 'refused', waiting: 'waiting' }[a2] || 'tracked';
     if (n.ageMin != null) lbl += ' · ' + ageStr(n.ageMin) + ' ago';
-    /* Both of these SCROLL — `jump()` moves the page to a section and does
-       nothing else. "Open the receipt" therefore promised something it did not
-       do: it landed you on a list of every receipt with no drawer opened and no
-       sign of which one you had picked. A control that names an effect it does
-       not have is the same failure as a number with no source, so it is named
-       for what it actually does. Opening the receipt itself is one more click,
-       on the row's own "receipt ›". */
+    /* These SWITCH to a section and do nothing else. "Open the receipt" would
+       therefore have promised something it does not do: it lands you on the
+       list of every receipt with no drawer opened and no sign of which one you
+       picked. A control that names an effect it does not have is the same
+       failure as a number with no source, so it is named for what it actually
+       does. Opening the receipt itself is one more click, on the row's own
+       "receipt ›". */
     const action = ticketAction(n);
     act = `<button type="button" class="btn sm ${action.tone}" data-jump="${action.jump}">${action.label}</button>`;
     note = `<div class="ncnote">Status: <b>${esc(lbl)}</b>. Glowing means it wants your attention.</div>`;
@@ -1179,7 +1181,7 @@ function boot() {
   if (ld('fl') === '1') { R.setAttribute('data-flat', '1'); F.tilt0 = 0; F.tilt = 0; F.rot = 0; }
   bootMotion();
   const cmd = document.querySelector('[data-surface="command"]');
-  if (cmd) { init(cmd); wireRail(cmd); }
+  if (cmd) init(cmd);
   wireControls();
   syncControls();
 }
@@ -1235,71 +1237,6 @@ function wireControls() {
   });
 }
 
-function wireRail(cmd) {
-  const btns = cmd.querySelectorAll('.rail-n');
-  /* One writer for the selected pill. Called by the rail's own buttons AND by
-     the summary tiles below, which jump to the same sections — without this the
-     rail went on claiming "Today & Attention" while you were reading Settings,
-     and the selected state is the only thing on the rail that says where you
-     are. Nothing else in this file touches aria-current on a .rail-n. */
-  const select = (id) => {
-    const railId = id === 'desk' ? 'cmd-hero' : id;
-    let hit = null;
-    btns.forEach((x) => {
-      const on = x.getAttribute('data-jump') === railId;
-      if (on) hit = x;
-      if (on) x.setAttribute('aria-current', 'page');
-      else x.removeAttribute('aria-current');
-    });
-    /* Under 820px the rail is a horizontally scrolling strip and the item you
-       just activated is routinely off its right edge — a selected state you
-       cannot see is not a selected state. Scroll the STRIP only: scrollIntoView
-       on the button would drag the work column with it and undo the jump. */
-    if (hit && hit.parentElement) {
-      const nav = hit.parentElement;
-      if (nav.scrollWidth > nav.clientWidth + 1) {
-        const nr = nav.getBoundingClientRect();
-        const br = hit.getBoundingClientRect();
-        const pad = 12;
-        if (br.left < nr.left + pad) nav.scrollLeft += br.left - nr.left - pad;
-        else if (br.right > nr.right - pad) nav.scrollLeft += br.right - nr.right + pad;
-      }
-    }
-  };
-  btns.forEach((b) => b.addEventListener('click', () => {
-    select(b.getAttribute('data-jump'));
-    jump(b.getAttribute('data-jump'), cmd);
-  }));
-  // the node card's own jumps use the same resolver
-  document.addEventListener('click', (e) => {
-    const t = e.target;
-    if (!t || !t.closest) return;
-    const j = t.closest('.nodecard [data-jump]');
-    if (j) { select(j.getAttribute('data-jump')); jump(j.getAttribute('data-jump'), cmd); }
-    // The summary tiles are app.js's and do their own scrolling; this listener
-    // only keeps the rail honest about where that scroll landed. `#sec-vault`
-    // and `sec-vault` are the same destination under two spellings.
-    const g = t.closest('[data-goto]');
-    if (g) {
-      const sel = g.getAttribute('data-goto') || '';
-      if (sel.charAt(0) === '#') select(sel.slice(1));
-    }
-  });
-}
-function jump(id, cmd) {
-  if (!id) return;
-  const t = id === 'cmd-hero' ? cmd.querySelector('.hero')
-    : (cmd.querySelector('#' + id) || cmd.querySelector(`[data-mount="${id}"]`));
-  if (!t) return;
-  if (t.scrollIntoView) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  /* Real keyboard focus, not just the viewport — the same rule the summary
-     tiles keep. Without it the rail moved the page and left the next Tab back
-     on the rail, so a keyboard owner could never actually reach the section the
-     rail had just taken them to. Every destination carries tabindex="-1". */
-  if (t.hasAttribute('tabindex') && t.focus) {
-    try { t.focus({ preventScroll: true }); } catch { /* focus is a courtesy, never a failure */ }
-  }
-}
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();

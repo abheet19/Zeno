@@ -313,15 +313,14 @@ body{
 }
 .cmdmain{ overflow:auto; min-height:0; padding:16px 18px 30px; min-width:0; position:relative; display:flex; flex-direction:column; gap:16px; }
 
-/* ---- the hero: the field IS the ground, the masthead sits on it ----------- */
+/* ---- the hero: a calm, centred Home — orb above, greeting below ----------- */
 .hero{
-  position:relative; height:clamp(250px,36vh,340px);
-  margin:-16px -18px 6px; overflow:hidden;
-  border-bottom:1px solid var(--gl-edge); flex:none;
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  margin:0 0 4px; flex:none;
 }
-.fieldbox{ position:absolute; inset:0; }
+.fieldbox{ position:relative; width:min(760px,100%); height:clamp(258px,38vh,420px); margin:0 auto; }
 .field-atmos{
-  position:absolute; inset:0; pointer-events:none;
+  position:absolute; inset:-8% -12%; pointer-events:none;
   background:
     radial-gradient(48% 42% at 18% 88%, var(--amb-1), transparent 70%),
     radial-gradient(42% 38% at 84% 8%, var(--amb-2), transparent 72%),
@@ -329,19 +328,18 @@ body{
 }
 .field-mount{ position:absolute; inset:0; }
 #field{ position:absolute; inset:0; display:block; width:100%; height:100%; touch-action:none; cursor:grab; }
-/* the field fades into the page rather than ending at a border */
-.heroveil{ position:absolute; inset:0; pointer-events:none; background:var(--veil); }
+/* the field fades into the page at its edges instead of ending on a hard line */
+.heroveil{ position:absolute; inset:0; pointer-events:none; background:radial-gradient(74% 74% at 50% 46%, transparent 56%, var(--g1) 100%); }
 
-.heromast{ position:absolute; left:26px; top:50%; transform:translateY(-50%); right:auto; pointer-events:none; max-width:31ch; z-index:2; }
-.hero-eyebrow{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); margin:0 0 11px; }
+.heromast{ position:static; text-align:center; max-width:62ch; margin:2px auto 0; pointer-events:auto; z-index:2; }
+.hero-eyebrow{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-2); margin:0 0 10px; }
 .hero-h1{
   margin:0; font-family:var(--font-display); font-optical-sizing:auto; font-variant-numeric:proportional-nums;
-  font-weight:500; font-size:clamp(24px,3.4vw,35px); line-height:1.14; letter-spacing:-.018em;
+  font-weight:500; font-size:clamp(26px,3.6vw,40px); line-height:1.12; letter-spacing:-.02em;
   color:var(--ink); text-wrap:balance;
-  text-shadow:0 2px 22px color-mix(in srgb,var(--g1) 85%,transparent);
 }
-.hero-cap{ font-size:12.5px; color:var(--ink-2); margin:9px 0 0; max-width:34ch; line-height:1.5; }
-.hchips{ display:flex; gap:7px; flex-wrap:wrap; margin-top:14px; pointer-events:auto; }
+.hero-cap{ font-size:13.5px; color:var(--ink-2); margin:9px auto 0; max-width:52ch; line-height:1.5; }
+.hchips{ display:flex; gap:7px; flex-wrap:wrap; margin-top:14px; pointer-events:auto; justify-content:center; }
 .hchip{
   display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10px;
   padding:5px 10px; border-radius:8px; color:var(--ink-2);
@@ -1823,7 +1821,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
         <button type="button" class="rail-n" aria-current="true" data-jump="cmd-hero"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Today &amp; Attention <span class="n" data-mount="rail-today"></span></button>
         <button type="button" class="rail-n" data-jump="pending"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>Approvals <span class="n" data-mount="rail-approvals"></span></button>
         <button type="button" class="rail-n" data-jump="timeline"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>Receipts</button>
-        <button type="button" class="rail-n" data-jump="sec-workstation"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Workstation <span class="n" data-mount="rail-workstation"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-workstation"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Work <span class="n" data-mount="rail-workstation"></span></button>
         <button type="button" class="rail-n" data-jump="sec-vault"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>Vault <span class="n" data-mount="rail-vault"></span></button>
         <button type="button" class="rail-n" data-jump="devices"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>Devices <span class="n" data-mount="rail-devices"></span></button>
         <button type="button" class="rail-n" data-jump="sec-integrations"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Integrations <span class="n" data-mount="rail-integrations"></span></button>
@@ -1855,6 +1853,11 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
         <!-- field.js puts its <canvas id="field"> here. -->
         <div class="field-mount" data-mount="field"></div>
         <div class="heroveil" aria-hidden="true"></div>
+        <!-- The field has a full text equivalent. The button reveals it in place;
+             it is the same nodes, read rather than rotated. -->
+        <div class="field-tog">
+          <button type="button" class="ctl" id="fl-t" aria-pressed="false" aria-controls="fl">☰ list</button>
+        </div>
         <div class="fieldleg mono" aria-hidden="true">
           <span><i class="gl am"></i>needs you</span>
           <span><i class="gl rd"></i>blocked / error</span>
@@ -1874,13 +1877,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
         <div class="hchips" data-mount="hero-chips"></div>
       </div>
 
-      <!-- The field has a full text equivalent. The button reveals it in place;
-           it is the same nodes, read rather than rotated. -->
-      <div class="field-tog">
-        <button type="button" class="ctl" id="fl-t" aria-pressed="false" aria-controls="fl">☰ list</button>
-      </div>
       <div class="fieldlist" id="fl" data-mount="field-list" hidden></div>
-
       <!-- field.js fills this when a node is selected, and empties it otherwise. -->
       <div data-mount="node-card"></div>
     </section><!-- /.hero -->
@@ -2244,7 +2241,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
          PRESENCE only: no token value ever reaches this DOM. The ledger path is
          served by no route, and the section says so rather than printing a path
          it cannot verify. -->
-    <div id="sec-settings" data-mount="sec-settings" tabindex="-1">
+    <div id="sec-settings" data-mount="sec-settings" tabindex="-1" hidden>
       <section class="plane" aria-labelledby="sec-settings-boot-h">
         <div class="plane-head">
           <h2 class="plane-h" id="sec-settings-boot-h">Settings</h2>
