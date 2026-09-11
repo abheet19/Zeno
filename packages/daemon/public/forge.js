@@ -348,6 +348,8 @@ export function initForge(section) {
     readAt: null,        // Date of the last completed read, so reload can prove it ran
     agents: null,        // GET /forge/agents, verbatim
     agentsErr: null,
+    build: null,         // GET /state -> build { sha, version }, for the completion screen
+
     context: null,       // GET /skills, including selected-repository rules
     contextErr: null,
     contextBusy: false,
@@ -1609,6 +1611,25 @@ export function initForge(section) {
               add(label, check, document.createTextNode(' ' + (c.text || '')));
               add(gate, label);
             });
+          }
+          // Completion is GATED on the acceptance checks: this summary appears only
+          // once every criterion is met, and links the evidence — the run's files
+          // and outcome, the Receipts pointer for sealed records, and the build.
+          const allMet = p.criteria && p.criteria.length > 0 && met === p.criteria.length;
+          if (allMet) {
+            const done = el('div', 'fgwfl-done');
+            add(done, el('div', 'fgwfl-done-h', '✓ Acceptance gate met'));
+            const last = session.runs[session.runs.length - 1];
+            if (last) {
+              add(done, el('div', 'hint', `Last run: ${last.ok ? 'completed' : 'failed'} · ${last.files} file${last.files === 1 ? '' : 's'} changed.`));
+              if (!last.ok) add(done, el('div', 'hint fgwfl-err', 'The last run FAILED — resolve it before treating this as shipped.'));
+            } else {
+              add(done, el('div', 'hint', 'No run has been recorded for this workflow yet — the gate is met by your checks alone.'));
+            }
+            add(done, el('div', 'hint', 'Sealed records for any applied change are in Receipts; every file a run wrote went through the approval gate.'));
+            const sha = S.build && S.build.sha ? String(S.build.sha).slice(0, 12) : '';
+            add(done, el('div', 'hint', sha ? `Build: ${sha}${S.build.version ? ' · v' + S.build.version : ''}` : 'Build: unstamped (dev build).'));
+            add(gate, done);
           }
           add(wrap, gate);
         }
@@ -4614,6 +4635,14 @@ export function initForge(section) {
     paintE();
   }
 
+  // The release SHA + version, read once for the workflow completion screen. A
+  // dev build reports null, which the screen renders as "unstamped" rather than
+  // inventing a version.
+  async function loadBuildInfo() {
+    const r = await api('/state');
+    if (r.ok && r.data && r.data.build) { S.build = r.data.build; paintA(); }
+  }
+
   async function loadAgents() {
     const r = await api('/forge/agents');
     if (!r.ok) {
@@ -5568,6 +5597,7 @@ export function initForge(section) {
   void loadStatus();
   void loadAgents();
   void loadContext();
+  void loadBuildInfo();
   void syncGates();
   openStream();
   openRunProgressStream();
