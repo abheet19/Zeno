@@ -20,6 +20,7 @@ const groups = new Map([
   ['sec-vault', [one('#sec-vault')]],
   ['devices', [one('#devices')]],
   ['sec-integrations', [one('#sec-integrations')]],
+  ['projects', [one('#projects')]],
 ]);
 
 const managed = new Set([...groups.values()].flat().filter(Boolean));
