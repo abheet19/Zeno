@@ -706,23 +706,32 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .cmdmain .plane-h{ font-family:var(--font-display); font-optical-sizing:auto; font-weight:500; letter-spacing:-.012em; font-size:19px; }
 
 @media (max-width:820px){
-  .cmd{ grid-template-columns:1fr; min-height:0; }
-  /* COMMAND: the rail becomes a horizontal strip above the work column */
-  .rail{ border-right:0; border-bottom:1px solid var(--rule); padding:8px 10px; overflow:hidden; min-width:0; }
+  /* COMMAND on a phone: the rail becomes a bottom tab bar; the work column
+     scrolls above it, and the centred Home layout already fits. */
+  .cmd{ display:flex; flex-direction:column; height:100%; min-height:0; }
+  .cmdmain{ order:1; flex:1 1 auto; min-height:0; padding:14px 14px calc(74px + env(safe-area-inset-bottom)); }
+  .rail{ order:2; position:fixed; left:0; right:0; bottom:0; z-index:40; border-right:0; border-top:1px solid var(--gl-edge); border-bottom:0; padding:6px 4px calc(6px + env(safe-area-inset-bottom)); }
   .rail>.k{ display:none; }
-  .rail nav{ flex-direction:row; gap:5px; overflow-x:auto; padding-bottom:3px; }
-  .rail-n{ white-space:nowrap; flex:none; width:auto; padding:5px 10px; font-size:11.5px; background:var(--g3); border:1px solid var(--rule); }
+  .rail nav{ flex-direction:row; gap:2px; overflow-x:auto; justify-content:flex-start; scrollbar-width:none; }
+  .rail nav::-webkit-scrollbar{ display:none; }
+  .rail-n{ position:relative; flex:none; width:auto; min-width:62px; flex-direction:column; align-items:center; gap:3px; padding:5px 7px; font-size:9.5px; background:none; border:0; white-space:nowrap; }
+  .rail-n .ri{ width:20px; height:20px; opacity:.9; }
+  .rail-n[aria-current]{ color:var(--cyan); background:none; box-shadow:none; }
+  .rail-n[aria-current] .ri{ color:var(--cyan); opacity:1; }
+  .rail-n .n{ position:absolute; top:1px; right:calc(50% - 21px); margin:0; min-width:14px; padding:0 3px; border-radius:99px; font-size:8.5px; text-align:center; }
+  .rail-n .n[data-att="needs"]{ background:var(--amber); color:var(--g1); font-weight:700; }
   .rail .legend{ display:none; }
-  .cmdmain{ padding:16px; }
-  .hero{ margin:-16px -16px 6px; height:clamp(240px,36vh,310px); }
-  .heromast{ left:18px; right:18px; max-width:none; }
+  .hero{ margin:0 0 2px; }
+  .fieldbox{ height:clamp(220px,32vh,320px); }
+  .home-starters{ flex-wrap:nowrap; overflow-x:auto; justify-content:flex-start; scrollbar-width:none; }
+  .home-starters::-webkit-scrollbar{ display:none; }
+  .hstart{ flex:none; }
   .nodecard{ width:auto; right:12px; }
 }
 @media (max-width:420px){
-  .cmdmain{ padding:12px 10px 22px; gap:10px; }
-  .hero{ margin:-12px -10px 2px; height:clamp(230px,35vh,280px); }
-  .heromast{ left:14px; right:14px; }
-  .hero-cap{ max-width:28ch; }
+  .cmdmain{ padding:12px 10px calc(74px + env(safe-area-inset-bottom)); gap:10px; }
+  .fieldbox{ height:clamp(200px,30vh,270px); }
+  .hero-cap{ max-width:34ch; }
   .cmdduo{ width:100%; }
   .za-head{ align-items:flex-start !important; }
   .za-title{ flex-basis:100%; }
