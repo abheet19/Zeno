@@ -1869,6 +1869,14 @@ export function createServer(opts: DaemonOptions): Server {
       receipts: opts.kernel.receipts(),
       chain: opts.kernel.verifyChain(),
       lastEventId: opts.stream.lastId(),
+      // Build identity for the diagnostics surface. Stamped from the environment
+      // at release time (release.yml sets ZENO_BUILD_SHA / ZENO_VERSION); a dev or
+      // unstamped build reports null, and the window says "unstamped" rather than
+      // inventing a version. No git is spawned — this is a read of the process env.
+      build: {
+        sha: process.env['ZENO_BUILD_SHA'] || null,
+        version: process.env['ZENO_VERSION'] || process.env['npm_package_version'] || null,
+      },
     });
   }
 

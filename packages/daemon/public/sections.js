@@ -72,15 +72,19 @@ async function api(path) {
   try {
     res = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin' });
   } catch (err) {
-    return { ok: false, status: 0, data: null, error: { message: (err && err.message) || 'the daemon could not be reached' } };
+    const msg = (err && err.message) || 'the daemon could not be reached';
+    recordDiag(path, 'GET', 0, msg);
+    return { ok: false, status: 0, data: null, error: { message: msg } };
   }
   const data = await res.json().catch(() => null);
-  return {
+  const result = {
     ok: res.ok,
     status: res.status,
     data,
     error: res.ok ? null : ((data && data.error) || { message: `The daemon answered ${res.status}.` }),
   };
+  if (!result.ok) recordDiag(path, 'GET', result.status, result.error && result.error.message);
+  return result;
 }
 
 /* The only NON-GET call this file makes: the owner writing their own memory note.
@@ -95,15 +99,19 @@ async function apiWrite(path, payload) {
   try {
     res = await fetch(path, { method: 'POST', headers, cache: 'no-store', credentials: 'same-origin', body: JSON.stringify(payload) });
   } catch (err) {
-    return { ok: false, status: 0, data: null, error: { message: (err && err.message) || 'the daemon could not be reached' } };
+    const msg = (err && err.message) || 'the daemon could not be reached';
+    recordDiag(path, 'POST', 0, msg);
+    return { ok: false, status: 0, data: null, error: { message: msg } };
   }
   const data = await res.json().catch(() => null);
-  return {
+  const result = {
     ok: res.ok,
     status: res.status,
     data,
     error: res.ok ? null : ((data && data.error) || { message: `The daemon answered ${res.status}.` }),
   };
+  if (!result.ok) recordDiag(path, 'POST', result.status, result.error && result.error.message);
+  return result;
 }
 
 /* The owner forgetting their own note. DELETE /memory/<id> is owner-only and, by
@@ -118,15 +126,121 @@ async function apiDelete(path) {
   try {
     res = await fetch(path, { method: 'DELETE', headers, cache: 'no-store', credentials: 'same-origin' });
   } catch (err) {
-    return { ok: false, status: 0, data: null, error: { message: (err && err.message) || 'the daemon could not be reached' } };
+    const msg = (err && err.message) || 'the daemon could not be reached';
+    recordDiag(path, 'DELETE', 0, msg);
+    return { ok: false, status: 0, data: null, error: { message: msg } };
   }
   const data = await res.json().catch(() => null);
-  return {
+  const result = {
     ok: res.ok,
     status: res.status,
     data,
     error: res.ok ? null : ((data && data.error) || { message: `The daemon answered ${res.status}.` }),
   };
+  if (!result.ok) recordDiag(path, 'DELETE', result.status, result.error && result.error.message);
+  return result;
+}
+
+/* ---- diagnostics: opt-in, local, redacted ---------------------------------
+   A structured record of daemon calls that FAILED, so a bug can be reported with
+   a route, a status, a safe trace id, a severity and whether a retry is worth it
+   — never a payload and never a token. OFF by default: nothing is recorded until
+   the owner turns it on, it lives only in this page's memory, and it leaves the
+   page only when the owner deliberately Copies or Exports it. */
+const DIAG_KEY = 'zeno-diag-opt-in';
+const diag = { events: [] };
+let diagSeq = 0;
+
+function diagOn() {
+  try { return localStorage.getItem(DIAG_KEY) === '1'; } catch { return false; }
+}
+function setDiagOn(on) {
+  try { localStorage.setItem(DIAG_KEY, on ? '1' : '0'); } catch { /* private mode: stays off */ }
+}
+function recordDiag(route, method, status, message) {
+  if (!diagOn()) return;
+  const s = Number(status) || 0;
+  diag.events.unshift({
+    id: 't' + (++diagSeq).toString(36) + Date.now().toString(36).slice(-4),
+    at: new Date().toISOString(),
+    method: String(method || 'GET'),
+    route: String(route || ''),
+    status: s,
+    component: 'command-window',
+    severity: s >= 500 || s === 0 ? 'error' : 'warning',
+    // A retry is worth it for a transport failure or a server-side fault, not for
+    // a 4xx the same request will keep earning (owner-only, bad-request, …).
+    retryable: s === 0 || s >= 500 || s === 408 || s === 429,
+    message: String(message || '').slice(0, 240),
+  });
+  if (diag.events.length > 60) diag.events.length = 60;
+}
+
+function copyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(String(text)); return true; }
+  } catch { /* fall through to the legacy path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = String(text);
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch { return false; }
+}
+
+function downloadJson(name, obj) {
+  try {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return true;
+  } catch { return false; }
+}
+
+/** The diagnostics control for Settings → Runtime: an opt-in toggle, and, when
+ * on, the recorded failures with Copy / Export / Clear. Every field is safe to
+ * share — route, status, trace id, severity, retryable, the daemon's own message. */
+function diagnosticsHtml() {
+  const on = diagOn();
+  const rows = diag.events.slice(0, 12).map((e) =>
+    '<div class="zs-diag-row">'
+    + '<span class="zs-diag-id">' + esc(e.id) + '</span>'
+    + '<span class="zs-diag-route">' + esc(e.method + ' ' + e.route) + '</span>'
+    + '<span class="zs-diag-st ' + (e.severity === 'error' ? 'rd' : 'am') + '">'
+    + esc(e.status + ' · ' + (e.retryable ? 'retryable' : 'not retryable')) + '</span>'
+    + '<span class="zs-diag-msg">' + esc(e.message) + '</span>'
+    + '</div>').join('');
+  return '<div class="zs-diag">'
+    + '<div class="zs-diag-head">'
+    + '<button type="button" class="btn sm ' + (on ? 'p' : 'g') + '" data-diag-toggle="1" aria-pressed="' + (on ? 'true' : 'false') + '">'
+    + (on ? 'Recording — turn off' : 'Off — turn on') + '</button>'
+    + (on && diag.events.length
+      ? '<button type="button" class="btn sm g" data-diag-copy="1">Copy</button>'
+        + '<button type="button" class="btn sm g" data-diag-export="1">Export</button>'
+        + '<button type="button" class="btn sm g" data-diag-clear="1">Clear</button>'
+      : '')
+    + '</div>'
+    + '<p class="zs-diag-note">' + (on
+      ? 'Recording failed daemon calls in THIS window — method, route, status, a trace id, severity and whether a retry is worth it. No request body and no token is ever recorded; it stays in this page until you Copy or Export it.'
+      : 'Off. Turn it on to record failed daemon calls (route, status, trace id, retryable) for a bug report. Nothing is recorded until you do, and it never leaves this page unless you Copy or Export it.') + '</p>'
+    + (on
+      ? (diag.events.length
+        ? '<div class="zs-diag-list">' + rows + '</div>'
+          + (diag.events.length > 12 ? '<p class="zs-more">' + (diag.events.length - 12) + ' older not shown; Export has them all.</p>' : '')
+        : '<p class="zs-diag-empty">No failed calls recorded yet.</p>')
+      : '')
+    + '</div>';
 }
 
 /* ---- text ------------------------------------------------------------------
@@ -242,6 +356,20 @@ const CSS = `
   background:color-mix(in srgb,var(--red,#D9634F) 12%,transparent);
 }
 .zs-forget:disabled{ opacity:.55; cursor:default; }
+/* diagnostics (Settings -> Runtime) */
+.zs-diag{ display:flex; flex-direction:column; gap:8px; }
+.zs-diag-head{ display:flex; gap:6px; flex-wrap:wrap; }
+.zs-diag-note{ margin:0; font-size:11px; line-height:1.5; color:var(--ink-2,#9AA1AC); }
+.zs-diag-list{ display:flex; flex-direction:column; gap:5px; }
+.zs-diag-row{ display:grid; grid-template-columns:auto minmax(80px,1fr) auto; gap:4px 10px; align-items:baseline;
+  padding:6px 8px; border-radius:7px; border:1px solid var(--rule,#242C31); background:var(--g2,#0F1214); }
+.zs-diag-id{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:9.5px; color:var(--ink-3,#6C7480); }
+.zs-diag-route{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10.5px; color:var(--ink,#ECEBE6); overflow-wrap:anywhere; }
+.zs-diag-st{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:9.5px; text-align:right; white-space:nowrap; }
+.zs-diag-st.rd{ color:var(--red,#D9634F); }
+.zs-diag-st.am{ color:var(--amber,#E0A128); }
+.zs-diag-msg{ grid-column:1 / -1; font-size:11px; line-height:1.45; color:var(--ink-2,#9AA1AC); overflow-wrap:anywhere; }
+.zs-diag-empty{ margin:0; font-size:11px; color:var(--ink-3,#6C7480); }
 /* Approve sits where Forget does, at the end of a proposed-memory row. */
 .zs-approve{ flex:none; font-size:10.5px; padding:2px 10px; }
 .zs-approve:disabled{ opacity:.6; cursor:default; }
@@ -928,6 +1056,15 @@ function buildSettingsGroups(state) {
   try { origin = String(location.origin || ''); } catch { origin = ''; }
   let port = '';
   try { port = String(location.port || (location.protocol === 'https:' ? '443' : '80')); } catch { port = ''; }
+  const build = (state && state.data && state.data.build) || {};
+  const buildSha = build.sha ? String(build.sha) : '';
+  const buildVer = build.version ? String(build.version) : '';
+  const buildValue = buildSha
+    ? buildSha.slice(0, 12) + (buildVer ? ' · v' + buildVer : '')
+    : (buildVer ? 'v' + buildVer : 'Unstamped dev build');
+  const buildNote = buildSha
+    ? 'Stamped from the environment at release. This is the exact code this window is talking to — quote it in a bug report.'
+    : 'This build carries no release SHA (a dev or local build), so it reports none rather than invent one. Released builds stamp it.';
   const runtime = [
     settingItem('runtime', 'Origin', 'Read from this page’s own address, not from configured copy.', 'url address local daemon',
       readOnlySetting('Origin', origin ? esc(origin) : 'Not readable', 'The endpoint this window is actually talking to.', origin ? '' : 'warn')),
@@ -937,6 +1074,10 @@ function buildSettingsGroups(state) {
       readOnlySetting('Network binding', 'Loopback only', 'Only this machine can reach the HTTP daemon.', 'good')),
     settingItem('runtime', 'Ledger path', 'No HTTP route exposes the ledger location.', 'file audit storage cli startup',
       readOnlySetting('Ledger path', 'Not served', 'The daemon prints the path on startup, and the CLI reads the same file. This page cannot invent it.', '')),
+    settingItem('runtime', 'Build', 'Release SHA and version, stamped from the environment at release.', 'version sha release build artifact diagnostics',
+      readOnlySetting('Build', esc(buildValue), buildNote, buildSha ? 'good' : '')),
+    settingItem('runtime', 'Diagnostics', 'An opt-in, local, redacted log of failed daemon calls for a bug report.', 'error trace retry diagnostics export copy support id release',
+      diagnosticsHtml()),
   ];
 
   return SETTINGS_CATEGORIES.map((category) => ({
@@ -1125,6 +1266,11 @@ function openSettings() {
     if (typeof dialog.showModal === 'function') dialog.showModal();
     else dialog.setAttribute('open', '');
   }
+  // The dialog shows facts from GET /state (receipts/chain totals, build). On the
+  // Home view the section poll has not run, so S.state can be null — read it now
+  // and force the dialog to repaint once it lands, rather than show "unstamped"
+  // over a build the daemon does in fact know.
+  if (!S.state) refresh().then(() => paintSettingsDialog({ force: true }));
   const search = dialog.querySelector('#zs-settings-search');
   if (search && search.focus) search.focus({ preventScroll: true });
 }
@@ -1322,6 +1468,21 @@ function wire() {
     if (t.closest('[data-recheck]')) {
       S.agents = null;
       refresh({ agents: true });
+      return;
+    }
+    // Diagnostics (Settings → Runtime): opt-in recording, and Copy/Export/Clear
+    // of the redacted failure log. Re-render the dialog on the Runtime tab so the
+    // toggle and list reflect the new state immediately.
+    if (t.closest('[data-diag-toggle]')) {
+      setDiagOn(!diagOn());
+      paintSettingsDialog({ force: true, snapshot: { key: 'tab:runtime' } });
+      return;
+    }
+    if (t.closest('[data-diag-copy]')) { copyText(JSON.stringify(diag.events, null, 2)); return; }
+    if (t.closest('[data-diag-export]')) { downloadJson('zeno-diagnostics.json', diag.events); return; }
+    if (t.closest('[data-diag-clear]')) {
+      diag.events.length = 0;
+      paintSettingsDialog({ force: true, snapshot: { key: 'tab:runtime' } });
       return;
     }
     // A preference is owned by the top bar's control. Clicking it there is the
