@@ -971,6 +971,33 @@ export function initCounsel(section) {
       : 'The browser blocked the download. Nothing was saved — try again, or copy the notes by hand.');
   }
 
+  /* Copy the notes so the owner can paste them into their own mail or chat. This
+     is how you "share" a call from a daemon with no mail provider: Zeno hands YOU
+     the text — it never sends on your behalf, and never shows a call as sent when
+     it was not (there is no send path to lie about). */
+  async function copyCall(m) {
+    const text = callMarkdown(m);
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); ok = true; }
+    } catch { ok = false; }
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        ta.remove();
+      } catch { ok = false; }
+    }
+    announce(ok
+      ? 'Copied these notes to the clipboard — paste them into your own mail or chat.'
+      : 'Copy is unavailable in this window. Use ↓ Markdown to save the notes to a file instead.');
+  }
+
   function renderCall() {
     clear(panelCall);
     add(panelCall, el('p', 'k', 'The call'));
@@ -1024,11 +1051,13 @@ export function initCounsel(section) {
     // to this machine's disk only (see downloadFile). Owner-gated like delete: a
     // read-only page cannot save what it was never trusted to hold.
     if (OWNER_TOKEN) {
+      const copyBtn = btn('btn sm g', '⧉ Copy', () => { copyCall(m); });
+      copyBtn.title = 'Copy these notes (Markdown) to the clipboard';
       const mdBtn = btn('btn sm g', '↓ Markdown', () => { exportCall(m, 'md'); });
       mdBtn.title = 'Save this call as a Markdown file on this machine';
       const jsonBtn = btn('btn sm g', '↓ JSON', () => { exportCall(m, 'json'); });
       jsonBtn.title = 'Save this call as a JSON record on this machine';
-      add(h, mdBtn, jsonBtn);
+      add(h, copyBtn, mdBtn, jsonBtn);
     }
     const delBtn = btn(
       'btn sm g',
@@ -1131,6 +1160,16 @@ export function initCounsel(section) {
         'hint',
         'Every item above was extracted by an open set of cue phrases running on this machine. There is no ' +
           'model in this step and nothing here is stochastic — and an item with no citation cannot be produced.',
+      ),
+    );
+    add(
+      panelCall,
+      el(
+        'p',
+        'hint',
+        'Sharing: Copy or Export hands you the notes to send yourself. This daemon has no mail provider, so ' +
+          'Zeno cannot email — and it will never show a call as “sent”, because there is no send it could be ' +
+          'lying about. Share a changed call again; Zeno tracks no send it never made.',
       ),
     );
   }
