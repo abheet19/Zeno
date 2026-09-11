@@ -491,6 +491,11 @@ export function initForge(section) {
       runAt: null,
       runProgress: null,
       runProgressStale: false,
+      // A workflow plan the owner authored in the builder, or null for a plain
+      // session. { objective, criteria:[{text,done}], steps:[{text,model,effort,permission}] }.
+      // It is the recorded plan + the acceptance checklist (the verification gate);
+      // Forge runs one agent per session, so it never fakes multi-agent orchestration.
+      plan: null,
       // The switch is scoped to this session and defaults on. The records
       // themselves live in Vault Markdown, so creating/reloading a renderer does
       // not create a second chat-local memory store.
@@ -537,6 +542,156 @@ export function initForge(section) {
     paintE();
     const input = rgC.querySelector('#zf-task');
     if (input) input.focus();
+  }
+
+  // ---- workflow builder (Task board) --------------------------------------
+  // Module-scoped so it survives the rail repaints; paintA() redraws the panel
+  // from it. It captures a PLAN — objective, acceptance criteria, ordered steps
+  // with per-step model/effort/permission — and seeds one real Forge session
+  // with it. Forge runs one agent per session, so the steps and criteria are the
+  // recorded plan and the owner's verification gate, never faked orchestration.
+  const WFL = {
+    open: false,
+    objective: '',
+    criteria: [''],
+    steps: [{ text: '', model: '', effort: 'low', permission: '' }],
+    error: '',
+  };
+  function resetWfl() {
+    WFL.open = false;
+    WFL.objective = '';
+    WFL.criteria = [''];
+    WFL.steps = [{ text: '', model: '', effort: 'low', permission: '' }];
+    WFL.error = '';
+  }
+  function createWorkflow() {
+    const objective = WFL.objective.trim();
+    const steps = WFL.steps
+      .map((s) => ({ text: s.text.trim(), model: s.model, effort: s.effort, permission: s.permission.trim() }))
+      .filter((s) => s.text);
+    // Validate at click time (the fields write to WFL without repainting, so a
+    // render-time disabled button would go stale). Say what is missing.
+    if (!objective || steps.length === 0) {
+      WFL.error = !objective ? 'Give the workflow an objective.' : 'Add at least one step with a description.';
+      paintA();
+      return;
+    }
+    if (S.sessions.length >= 8) { WFL.error = 'Forge keeps at most eight concurrent sessions.'; paintA(); return; }
+    const criteria = WFL.criteria.map((c) => c.trim()).filter(Boolean).map((text) => ({ text, done: false }));
+    const session = createSession();
+    session.name = objective.slice(0, 40);
+    session.plan = { objective, criteria, steps };
+    if (steps[0].model) {
+      session.model = steps[0].model;
+      session.agentId = 'local';
+      session.autoRoute = false;
+      session.route = { rationale: 'Manual routing from the workflow plan (first step model).' };
+    }
+    if (steps[0].effort) session.effort = steps[0].effort;
+    const lines = [`Objective: ${objective}`, '', 'Steps:'];
+    steps.forEach((s, i) => lines.push(`${i + 1}. ${s.text}${s.model ? ` [model: ${s.model}]` : ''}${s.permission ? ` [permission: ${s.permission}]` : ''}`));
+    if (criteria.length) {
+      lines.push('', 'Acceptance criteria (all must hold before this is done):');
+      criteria.forEach((c) => lines.push(`- ${c.text}`));
+    }
+    session.draft = lines.join('\n');
+    S.sessions.push(session);
+    S.selectedSessionId = session.id;
+    resetWfl();
+    if (!S.sessionOpen) setPaneOpen('session', true);
+    paintC();
+    paintE();
+    paintA();
+    const input = rgC.querySelector('#zf-task');
+    if (input) input.focus();
+  }
+  function wflModelOptions(current) {
+    const opts = [{ v: '', label: 'auto / default' }];
+    const local = (S.agents && Array.isArray(S.agents.localModels)) ? S.agents.localModels : [];
+    for (const m of local) opts.push({ v: m, label: m });
+    return opts.map((o) => `<option value="${o.v}"${o.v === current ? ' selected' : ''}>${o.label}</option>`).join('');
+  }
+  /** The builder form. Text inputs write straight to WFL without a repaint (so
+   * typing keeps its caret); only structural changes — add/remove — repaint. */
+  function wflForm() {
+    const form = el('div', 'fgwfl');
+    const objRow = el('div', 'fgwfl-field');
+    add(objRow, el('label', null, 'Objective'));
+    const obj = el('input', 'fgwfl-input');
+    obj.type = 'text';
+    obj.placeholder = 'What should this workflow achieve?';
+    obj.value = WFL.objective;
+    obj.addEventListener('input', () => { WFL.objective = obj.value; });
+    add(objRow, obj);
+    add(form, objRow);
+
+    // Acceptance criteria — the verification gate.
+    const critWrap = el('div', 'fgwfl-field');
+    add(critWrap, el('label', null, 'Acceptance criteria (the verification gate)'));
+    WFL.criteria.forEach((c, i) => {
+      const line = el('div', 'fgwfl-line');
+      const inp = el('input', 'fgwfl-input');
+      inp.type = 'text';
+      inp.placeholder = 'A condition that must hold before this is done';
+      inp.value = c;
+      inp.addEventListener('input', () => { WFL.criteria[i] = inp.value; });
+      const rm = btn('fgwfl-x', '✕', () => { WFL.criteria.splice(i, 1); if (!WFL.criteria.length) WFL.criteria = ['']; paintA(); });
+      rm.setAttribute('aria-label', 'Remove criterion');
+      add(line, inp, rm);
+      add(critWrap, line);
+    });
+    add(critWrap, btn('fgwfl-add', '+ criterion', () => { WFL.criteria.push(''); paintA(); }));
+    add(form, critWrap);
+
+    // Steps — each with its own model, effort and permission note.
+    const stepsWrap = el('div', 'fgwfl-field');
+    add(stepsWrap, el('label', null, 'Steps'));
+    WFL.steps.forEach((s, i) => {
+      const step = el('div', 'fgwfl-step');
+      const top = el('div', 'fgwfl-line');
+      const num = el('span', 'fgwfl-num', String(i + 1));
+      const inp = el('input', 'fgwfl-input');
+      inp.type = 'text';
+      inp.placeholder = 'What this step does';
+      inp.value = s.text;
+      inp.addEventListener('input', () => { WFL.steps[i].text = inp.value; });
+      const rm = btn('fgwfl-x', '✕', () => { WFL.steps.splice(i, 1); if (!WFL.steps.length) WFL.steps = [{ text: '', model: '', effort: 'low', permission: '' }]; paintA(); });
+      rm.setAttribute('aria-label', 'Remove step');
+      add(top, num, inp, rm);
+      add(step, top);
+      const opts = el('div', 'fgwfl-opts');
+      const modelSel = el('select', 'fgwfl-sel');
+      modelSel.setAttribute('aria-label', `Step ${i + 1} model`);
+      modelSel.innerHTML = wflModelOptions(s.model);
+      modelSel.addEventListener('change', () => { WFL.steps[i].model = modelSel.value; });
+      const effortSel = el('select', 'fgwfl-sel');
+      effortSel.setAttribute('aria-label', `Step ${i + 1} effort`);
+      effortSel.innerHTML = ['low', 'medium', 'high'].map((e) => `<option value="${e}"${e === s.effort ? ' selected' : ''}>effort: ${e}</option>`).join('');
+      effortSel.addEventListener('change', () => { WFL.steps[i].effort = effortSel.value; });
+      const perm = el('input', 'fgwfl-input');
+      perm.type = 'text';
+      perm.placeholder = 'permission note (e.g. read-only, may write)';
+      perm.value = s.permission;
+      perm.addEventListener('input', () => { WFL.steps[i].permission = perm.value; });
+      add(opts, modelSel, effortSel, perm);
+      add(step, opts);
+      add(stepsWrap, step);
+    });
+    add(stepsWrap, btn('fgwfl-add', '+ step', () => { WFL.steps.push({ text: '', model: '', effort: 'low', permission: '' }); paintA(); }));
+    add(form, stepsWrap);
+
+    add(form, el('div', 'hint',
+      'This records your plan and seeds ONE Forge session with it — objective, numbered steps and acceptance criteria as the task. Forge runs one agent per session, so the steps are the plan and the criteria are your verification gate; nothing here fakes a multi-agent run. Every file the run writes still waits for your approval.'));
+
+    if (WFL.error) add(form, el('div', 'hint fgwfl-err', WFL.error));
+    const acts = el('div', 'acts');
+    const create = btn('btn sm', 'Create workflow', () => createWorkflow());
+    create.disabled = S.sessions.length >= 8;
+    if (create.disabled) create.title = 'Forge keeps at most eight concurrent sessions.';
+    const cancel = btn('btn sm ghost', 'Cancel', () => { resetWfl(); paintA(); });
+    add(acts, create, cancel);
+    add(form, acts);
+    return form;
   }
 
   function closeActiveSession() {
@@ -1393,17 +1548,21 @@ export function initForge(section) {
     tasks() {
       const wrap = el('div', 'pw fgworkflows');
       const head = el('div', 'acts');
-      add(head, el('b', null, 'Workflow launcher'));
-      const fresh = btn('btn sm', '+ New workflow', () => {
+      add(head, el('b', null, 'Task board'));
+      const plan = btn('btn sm', WFL.open ? 'Close builder' : 'Plan a workflow', () => { WFL.open = !WFL.open; paintA(); });
+      plan.title = 'Author a plan — objective, acceptance criteria, ordered steps with per-step models — and seed a session with it.';
+      const fresh = btn('btn sm ghost', '+ New session', () => {
         S.insp = 'chat';
         addSession();
         if (!S.sessionOpen) setPaneOpen('session', true);
       });
       fresh.disabled = S.sessions.length >= 8;
       fresh.title = fresh.disabled ? 'Forge keeps at most eight concurrent sessions.' : 'Create an independent session and focus its task composer.';
-      add(head, el('span', 'sp'), fresh);
-      add(wrap, head, el('div', 'hint',
-        'Each workflow below is a real independent Forge session. Runs may overlap, and every run keeps its provider, progress, cancellation, result, files, and approvals.'));
+      add(head, el('span', 'sp'), plan, fresh);
+      add(wrap, head);
+      if (WFL.open) add(wrap, wflForm());
+      add(wrap, el('div', 'hint',
+        'Each item below is a real independent Forge session. Runs may overlap, and every run keeps its provider, progress, cancellation, result, files, and approvals.'));
       for (const session of S.sessions) {
         const state = session.routing ? 'routing' : session.running ? phaseLabel(session.runProgress) : sessionTabState(session);
         const row = el('div', 'fgworkflow-row');
@@ -1428,6 +1587,31 @@ export function initForge(section) {
           add(row, cancel);
         }
         add(wrap, row);
+
+        // A planned workflow shows its acceptance criteria as a tickable gate,
+        // and its steps, under the row. The ticks are the owner's own judgement —
+        // Forge never marks a criterion met on its behalf.
+        if (session.plan) {
+          const p = session.plan;
+          const gate = el('div', 'fgwfl-gate');
+          if (Array.isArray(p.steps) && p.steps.length) {
+            add(gate, el('div', 'hint', `${p.steps.length} step${p.steps.length === 1 ? '' : 's'} planned` + (p.steps[0] && p.steps[0].model ? ` · first: ${p.steps[0].model}` : '')));
+          }
+          const met = (p.criteria || []).filter((c) => c.done).length;
+          if (p.criteria && p.criteria.length) {
+            add(gate, el('div', 'fgwfl-gate-h', `Acceptance · ${met}/${p.criteria.length} met`));
+            p.criteria.forEach((c, ci) => {
+              const label = el('label', 'fgwfl-crit');
+              const check = el('input');
+              check.type = 'checkbox';
+              check.checked = !!c.done;
+              check.addEventListener('change', () => { session.plan.criteria[ci].done = check.checked; paintA(); });
+              add(label, check, document.createTextNode(' ' + (c.text || '')));
+              add(gate, label);
+            });
+          }
+          add(wrap, gate);
+        }
       }
       const topology = el('details', 'fgcapability-gap');
       add(topology, el('summary', null, 'Parent and child agent topology'),

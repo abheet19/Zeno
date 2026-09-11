@@ -1173,6 +1173,30 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .fgcatalog-row>div:not(.acts){ padding:3px 2px; }
 .forge .fgcatalog-subrow{ padding:8px 4px 8px 15px; border-top:1px solid var(--rule); font-size:11.5px; }
 
+/* ---- workflow builder (Task board) ---- */
+.forge .fgwfl{ display:flex; flex-direction:column; gap:11px; padding:11px; margin:6px 0 4px;
+  border:1px solid var(--rule-2); border-radius:10px; background:var(--g2); }
+.forge .fgwfl-field{ display:flex; flex-direction:column; gap:6px; }
+.forge .fgwfl-field>label{ font:600 9.5px/1.2 var(--font-mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); }
+.forge .fgwfl-input{ width:100%; min-width:0; font:inherit; font-size:12px; padding:7px 9px; border-radius:7px;
+  border:1px solid var(--rule-2); background:var(--g1); color:var(--ink); }
+.forge .fgwfl-input::placeholder{ color:var(--ink-3); }
+.forge .fgwfl-line{ display:flex; gap:6px; align-items:center; }
+.forge .fgwfl-num{ flex:none; width:18px; text-align:center; font:600 11px var(--font-mono); color:var(--ink-3); }
+.forge .fgwfl-x{ flex:none; border:0; background:transparent; color:var(--ink-3); cursor:pointer; font:11px var(--font-mono); padding:4px 6px; border-radius:6px; }
+.forge .fgwfl-x:hover{ color:var(--red); background:color-mix(in srgb,var(--red) 12%,transparent); }
+.forge .fgwfl-step{ display:flex; flex-direction:column; gap:5px; padding:8px; border:1px solid var(--rule); border-radius:8px; background:var(--g3); }
+.forge .fgwfl-opts{ display:flex; gap:6px; flex-wrap:wrap; padding-left:24px; }
+.forge .fgwfl-sel{ font:11px var(--font-mono); padding:4px 6px; border-radius:6px; border:1px solid var(--rule); background:var(--g3); color:var(--ink); }
+.forge .fgwfl-opts .fgwfl-input{ flex:1; min-width:140px; }
+.forge .fgwfl-add{ align-self:flex-start; border:1px dashed var(--rule-2); background:transparent; color:var(--ink-2); cursor:pointer; font:600 11px system-ui; padding:5px 11px; border-radius:7px; }
+.forge .fgwfl-add:hover{ color:var(--ink); border-color:var(--ink-3); }
+.forge .fgwfl-gate{ display:flex; flex-direction:column; gap:4px; margin:-2px 0 8px; padding:8px 10px; border:1px solid var(--rule); border-left:2px solid var(--cyan-dim,#1E6B76); border-radius:8px; background:var(--g2); }
+.forge .fgwfl-gate-h{ font:600 9.5px/1.2 var(--font-mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); }
+.forge .fgwfl-crit{ display:flex; align-items:flex-start; gap:7px; font-size:11.5px; line-height:1.45; color:var(--ink); }
+.forge .fgwfl-crit input{ margin-top:2px; accent-color:var(--cyan); flex:none; }
+.forge .fgwfl-err{ color:var(--red); }
+
 /* ---- rgC: the session row, the inspector tabs, the agent chat ------------- */
 .forge .sesrow{ display:flex; align-items:center; gap:8px; padding:7px 10px 0; font-size:10px; color:var(--ink-2); font-family:var(--font-mono); }
 .forge .sesname{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
