@@ -4010,6 +4010,13 @@ export function initForge(section) {
     const sources = (Array.isArray(catalog.skillSources) ? catalog.skillSources : [])
       .filter((source) => catalogMatches(query, source.path, source.provenance, source.reason));
     add(wrap, el('div', 'd', 'local skill sources'));
+    // Make the isolation guarantee visible, not just enforced: every source
+    // below is discovery-only. No provider — Claude, Codex, Cursor or any other —
+    // is trusted to inject skills into a run; a skill acts only after it is
+    // installed into the selected repository AND selected here.
+    add(wrap, el('div', 'hint',
+      'Isolation: strict. Each source is discovery-only — its skills are catalogued read-only and never loaded '
+      + 'into a run ambiently. No provider (Claude / Codex / Cursor / …) may inject a skill on its own.'));
     if (!S.extensions && !S.extensionsErr) add(wrap, renderNote('Reading repository and global skill libraries…'));
     else if (!sources.length) add(wrap, renderNote(query
       ? 'No skill source matches this search.'
@@ -4022,7 +4029,10 @@ export function initForge(section) {
         `${sources.length} source${sources.length === 1 ? '' : 's'} · ${installed} installed · ${unreadable} unreadable`));
       for (const source of sources) {
         const sourceRow = el('div', 'fgcatalog-subrow');
-        add(sourceRow, el('b', null, source.provenance || 'local skill source'));
+        const nameRow = el('div', 'acts');
+        add(nameRow, el('b', null, source.provenance || 'local skill source'),
+          el('span', 'sp'), el('span', 'tag', 'discovery-only · not loaded'));
+        add(sourceRow, nameRow);
         add(sourceRow, el('div', 'hint', source.path || 'path unavailable'));
         add(sourceRow, el('div', 'hint', source.reason
           ? `unreadable · ${source.reason}`
