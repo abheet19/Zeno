@@ -396,15 +396,15 @@ function gitWord(code) {
 }
 
 function renderWorkstation(st) {
-  if (!st) return plane('sec-workstation', 'Workstation', WORDS.workstationSub, unread('The sandbox'));
-  if (!st.ok) return plane('sec-workstation', 'Workstation', WORDS.workstationSub, unreadable('The sandbox', st.error));
+  if (!st) return plane('sec-workstation', 'Work', WORDS.workstationSub, unread('The sandbox'));
+  if (!st.ok) return plane('sec-workstation', 'Work', WORDS.workstationSub, unreadable('The sandbox', st.error));
 
   const d = st.data || {};
   const openBtn = '<div class="zs-acts"><button type="button" class="btn sm p" data-go="forge">Open in Forge</button>'
     + '<span class="zs-more">Forge proposes. A commit is still a separate approval.</span></div>';
 
   if (!d.repo) {
-    return plane('sec-workstation', 'Workstation', WORDS.workstationSub,
+    return plane('sec-workstation', 'Work', WORDS.workstationSub,
       empty('○', 'The sandbox is not a git repository.',
         String(d.note || 'The daemon reported no repository at the sandbox path.'))
       + openBtn);
@@ -466,7 +466,7 @@ function renderWorkstation(st) {
     : 'Nothing is staged and nothing is uncommitted. Every write into this repository arrives as an '
       + 'approval capsule first — the sandbox is never edited behind your back.');
 
-  return plane('sec-workstation', 'Workstation', WORDS.workstationSub, body);
+  return plane('sec-workstation', 'Work', WORDS.workstationSub, body);
 }
 
 /* ================================================================== *
