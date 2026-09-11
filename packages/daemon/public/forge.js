@@ -375,6 +375,7 @@ export function initForge(section) {
     connectorsBusy: false,
     collapsedDirs: new Set(),
     rainbowBrackets: true,
+    minimap: true,
     explorerOpen: true,
     sessionOpen: true,
     thinkingExpanded: false,
@@ -557,6 +558,7 @@ export function initForge(section) {
   S.sessions.push(firstSession);
   S.selectedSessionId = firstSession.id;
   try { S.rainbowBrackets = localStorage.getItem('zeno-forge-rainbow') !== '0'; } catch { /* storage is optional */ }
+  try { S.minimap = localStorage.getItem('zeno-forge-minimap') !== '0'; } catch { /* storage is optional */ }
   try { S.explorerOpen = localStorage.getItem('zeno-forge-explorer') !== '0'; } catch { /* storage is optional */ }
   try { S.sessionOpen = localStorage.getItem('zeno-forge-session') !== '0'; } catch { /* storage is optional */ }
   try { S.thinkingExpanded = localStorage.getItem('zeno-forge-thinking-expanded') === '1'; } catch { /* storage is optional */ }
@@ -1284,6 +1286,20 @@ export function initForge(section) {
       add(label, check, document.createTextNode(' Rainbow brackets'));
       add(rainbow, label, el('div', null, 'A real Monaco editor setting. The choice applies immediately and is stored only on this device.'));
       add(wrap, rainbow);
+
+      const mini = el('div', 'box');
+      const miniLabel = el('label', 'fgcheck');
+      const miniCheck = el('input');
+      miniCheck.type = 'checkbox';
+      miniCheck.checked = S.minimap;
+      miniCheck.addEventListener('change', () => {
+        S.minimap = miniCheck.checked;
+        try { localStorage.setItem('zeno-forge-minimap', miniCheck.checked ? '1' : '0'); } catch { /* storage is optional */ }
+        for (const view of paneViews) if (view.editor) view.editor.updateOptions({ minimap: { enabled: miniCheck.checked } });
+      });
+      add(miniLabel, miniCheck, document.createTextNode(' Minimap'));
+      add(mini, miniLabel, el('div', null, 'A real Monaco editor setting. The choice applies immediately and is stored only on this device.'));
+      add(wrap, mini);
 
       add(wrap, el('div', 'd', 'glass theme'));
       const themes = el('div', 'acts fgthemes');
@@ -2044,7 +2060,7 @@ export function initForge(section) {
         // The features this pane exists to have.
         bracketPairColorization: { enabled: S.rainbowBrackets, independentColorPoolPerBracketType: true },
         guides: { bracketPairs: S.rainbowBrackets ? 'active' : false, bracketPairsHorizontal: S.rainbowBrackets ? 'active' : false, indentation: true, highlightActiveIndentation: true },
-        minimap: { enabled: true, renderCharacters: false, maxColumn: 90 },
+        minimap: { enabled: S.minimap, renderCharacters: false, maxColumn: 90 },
         folding: true,
         foldingHighlight: true,
         showFoldingControls: 'mouseover',
