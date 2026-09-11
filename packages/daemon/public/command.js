@@ -334,6 +334,18 @@ export function init() {
   window.addEventListener('zeno:command-panel', () => { if (deskVisible()) refresh(); });
   document.getElementById('cmd-desk')?.addEventListener('toggle', () => { if (deskVisible()) refresh(); });
   setInterval(() => { if (deskVisible()) refresh(); }, 15000);
+
+  // Home's starter chips prefill the one composer and hand it focus. Chips that
+  // navigate use data-goto and are handled by command-panels, not here.
+  document.addEventListener('click', (e) => {
+    const s = e.target && e.target.closest ? e.target.closest('[data-starter]') : null;
+    if (!s) return;
+    const inp = document.querySelector('.za-input');
+    if (!inp) return;
+    inp.value = s.getAttribute('data-starter') || '';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.focus();
+  });
 }
 
 if (document.readyState === 'loading') {

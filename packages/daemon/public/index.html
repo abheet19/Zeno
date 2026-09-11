@@ -340,6 +340,9 @@ body{
 }
 .hero-cap{ font-size:13.5px; color:var(--ink-2); margin:9px auto 0; max-width:52ch; line-height:1.5; }
 .hchips{ display:flex; gap:7px; flex-wrap:wrap; margin-top:14px; pointer-events:auto; justify-content:center; }
+.home-starters{ display:flex; gap:9px; flex-wrap:wrap; justify-content:center; width:min(760px,100%); margin:2px auto 0; flex:none; }
+.hstart{ display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:12.5px; color:var(--ink-2); background:var(--wash); border:1px solid var(--gl-edge); border-radius:9px; padding:8px 13px; cursor:pointer; transition:background .18s ease,color .18s ease,border-color .18s ease; }
+.hstart:hover{ color:var(--ink); background:var(--wash-2); border-color:var(--rule-2); }
 .hchip{
   display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10px;
   padding:5px 10px; border-radius:8px; color:var(--ink-2);
@@ -1882,10 +1885,19 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
       <div data-mount="node-card"></div>
     </section><!-- /.hero -->
 
-    <!-- The primary Command action stays beside the field in the first
-         viewport. Typed chat is always available; wake-word and command voice
-         controls are an explicit disclosure and reopen automatically while a
-         microphone session is armed. -->
+    <!-- Starter chips: prefill the one composer (data-starter) or jump to a
+         section (data-goto, handled by command-panels). Nothing here runs on
+         its own — a task still goes through the composer and the gate. -->
+    <div class="home-starters" aria-label="Quick starts">
+      <button type="button" class="hstart" data-starter="Add unit tests for the ingest parser and run them">✎ Start a Forge task</button>
+      <button type="button" class="hstart" data-goto="#pending">✔ Review what needs approval</button>
+      <button type="button" class="hstart" data-starter="What changed in the sandbox since my last approval?">◷ What changed recently?</button>
+      <button type="button" class="hstart" data-goto="#sec-vault">⌕ Search my Vault</button>
+    </div>
+
+    <!-- The primary Command action. Typed chat is always available; wake-word
+         and command voice controls are an explicit disclosure and reopen
+         automatically while a microphone session is armed. -->
     <section class="cmdduo" tabindex="-1" aria-label="Ask Zeno">
       <div class="cmd-ask" data-mount="ask"></div>
       <details class="cmd-voice-more">
