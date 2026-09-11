@@ -463,6 +463,12 @@ const MIC = {
   wakeState: 'off',     // 'off' | 'armed' | 'open', from the pure listener
   windowLeftMs: 0,
   wakeStarting: false,
+  // A soft pause. The microphone stays open and stays disclosed; only ACTING on
+  // a command is held. This is not privacy — closing the microphone is the Stop
+  // control below. Mute is "hold my calls": keep the wake session, ignore what
+  // it hears, until the owner unmutes. Reset whenever listening fully stops so a
+  // later session never starts silently muted.
+  muted: false,
 };
 
 // Filled in by the two wiring functions below, so the bar's stop button can
@@ -538,20 +544,38 @@ function mountLiveBar() {
   word.style.cssText = 'font:700 11.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em';
   const why = el('span', 'zv-live-why', '');
   why.style.cssText = 'font:400 12px/1.4 system-ui,sans-serif;min-width:0';
-  const stop = el('button', 'zv-live-stop', 'Stop listening');
-  stop.type = 'button';
-  stop.style.cssText = [
+  const pillCss = [
     'margin-left:4px', 'padding:4px 12px', 'border-radius:999px',
     'border:1px solid #12171A', 'background:transparent', 'color:#12171A',
     'font:700 11.5px system-ui,sans-serif', 'cursor:pointer', 'pointer-events:auto',
   ].join(';');
+  // Mute is the softer sibling of Stop: it keeps the microphone open (and the
+  // bar keeps saying so) but pauses acting on commands. `paint()` owns its
+  // label — this only flips the flag and redraws.
+  const mute = el('button', 'zv-live-mute', 'Mute');
+  mute.type = 'button';
+  mute.style.cssText = pillCss;
+  mute.addEventListener('click', () => {
+    MIC.muted = !MIC.muted;
+    setOutcome(
+      MIC.muted
+        ? 'Muted. The microphone stays open, but Zeno will not act on a command until you unmute.'
+        : 'Unmuted. Zeno is acting on what it hears again.',
+      MIC.muted ? 'warn' : 'ok',
+    );
+    paint();
+  });
+  const stop = el('button', 'zv-live-stop', 'Stop listening');
+  stop.type = 'button';
+  stop.style.cssText = pillCss;
   stop.addEventListener('click', () => {
+    MIC.muted = false; // a fresh session later must not start silently muted
     turnWakeOff('Wake mode off. The microphone is closed and the retained transcript was dropped.');
     abortPtt();
   });
-  bar.append(glyph, word, why, stop);
+  bar.append(glyph, word, why, mute, stop);
   document.body.appendChild(bar);
-  return { bar, glyph, word, why, stop };
+  return { bar, glyph, word, why, mute, stop };
 }
 
 const live = mountLiveBar();
@@ -646,6 +670,18 @@ function paint() {
     );
     setNodeText(live.glyph, '○');
   }
+  // Muted overlays the open-microphone truth, it does not replace it: the word
+  // still says the microphone is OPEN so the disclosure never weakens, and the
+  // detail adds that commands are held. Only meaningful while something is
+  // actually capturing — a reconnecting engine has nothing to act on anyway.
+  if (MIC.muted && open) {
+    setNodeText(live.word, 'MICROPHONE OPEN · MUTED');
+    setNodeText(live.why, 'Muted — the microphone is still open and disclosed, but Zeno will not act on a command until you unmute.');
+    setNodeText(live.glyph, '⊘');
+  }
+  setNodeText(live.mute, MIC.muted ? 'Unmute' : 'Mute');
+  live.mute.setAttribute('aria-pressed', MIC.muted ? 'true' : 'false');
+  live.mute.hidden = !open; // nothing to mute unless the microphone is open
   setNodeText(live.stop, MIC.wakeOn ? 'Stop listening' : 'Close the microphone');
 
   // -- the panel indicator, from the same state.
@@ -1392,6 +1428,15 @@ function summonCommand(note) {
  */
 function handleOutcome(result, spoken) {
   if (spoken) setHeard(spoken);
+  // Muted: both modes land here, so this one gate holds push-to-talk and wake
+  // alike. Show what was heard (already done above — honesty), then stop before
+  // anything acts. Unmute is the bar's own button; a spoken command cannot lift
+  // the mute, by design, because a muted microphone is one the owner has told
+  // Zeno to ignore.
+  if (MIC.muted) {
+    setOutcome('Muted — Zeno heard you but will not act until you unmute.', 'warn');
+    return;
+  }
   if (result.kind === 'idle') {
     setOutcome(result.reason, 'warn');
     return;
