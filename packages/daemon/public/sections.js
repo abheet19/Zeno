@@ -242,6 +242,9 @@ const CSS = `
   background:color-mix(in srgb,var(--red,#D9634F) 12%,transparent);
 }
 .zs-forget:disabled{ opacity:.55; cursor:default; }
+/* Approve sits where Forget does, at the end of a proposed-memory row. */
+.zs-approve{ flex:none; font-size:10.5px; padding:2px 10px; }
+.zs-approve:disabled{ opacity:.6; cursor:default; }
 .zs-more{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10px; color:var(--ink-3,#6C7480); padding-left:2px; }
 .zs-hr{ height:1px; background:var(--rule,#242C31); border:0; margin:2px 0; }
 
@@ -560,7 +563,7 @@ function noteRow(n, score, matched, owner) {
   return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null, del);
 }
 
-function renderVault(mem, brief, query) {
+function renderVault(mem, brief, query, pending) {
   const sub = WORDS.vaultSub;
   if (!mem) return plane('sec-vault', 'Vault', sub, unread('Memory'));
 
@@ -596,6 +599,35 @@ function renderVault(mem, brief, query) {
     + note('The query goes to this daemon on 127.0.0.1 and nowhere else. Recall is a plain term match, '
       + 'so every result shows the terms it matched on and its score — a memory you cannot trace is a '
       + 'rumour, and the Vault does not deal in rumours.', 'cy');
+
+  /* ---- proposed memories: an agent asked to remember; the owner decides ----
+     This queue is deliberately separate from the window's approvals list
+     (memory-routes.ts), so the Vault is the ONLY place it can be seen or
+     approved. An agent proposes; it can never approve its own memory. There is
+     no Deny, by the same design as the main capsule: a proposal the owner does
+     not approve simply never becomes a memory, and is dropped on restart. */
+  const props = owner && pending && pending.ok && pending.data && Array.isArray(pending.data.pending)
+    ? pending.data.pending
+    : [];
+  if (props.length) {
+    body += heading('proposed memories · ' + props.length)
+      + note('An agent asked to remember these. Nothing is written until you approve it — and an agent can '
+        + 'propose but never approve its own memory. There is no Deny: a proposal you do not approve simply '
+        + 'never becomes a memory, and is dropped if the daemon restarts.', 'am')
+      + '<div class="zs-rows">'
+      + props.map((p) => {
+        const pv = (p && p.preview) || {};
+        const pl = (p && p.payload) || {};
+        const src = pl.source ? 'from ' + esc(String(pl.source)) : 'from an agent';
+        const tags = Array.isArray(pl.tags) && pl.tags.length ? 'tags: ' + esc(pl.tags.join(', ')) : null;
+        const meta = [src, 'tier ' + esc(String(pv.tier || '?')), tags].filter(Boolean).join(' · ');
+        const approve = pv.actionHash
+          ? '<button type="button" class="btn sm p zs-approve" data-vault-approve="' + esc(String(pv.actionHash)) + '">Approve</button>'
+          : '<span class="zs-add-status">no action hash — cannot approve</span>';
+        return row('◆', mk(pl.description || pl.body || '(proposed memory)', 90), meta, clip(String(pl.body || ''), 190), null, approve);
+      }).join('')
+      + '</div>';
+  }
 
   if (searching) {
     body += heading('results for “' + clip(d.query, 40) + '” · ' + (hits ? hits.length : 0));
@@ -1005,6 +1037,7 @@ const WORDS = {
 const S = {
   forge: null,      // GET /forge/status
   mem: null,        // GET /memory  (or /memory?q=)
+  pending: null,    // GET /memory/pending — agent-proposed memories waiting for the owner
   brief: null,      // GET /brief
   work: null,       // GET /work
   agents: null,     // GET /forge/agents
@@ -1114,7 +1147,7 @@ function typing() {
 function repaint() {
   const settingsFocus = settingsFocusSnapshot();
   paint('sec-workstation', renderWorkstation(S.forge));
-  if (!typing()) paint('sec-vault', renderVault(S.mem, S.brief, S.query));
+  if (!typing()) paint('sec-vault', renderVault(S.mem, S.brief, S.query, S.pending));
   paint('sec-integrations', renderIntegrations(S.work, S.agents, S.skills));
   paint('sec-settings', renderSettings(S.state));
   paintSettingsDialog({ snapshot: settingsFocus });
@@ -1125,7 +1158,7 @@ function repaint() {
 function repaintAndFocusSearch() {
   const settingsFocus = settingsFocusSnapshot();
   paint('sec-workstation', renderWorkstation(S.forge));
-  paint('sec-vault', renderVault(S.mem, S.brief, S.query));
+  paint('sec-vault', renderVault(S.mem, S.brief, S.query, S.pending));
   paint('sec-integrations', renderIntegrations(S.work, S.agents, S.skills));
   paint('sec-settings', renderSettings(S.state));
   paintSettingsDialog({ snapshot: settingsFocus });
@@ -1163,7 +1196,7 @@ async function refresh(opts) {
   try {
     const wantAgents = (opts && opts.agents) || S.agents === null || (Date.now() - S.agentsAt) > AGENTS_MIN_MS;
     const memPath = S.query ? '/memory?q=' + encodeURIComponent(S.query) : '/memory';
-    const [forge, mem, brief, work, state, agents, skills] = await Promise.all([
+    const [forge, mem, brief, work, state, agents, skills, pending] = await Promise.all([
       api('/forge/status'),
       api(memPath),
       api('/brief'),
@@ -1171,10 +1204,13 @@ async function refresh(opts) {
       api('/state'),
       wantAgents ? api('/forge/agents?passive=1') : Promise.resolve(S.agents),
       api('/skills'),
+      // Only the owner can approve, so only the owner asks for the queue. A missing
+      // token means the served page is read-only and there is nothing to approve.
+      token() ? api('/memory/pending') : Promise.resolve(null),
     ]);
     // Each read is settled on its own: a vault that is not enabled must not
     // blank the workstation, and a failed brief must not blank the notes.
-    S.forge = forge; S.mem = mem; S.brief = brief; S.work = work; S.state = state; S.skills = skills;
+    S.forge = forge; S.mem = mem; S.brief = brief; S.work = work; S.state = state; S.skills = skills; S.pending = pending;
     if (wantAgents) { S.agents = agents; S.agentsAt = Date.now(); }
     if (opts && opts.focusSearch) repaintAndFocusSearch(); else repaint();
   } finally {
@@ -1227,6 +1263,24 @@ function wire() {
           if (r.ok) { if (input) input.value = ''; if (status) status.textContent = 'Remembered.'; refresh(); }
           else if (status) status.textContent = 'Not saved: ' + ((r.error && r.error.message) || 'the daemon refused it');
         });
+      return;
+    }
+    if (t.closest('[data-vault-approve]')) {
+      const btn = t.closest('[data-vault-approve]');
+      const actionHash = btn.getAttribute('data-vault-approve');
+      if (!actionHash || btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = 'Approving…';
+      // The one write this queue makes: the owner saying yes to one waiting
+      // memory. On success the record is committed with a receipt and appears in
+      // the notes below, so a plain refresh tells the truth either way.
+      apiWrite('/memory/approvals', { actionHash }).then((r) => {
+        if (r.ok) { refresh(); return; }
+        btn.disabled = false;
+        btn.textContent = 'Approve';
+        btn.title = 'Not approved: ' + ((r.error && r.error.message) || 'the daemon refused it')
+          + ((r.error && r.error.resolve) ? ' — ' + r.error.resolve : '');
+      });
       return;
     }
     if (t.closest('[data-vault-forget]')) {
