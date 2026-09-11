@@ -1,0 +1,63 @@
+name: Release
+
+# Branch -> pipeline -> deploy-to-master, GitLab-style. Feature branches run the
+# CI gate (ci.yml, on every push). Merging to `main` runs THIS pipeline: it
+# re-runs the full gate, builds, packages the desktop app, and publishes it as a
+# GitHub Release. Nothing ships unless the gate is green first.
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (default: build-<run number>)'
+        required: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: gate - build - package - publish
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Gate - nothing ships unless the full suite is green
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Package the Windows desktop app
+        # Unsigned until an Authenticode cert is supplied. Add repo secrets
+        # WIN_CSC_LINK (base64 .pfx) + WIN_CSC_KEY_PASSWORD to sign; until then
+        # the build is unsigned and SmartScreen warns on first run.
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npx --yes electron-builder --win --config electron-builder.json --publish never
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { "build-${{ github.run_number }}" }
+          $files = @(Get-ChildItem dist-app -Recurse -Include *.exe, latest.yml -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { Write-Error "no installer produced in dist-app"; exit 1 }
+          Write-Host "Releasing $tag with:`n$($files -join "`n")"
+          gh release create $tag @files --repo ${{ github.repository }} --title "Zeno $tag" --notes "Automated release from main (commit ${{ github.sha }}). The installer is UNSIGNED until an Authenticode certificate is configured - Windows SmartScreen will warn on first run."
