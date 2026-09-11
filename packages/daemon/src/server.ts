@@ -16,7 +16,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, opendirSync, rea
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import { homedir, hostname } from 'node:os';
+import { homedir, hostname, totalmem, freemem } from 'node:os';
 import { delimiter as pathDelimiter, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import {
   Kernel,
@@ -1725,6 +1725,8 @@ export function createServer(opts: DaemonOptions): Server {
     // disclosed by the window). GET reports live download progress for polling.
     if (req.method === 'POST' && path === '/forge/models/pull') return await postForgeModelPull(req, res, role);
     if (req.method === 'GET' && path === '/forge/models/pull') return serveForgeModelPulls(res, url);
+    if (req.method === 'POST' && path === '/forge/models/remove') return await postForgeModelRemove(req, res, role);
+    if (req.method === 'GET' && path === '/forge/models/host') return await serveForgeModelHost(res);
     if (req.method === 'POST' && path === '/forge/context') return await postForgeContext(req, res);
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(req, res, role);
@@ -2772,6 +2774,89 @@ export function createServer(opts: DaemonOptions): Server {
       return json(res, 200, { pull: modelPulls.get(name) ?? null });
     }
     json(res, 200, { pulls: [...modelPulls.values()] });
+  }
+
+  /**
+   * What this machine can actually hold a model in — so the window can say, before
+   * a multi-gigabyte download, whether a model will fit. System RAM is read from
+   * the OS (reliable, cross-platform). The GPU is a best-effort probe: nvidia-smi
+   * if it is on PATH, and honest silence otherwise — an undetected GPU is reported
+   * as undetected, never as "no GPU". Ollama runs a model in GPU VRAM when it fits
+   * and spills to system RAM otherwise, so both numbers matter to the estimate.
+   */
+  async function probeGpu(): Promise<{ detected: boolean; name?: string; totalVram?: number; freeVram?: number }> {
+    try {
+      const runner = nodeSpawner({ timeoutMs: 4_000 });
+      const r = await runner.run(
+        'nvidia-smi',
+        ['--query-gpu=name,memory.total,memory.free', '--format=csv,noheader,nounits'],
+        { cwd: opts.sandbox, timeoutMs: 4_000 },
+      );
+      if (r.failedToSpawn || r.code !== 0) return { detected: false };
+      const line = String(r.stdout || '').split(/\r?\n/).find((l) => l.trim() !== '');
+      if (line === undefined) return { detected: false };
+      const parts = line.split(',').map((s) => s.trim());
+      const name = parts[0];
+      const total = Number(parts[1]);
+      const free = Number(parts[2]);
+      // Build with only the fields we actually resolved: under exactOptional
+      // property types, an optional field must be absent, never set to undefined.
+      const out: { detected: boolean; name?: string; totalVram?: number; freeVram?: number } = { detected: true };
+      if (name) out.name = name;
+      if (Number.isFinite(total)) out.totalVram = total * 1024 * 1024;
+      if (Number.isFinite(free)) out.freeVram = free * 1024 * 1024;
+      return out;
+    } catch {
+      return { detected: false }; // a probe reports; it never crashes the request
+    }
+  }
+
+  async function serveForgeModelHost(res: ServerResponse): Promise<void> {
+    json(res, 200, { totalMem: totalmem(), freeMem: freemem(), gpu: await probeGpu() });
+  }
+
+  /**
+   * Remove a local model. Owner-only: it frees gigabytes of the owner's disk,
+   * and it is their own model — reversible by pulling it again, which is exactly
+   * what the window says before it asks. Deletes through Ollama's own API so the
+   * daemon never touches the model store directly. `name`/`model` are both sent
+   * because Ollama renamed the field across versions.
+   */
+  async function postForgeModelRemove(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') {
+      return json(res, 403, { error: { code: 'owner-only', message: 'Only the owner can remove a model.', resolve: 'Remove it from the Zeno window.' } });
+    }
+    const body = await readJson(req);
+    const name = (str(body, 'name') ?? '').trim();
+    const modelNameRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)?(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$/;
+    if (name.length > 96 || !modelNameRe.test(name)) {
+      return json(res, 400, { error: { code: 'bad-request', message: 'That is not a valid model name.', resolve: 'Name a model exactly as it is installed.' } });
+    }
+    if (!(await ollamaUp())) {
+      return json(res, 503, { error: { code: 'ollama-down', message: 'The local Ollama runtime is not running.', resolve: 'Start Ollama, then remove the model again.' } });
+    }
+    try {
+      const r = await fetch(ollamaEndpoint('/api/delete'), {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, model: name }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        return json(res, r.status === 404 ? 404 : 502, {
+          error: {
+            code: r.status === 404 ? 'not-found' : 'ollama-error',
+            message: r.status === 404 ? `Ollama has no model named ${name}.` : `Ollama answered ${r.status} when asked to remove ${name}.`,
+            resolve: detail ? detail.slice(0, 300) : 'Check the model name against the installed list.',
+          },
+        });
+      }
+      modelPulls.delete(name); // drop any finished-pull record for a model that is now gone
+      json(res, 200, { removed: true, name });
+    } catch (err) {
+      json(res, 502, { error: { code: 'ollama-error', message: err instanceof Error ? err.message : 'The remove failed.', resolve: 'Check the local Ollama runtime and try again.' } });
+    }
   }
 
   /**

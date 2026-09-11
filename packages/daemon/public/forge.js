@@ -2795,15 +2795,19 @@ export function initForge(section) {
    * uses), the daemon route is owner-only, and progress is real — polled from
    * GET /forge/models/pull, never faked. A finished pull refreshes the picker
    * from /forge/agents, so a model appears only once Ollama actually has it. */
+  const GB = 1024 * 1024 * 1024;
+  // `needs` is the APPROXIMATE memory to run the model comfortably (weights + a
+  // working KV cache) — not the download size. Rough on purpose, and labelled as
+  // approximate in the UI; it is a guide before a multi-GB download, not a promise.
   const MODEL_CATALOG = [
-    { name: 'llama3.2:1b', size: '~1.3 GB', note: 'Tiny, fast — good on modest hardware' },
-    { name: 'llama3.2', size: '~2.0 GB', note: 'Small general-purpose model' },
-    { name: 'qwen3:8b', size: '~5.2 GB', note: 'Strong general + coding (Zeno default)' },
-    { name: 'qwen2.5-coder:7b', size: '~4.7 GB', note: 'Tuned for writing code' },
-    { name: 'deepseek-r1:8b', size: '~5.2 GB', note: 'Explicit step-by-step reasoning' },
-    { name: 'gemma2:2b', size: '~1.6 GB', note: 'Small Google Gemma 2' },
-    { name: 'phi4', size: '~9.1 GB', note: 'Microsoft Phi-4, larger' },
-    { name: 'all-minilm', size: '~45 MB', note: 'Embeddings only — not a chat model' },
+    { name: 'llama3.2:1b', size: '~1.3 GB', needs: 2 * GB, note: 'Tiny, fast — good on modest hardware' },
+    { name: 'llama3.2', size: '~2.0 GB', needs: 3 * GB, note: 'Small general-purpose model' },
+    { name: 'qwen3:8b', size: '~5.2 GB', needs: 7 * GB, note: 'Strong general + coding (Zeno default)' },
+    { name: 'qwen2.5-coder:7b', size: '~4.7 GB', needs: 6.5 * GB, note: 'Tuned for writing code' },
+    { name: 'deepseek-r1:8b', size: '~5.2 GB', needs: 7 * GB, note: 'Explicit step-by-step reasoning' },
+    { name: 'gemma2:2b', size: '~1.6 GB', needs: 3 * GB, note: 'Small Google Gemma 2' },
+    { name: 'phi4', size: '~9.1 GB', needs: 11 * GB, note: 'Microsoft Phi-4, larger' },
+    { name: 'all-minilm', size: '~45 MB', needs: 0.4 * GB, note: 'Embeddings only — not a chat model' },
   ];
   let modelMgr = null; // { dialog, poll, pulls[], err, seenDone } while the panel is open
 
@@ -2824,10 +2828,49 @@ export function initForge(section) {
       document.body.appendChild(dialog);
       dialog.addEventListener('close', closeModelManager);
     }
-    modelMgr = { dialog, poll: null, pulls: [], err: null, seenDone: new Set() };
+    modelMgr = { dialog, poll: null, pulls: [], err: null, seenDone: new Set(), armRemove: null, host: null, confirm: null };
     renderModelMgr();
     if (!dialog.open) dialog.showModal();
     void refreshPulls();
+    void refreshHost();
+  }
+
+  async function refreshHost() {
+    if (!modelMgr) return;
+    const r = await api('/forge/models/host');
+    if (!modelMgr) return;
+    modelMgr.host = r.ok ? r.data : null;
+    renderModelMgr();
+  }
+
+  /** Does `needs` bytes fit this machine? An honest, approximate verdict from the
+   * GPU (if one was detected) and then system RAM. Returns { tone, text }. */
+  function fitVerdict(needs) {
+    const h = modelMgr && modelMgr.host;
+    if (!needs) return { tone: 'warn', text: 'Requirement unknown for this tag — Ollama will run it on your GPU if it fits, otherwise on your CPU using system RAM (slower).' };
+    if (!h) return { tone: 'warn', text: 'Checking this machine’s memory… Ollama will fit the model to your GPU or spill to system RAM.' };
+    const gpu = h.gpu && h.gpu.detected ? h.gpu : null;
+    if (gpu && typeof gpu.totalVram === 'number' && gpu.totalVram > 0) {
+      if (needs <= (gpu.freeVram || 0)) return { tone: 'ok', text: `Fits your GPU now — about ${gib(needs)} needed, ${gib(gpu.freeVram)} free on ${gpu.name || 'your GPU'}.` };
+      if (needs <= gpu.totalVram) return { tone: 'warn', text: `Needs ~${gib(needs)}; your GPU has ${gib(gpu.totalVram)} total but only ${gib(gpu.freeVram || 0)} free now. It should fit once other models unload.` };
+      if (needs <= (h.totalMem || 0)) return { tone: 'warn', text: `Exceeds your GPU’s ${gib(gpu.totalVram)} VRAM — Ollama will run it on the CPU using system RAM (${gib(h.totalMem)}). It works, but slowly.` };
+      return { tone: 'bad', text: `Exceeds BOTH your GPU (${gib(gpu.totalVram)}) and your system RAM (${gib(h.totalMem)}). It is likely to fail to load or be unusably slow.` };
+    }
+    // No GPU detected — judge against system RAM.
+    if (needs <= (h.freeMem || 0)) return { tone: 'ok', text: `Should fit — about ${gib(needs)} needed, ${gib(h.freeMem)} free of ${gib(h.totalMem)} RAM (no GPU detected).` };
+    if (needs <= (h.totalMem || 0)) return { tone: 'warn', text: `Needs ~${gib(needs)}; you have ${gib(h.totalMem)} RAM but only ${gib(h.freeMem)} free now. Close things or expect swapping (no GPU detected).` };
+    return { tone: 'bad', text: `Needs ~${gib(needs)} but this machine has ${gib(h.totalMem)} RAM (no GPU detected). It is likely to fail or be unusably slow.` };
+  }
+
+  /** Step 1 of the add flow: don't pull yet — show what it needs vs this machine,
+   * then let the owner decide. This is the Mobbin confirm step. */
+  function confirmPull(name, needs) {
+    if (!modelMgr) return;
+    modelMgr.err = null;
+    modelMgr.confirm = { name, needs: needs || 0 };
+    renderModelMgr();
+    const dlg = modelMgr.dialog.querySelector('.fgmm-in');
+    if (dlg) dlg.scrollTop = 0;
   }
 
   function closeModelManager() {
@@ -2851,6 +2894,18 @@ export function initForge(section) {
     const active = modelMgr.pulls.some((p) => !p.done);
     if (active && !modelMgr.poll) modelMgr.poll = window.setInterval(refreshPulls, 800);
     if (!active && modelMgr.poll) { window.clearInterval(modelMgr.poll); modelMgr.poll = null; }
+  }
+
+  async function removeModel(name) {
+    if (!modelMgr) return;
+    modelMgr.err = null;
+    const r = await api('/forge/models/remove', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    if (!modelMgr) return;
+    if (!r.ok) { modelMgr.err = errText(r); renderModelMgr(); return; }
+    await loadAgents();               // the installed list shrinks; the picker updates too
+    if (modelMgr) renderModelMgr();   // the dialog lives on <body>, so redraw it from the fresh list
   }
 
   async function startPull(name) {
@@ -2884,10 +2939,56 @@ export function initForge(section) {
       + 'machine and the model can be several gigabytes. Nothing about you is sent — only the name you asked '
       + 'for. Every run still stays on this machine, and every file it writes still waits for your approval.'));
 
+    // The Mobbin confirm step: what it needs vs this machine, before any download.
+    if (modelMgr.confirm) {
+      const cf = modelMgr.confirm;
+      const v = fitVerdict(cf.needs);
+      const card = el('div', `fgmm-confirm ${v.tone}`);
+      add(card, el('div', 'fgmm-confirm-h', `Add ${cf.name}?`));
+      const facts = el('div', 'fgmm-confirm-facts');
+      add(facts, el('span', 'fgmm-confirm-need', cf.needs ? `needs ≈ ${gib(cf.needs)} to run` : 'requirement: unknown for this tag'));
+      const host = modelMgr.host;
+      if (host) {
+        const gpu = host.gpu && host.gpu.detected ? host.gpu : null;
+        add(facts, el('span', 'fgmm-confirm-host', gpu
+          ? `this machine: ${gib(host.totalMem)} RAM · GPU ${gpu.name || ''} ${gib(gpu.totalVram)} VRAM`.trim()
+          : `this machine: ${gib(host.totalMem)} RAM · no GPU detected`));
+      }
+      add(card, facts);
+      add(card, el('p', `fgmm-verdict ${v.tone}`, v.text));
+      const acts = el('div', 'fgmm-confirm-acts');
+      const go = btn('fgmm-add' + (v.tone === 'bad' ? ' danger' : ''), v.tone === 'bad' ? 'Download anyway' : 'Download & install', () => {
+        const name = cf.name; modelMgr.confirm = null; startPull(name);
+      });
+      const cancel = btn('fgmm-ghost', 'Cancel', () => { modelMgr.confirm = null; renderModelMgr(); });
+      add(acts, go, cancel);
+      add(card, acts);
+      add(wrap, card);
+    }
+
     add(wrap, el('div', 'fgmm-sec-h', `Installed · ${installed.length}`));
     const inst = el('div', 'fgmm-chips');
     if (installed.length === 0) add(inst, el('span', 'fgmm-empty', 'No local model yet — add one below.'));
-    else for (const m of installed) add(inst, el('span', 'fgmm-chip', m));
+    else for (const m of installed) {
+      const armed = modelMgr.armRemove === m;
+      const chip = el('span', armed ? 'fgmm-chip arm' : 'fgmm-chip');
+      add(chip, el('span', 'fgmm-chip-name', m));
+      // Two-step, because removing frees gigabytes: first click arms and says so,
+      // second removes. It disarms itself so an old click cannot delete later. A
+      // removed model is not lost — it can be pulled again.
+      const rm = btn('fgmm-chip-x', armed ? 'Remove?' : '✕', () => {
+        if (modelMgr.armRemove === m) { modelMgr.armRemove = null; removeModel(m); return; }
+        modelMgr.armRemove = m;
+        renderModelMgr();
+        window.setTimeout(() => {
+          if (modelMgr && modelMgr.armRemove === m) { modelMgr.armRemove = null; renderModelMgr(); }
+        }, 3500);
+      });
+      rm.setAttribute('aria-label', armed ? `Confirm remove ${m}` : `Remove ${m}`);
+      rm.title = armed ? 'Click again to remove — this frees disk; re-pull to restore it' : 'Remove this model';
+      add(chip, rm);
+      add(inst, chip);
+    }
     add(wrap, inst);
 
     add(wrap, el('div', 'fgmm-sec-h', 'Add a model'));
@@ -2897,8 +2998,10 @@ export function initForge(section) {
     input.id = 'fgmm-name';
     input.placeholder = 'Ollama tag — e.g. qwen3:8b or llama3.2';
     input.setAttribute('aria-label', 'Model name to add');
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startPull(input.value); } });
-    const addBtn = btn('fgmm-add', 'Add', () => startPull(input.value));
+    const needsFor = (nm) => { const hit = MODEL_CATALOG.find((c) => c.name === nm); return hit ? hit.needs : 0; };
+    const addTyped = () => { const nm = String(input.value || '').trim(); if (nm) confirmPull(nm, needsFor(nm)); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } });
+    const addBtn = btn('fgmm-add', 'Add', addTyped);
     add(form, input, addBtn);
     add(wrap, form);
     if (modelMgr.err) add(wrap, el('p', 'fgmm-err', modelMgr.err));
@@ -2906,9 +3009,9 @@ export function initForge(section) {
     const cat = el('div', 'fgmm-cat');
     for (const c of MODEL_CATALOG) {
       const has = installed.some((m) => m === c.name || m.startsWith(c.name + ':') || m === c.name + ':latest');
-      const card = btn('fgmm-card', null, () => { input.value = c.name; startPull(c.name); });
+      const card = btn('fgmm-card', null, () => { input.value = c.name; confirmPull(c.name, c.needs); });
       add(card, el('span', 'fgmm-card-name', c.name));
-      add(card, el('span', 'fgmm-card-size', c.size));
+      add(card, el('span', 'fgmm-card-size', `${c.size} · needs ≈ ${gib(c.needs)}`));
       add(card, el('span', 'fgmm-card-note', c.note));
       if (has) { card.classList.add('has'); card.disabled = true; card.title = 'Already installed'; add(card, el('span', 'fgmm-card-has', 'installed ✓')); }
       add(cat, card);
