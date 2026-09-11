@@ -2773,10 +2773,176 @@ export function initForge(section) {
     });
 
     add(box, agentSel, modelSel, effortSel);
+    // Add-a-model lives beside the model picker: local models are Ollama's, and
+    // this is where the owner would look to get one they don't yet have.
+    if (OWNER_TOKEN) {
+      const manage = btn('fgmodels-open', '＋ Models', () => openModelManager());
+      manage.title = 'Add or manage local models — pull one from Ollama without leaving Zeno';
+      add(box, manage);
+    }
     if (chosen && chosen.available === false) {
       add(box, el('span', 'fgprovider-note', chosen.unavailableReason || 'This provider is unavailable.'));
     }
     return box;
+  }
+
+  /* ================================================================== *
+   * MODEL MANAGER — add an Ollama model natively, no terminal           *
+   * ================================================================== *
+   * Pulling a model is a download from the Ollama registry: network egress
+   * AND a multi-gigabyte disk write. So the panel discloses the egress before
+   * anything is fetched (the same explicit-consent shape the hosted-run gate
+   * uses), the daemon route is owner-only, and progress is real — polled from
+   * GET /forge/models/pull, never faked. A finished pull refreshes the picker
+   * from /forge/agents, so a model appears only once Ollama actually has it. */
+  const MODEL_CATALOG = [
+    { name: 'llama3.2:1b', size: '~1.3 GB', note: 'Tiny, fast — good on modest hardware' },
+    { name: 'llama3.2', size: '~2.0 GB', note: 'Small general-purpose model' },
+    { name: 'qwen3:8b', size: '~5.2 GB', note: 'Strong general + coding (Zeno default)' },
+    { name: 'qwen2.5-coder:7b', size: '~4.7 GB', note: 'Tuned for writing code' },
+    { name: 'deepseek-r1:8b', size: '~5.2 GB', note: 'Explicit step-by-step reasoning' },
+    { name: 'gemma2:2b', size: '~1.6 GB', note: 'Small Google Gemma 2' },
+    { name: 'phi4', size: '~9.1 GB', note: 'Microsoft Phi-4, larger' },
+    { name: 'all-minilm', size: '~45 MB', note: 'Embeddings only — not a chat model' },
+  ];
+  let modelMgr = null; // { dialog, poll, pulls[], err, seenDone } while the panel is open
+
+  function gib(n) {
+    if (typeof n !== 'number' || !isFinite(n) || n <= 0) return '0 B';
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} kB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(0)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+
+  function openModelManager() {
+    if (!OWNER_TOKEN) return;
+    let dialog = document.getElementById('fgmm-dialog');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'fgmm-dialog';
+      dialog.className = 'fgmm';
+      document.body.appendChild(dialog);
+      dialog.addEventListener('close', closeModelManager);
+    }
+    modelMgr = { dialog, poll: null, pulls: [], err: null, seenDone: new Set() };
+    renderModelMgr();
+    if (!dialog.open) dialog.showModal();
+    void refreshPulls();
+  }
+
+  function closeModelManager() {
+    if (modelMgr && modelMgr.poll) window.clearInterval(modelMgr.poll);
+    modelMgr = null;
+  }
+
+  async function refreshPulls() {
+    if (!modelMgr) return;
+    const r = await api('/forge/models/pull');
+    if (!modelMgr) return; // closed while the read was in flight
+    modelMgr.pulls = (r.ok && r.data && Array.isArray(r.data.pulls)) ? r.data.pulls : [];
+    let finishedOk = false;
+    for (const p of modelMgr.pulls) {
+      if (p.done && p.ok && !modelMgr.seenDone.has(p.name)) finishedOk = true;
+      if (p.done) modelMgr.seenDone.add(p.name);
+    }
+    renderModelMgr();
+    if (finishedOk) await loadAgents(); // the new model now shows in the picker
+    if (!modelMgr) return;
+    const active = modelMgr.pulls.some((p) => !p.done);
+    if (active && !modelMgr.poll) modelMgr.poll = window.setInterval(refreshPulls, 800);
+    if (!active && modelMgr.poll) { window.clearInterval(modelMgr.poll); modelMgr.poll = null; }
+  }
+
+  async function startPull(name) {
+    const clean = String(name || '').trim();
+    if (!modelMgr || clean === '') return;
+    modelMgr.err = null;
+    renderModelMgr();
+    const r = await api('/forge/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: clean }),
+    });
+    if (!modelMgr) return;
+    if (!r.ok) { modelMgr.err = errText(r); renderModelMgr(); return; }
+    await refreshPulls();
+  }
+
+  function renderModelMgr() {
+    if (!modelMgr) return;
+    const d = modelMgr.dialog;
+    const installed = (S.agents && S.agents.localModels) || [];
+    const wrap = el('div', 'fgmm-in');
+
+    const head = el('div', 'fgmm-head');
+    add(head, el('div', 'fgmm-title', 'Local models'));
+    const x = btn('fgmm-x', '✕', () => d.close());
+    x.setAttribute('aria-label', 'Close');
+    add(head, x);
+    add(wrap, head);
+
+    add(wrap, el('p', 'fgmm-egress',
+      'Adding a model downloads it from the Ollama registry (registry.ollama.ai). That request leaves this '
+      + 'machine and the model can be several gigabytes. Nothing about you is sent — only the name you asked '
+      + 'for. Every run still stays on this machine, and every file it writes still waits for your approval.'));
+
+    add(wrap, el('div', 'fgmm-sec-h', `Installed · ${installed.length}`));
+    const inst = el('div', 'fgmm-chips');
+    if (installed.length === 0) add(inst, el('span', 'fgmm-empty', 'No local model yet — add one below.'));
+    else for (const m of installed) add(inst, el('span', 'fgmm-chip', m));
+    add(wrap, inst);
+
+    add(wrap, el('div', 'fgmm-sec-h', 'Add a model'));
+    const form = el('div', 'fgmm-form');
+    const input = el('input', 'fgmm-input');
+    input.type = 'text';
+    input.id = 'fgmm-name';
+    input.placeholder = 'Ollama tag — e.g. qwen3:8b or llama3.2';
+    input.setAttribute('aria-label', 'Model name to add');
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); startPull(input.value); } });
+    const addBtn = btn('fgmm-add', 'Add', () => startPull(input.value));
+    add(form, input, addBtn);
+    add(wrap, form);
+    if (modelMgr.err) add(wrap, el('p', 'fgmm-err', modelMgr.err));
+
+    const cat = el('div', 'fgmm-cat');
+    for (const c of MODEL_CATALOG) {
+      const has = installed.some((m) => m === c.name || m.startsWith(c.name + ':') || m === c.name + ':latest');
+      const card = btn('fgmm-card', null, () => { input.value = c.name; startPull(c.name); });
+      add(card, el('span', 'fgmm-card-name', c.name));
+      add(card, el('span', 'fgmm-card-size', c.size));
+      add(card, el('span', 'fgmm-card-note', c.note));
+      if (has) { card.classList.add('has'); card.disabled = true; card.title = 'Already installed'; add(card, el('span', 'fgmm-card-has', 'installed ✓')); }
+      add(cat, card);
+    }
+    add(wrap, cat);
+
+    const pulls = modelMgr.pulls || [];
+    const active = pulls.filter((p) => !p.done);
+    const recent = pulls.filter((p) => p.done);
+    if (active.length || recent.length) {
+      add(wrap, el('div', 'fgmm-sec-h', 'Downloads'));
+      const list = el('div', 'fgmm-dl');
+      for (const p of [...active, ...recent]) {
+        const rowE = el('div', 'fgmm-dlrow');
+        add(rowE, el('span', 'fgmm-dl-name', p.name));
+        const pct = (p.total > 0) ? Math.min(100, Math.round((p.completed / p.total) * 100)) : (p.done && p.ok ? 100 : 0);
+        const bar = el('div', 'fgmm-bar');
+        const fill = el('div', 'fgmm-bar-fill');
+        fill.style.width = pct + '%';
+        if (p.error) fill.classList.add('err');
+        else if (p.done && p.ok) fill.classList.add('ok');
+        add(bar, fill);
+        add(rowE, bar);
+        const status = p.error ? `error: ${short(p.error, 90)}`
+          : (p.done && p.ok) ? 'installed ✓'
+          : (p.total > 0) ? `${p.status} · ${gib(p.completed)} / ${gib(p.total)} · ${pct}%`
+          : (p.status || 'starting…');
+        add(rowE, el('span', p.error ? 'fgmm-dl-st err' : 'fgmm-dl-st', status));
+        add(list, rowE);
+      }
+      add(wrap, list);
+    }
+
+    d.replaceChildren(wrap);
   }
 
   const INSPECTOR = {

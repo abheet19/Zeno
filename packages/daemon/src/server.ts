@@ -1056,6 +1056,12 @@ export function createServer(opts: DaemonOptions): Server {
   // model. Same trap, second victim; moved rather than re-explained.
   let ollamaStarting: Promise<boolean> | null = null;
   let ollamaLastStartAttemptAt: number | null = null;
+  // Live model pulls, keyed by model name. Declared HERE, above the server's
+  // `return`, for exactly the reason the comment above gives: a `const` placed
+  // among the hoisted route helpers below the return never initializes, and
+  // every pull route would throw "before initialization". (ModelPullState is an
+  // interface — compile-time only — so referencing it ahead of its text is fine.)
+  const modelPulls = new Map<string, ModelPullState>();
   // The test panel is an owner-triggered process surface. Serialize it so two
   // impatient clicks cannot start two repository suites and make both reports
   // describe a machine-load state neither one owns.
@@ -1715,6 +1721,10 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/forge/agents') {
       return await serveForgeAgents(res, url.searchParams.get('passive') !== '1');
     }
+    // Add a model natively: pull it from the Ollama registry (owner-only, egress
+    // disclosed by the window). GET reports live download progress for polling.
+    if (req.method === 'POST' && path === '/forge/models/pull') return await postForgeModelPull(req, res, role);
+    if (req.method === 'GET' && path === '/forge/models/pull') return serveForgeModelPulls(res, url);
     if (req.method === 'POST' && path === '/forge/context') return await postForgeContext(req, res);
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(req, res, role);
@@ -2639,6 +2649,129 @@ export function createServer(opts: DaemonOptions): Server {
     } catch {
       return []; // Ollama not running — the local rung simply shows no models to pick
     }
+  }
+
+  /**
+   * A live model pull, keyed by model name. Pulling a model is a streaming
+   * download from the Ollama registry — network egress AND a multi-gigabyte disk
+   * write — so the route that starts one is owner-only and the window discloses
+   * the egress before it calls (the same explicit-confirmation shape Forge uses
+   * for hosted-provider egress; a pull is not a file-write capsule). This map is
+   * in-memory only: a pull is not durable state, and its real receipt is the
+   * model appearing in `/api/tags`. Finished pulls are pruned so a long-lived
+   * daemon does not accumulate them.
+   */
+  interface ModelPullState {
+    name: string;
+    status: string;    // Ollama's own phase text: 'pulling manifest' | 'downloading' | 'success' | …
+    completed: number; // bytes fetched in the current layer
+    total: number;     // bytes of the current layer (0 until Ollama reports one)
+    done: boolean;
+    ok: boolean;
+    error: string | null;
+    startedAt: number;
+    updatedAt: number;
+  }
+  // `modelPulls` is declared far above, before the server's return, so it is
+  // actually initialized (see the note there). Only hoisted functions may live
+  // down here among the route helpers.
+
+  function pruneModelPulls(): void {
+    const now = Date.now();
+    for (const [name, st] of modelPulls) {
+      if (st.done && now - st.updatedAt > 300_000) modelPulls.delete(name);
+    }
+  }
+
+  /**
+   * Add a model natively: pull it from the Ollama registry so the owner never
+   * has to leave Zeno for a terminal. Owner-only, because it egresses and writes
+   * gigabytes; the window has already disclosed that before this is called. The
+   * download runs fire-and-forget and the window polls GET /forge/models/pull.
+   */
+  async function postForgeModelPull(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') {
+      return json(res, 403, { error: { code: 'owner-only', message: 'Only the owner can add a model.', resolve: 'Add it from the Zeno window.' } });
+    }
+    const body = await readJson(req);
+    const name = (str(body, 'name') ?? '').trim();
+    // An Ollama model tag: a name, an optional /namespace, an optional :tag. No
+    // spaces, no shell metacharacters — this only ever names a registry model.
+    // A literal (not a hoisted-away const) so it evaluates when this route runs.
+    const modelNameRe = /^[a-zA-Z0-9][a-zA-Z0-9._-]*(?:\/[a-zA-Z0-9][a-zA-Z0-9._-]*)?(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?$/;
+    if (name.length > 96 || !modelNameRe.test(name)) {
+      return json(res, 400, { error: { code: 'bad-request', message: 'That is not a valid model name.', resolve: 'Use an Ollama tag such as qwen3:8b or llama3.2.' } });
+    }
+    const existing = modelPulls.get(name);
+    if (existing !== undefined && !existing.done) {
+      return json(res, 200, { started: true, name, already: true, pull: existing });
+    }
+    if (!(await ensureOllama())) {
+      return json(res, 503, { error: { code: 'ollama-down', message: 'The local Ollama runtime is not running and could not be started.', resolve: 'Start Ollama, then add the model again.' } });
+    }
+    const state: ModelPullState = {
+      name, status: 'starting', completed: 0, total: 0,
+      done: false, ok: false, error: null, startedAt: Date.now(), updatedAt: Date.now(),
+    };
+    modelPulls.set(name, state);
+    void (async () => {
+      try {
+        const r = await fetch(ollamaEndpoint('/api/pull'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name, stream: true }),
+        });
+        if (!r.ok || r.body === null) {
+          state.status = 'error';
+          state.error = `Ollama answered ${r.status} when asked to pull ${name}.`;
+          state.done = true; state.ok = false; state.updatedAt = Date.now();
+          return;
+        }
+        // Ollama streams NDJSON: one JSON object per line, ending on
+        // {"status":"success"} or an {"error":"…"} line for an unknown model.
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          let nl = buffer.indexOf('\n');
+          while (nl >= 0) {
+            const line = buffer.slice(0, nl).trim();
+            buffer = buffer.slice(nl + 1);
+            nl = buffer.indexOf('\n');
+            if (line === '') continue;
+            let obj: Record<string, unknown>;
+            try { obj = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+            if (typeof obj['error'] === 'string') { state.error = obj['error']; state.status = 'error'; }
+            if (typeof obj['status'] === 'string') state.status = obj['status'];
+            if (typeof obj['total'] === 'number') state.total = obj['total'];
+            if (typeof obj['completed'] === 'number') state.completed = obj['completed'];
+            state.updatedAt = Date.now();
+          }
+        }
+        state.done = true;
+        state.ok = state.error === null && /success/i.test(state.status);
+        state.updatedAt = Date.now();
+      } catch (err) {
+        state.status = 'error';
+        state.error = err instanceof Error ? err.message : 'The pull failed.';
+        state.done = true; state.ok = false; state.updatedAt = Date.now();
+      }
+    })();
+    json(res, 202, { started: true, name, pull: state });
+  }
+
+  /** Progress for one pull (?name=) or every tracked pull. Read-only, so it is
+   * legible to either role; only starting a pull is owner-gated. */
+  function serveForgeModelPulls(res: ServerResponse, url: URL): void {
+    pruneModelPulls();
+    const name = url.searchParams.get('name');
+    if (name !== null) {
+      return json(res, 200, { pull: modelPulls.get(name) ?? null });
+    }
+    json(res, 200, { pulls: [...modelPulls.values()] });
   }
 
   /**
