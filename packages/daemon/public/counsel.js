@@ -324,6 +324,27 @@ const CSS = `
 .callrow .cp{ font-size:11px; color:var(--ink-2); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .callrow .cc{ display:flex; gap:5px; flex-wrap:wrap; margin-top:7px }
 
+/* ---------- search over the archive ---------- */
+.cn-find{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:9px }
+.cn-find input{ flex:1; min-width:150px; font:inherit; font-size:12px; padding:7px 10px; border-radius:8px;
+  border:1px solid var(--rule-2); background:var(--g2); color:var(--ink) }
+.cn-find input::placeholder{ color:var(--ink-3) }
+.cn-matches{ display:flex; flex-direction:column; gap:4px; margin:-3px 0 9px; padding-left:4px }
+.cn-match{ font-size:10.5px; line-height:1.4; color:var(--ink-3); overflow-wrap:anywhere }
+.cn-match-line{ text-align:left; border:0; background:transparent; cursor:pointer; padding:2px 0;
+  font:inherit; font-size:10.5px; color:var(--cyan); border-bottom:1px dashed color-mix(in srgb,var(--cyan) 40%,transparent) }
+.cn-match-line:hover{ color:var(--ink) }
+
+/* ---------- the browsable transcript in a call ---------- */
+.trx{ margin-top:12px; border-top:1px solid var(--rule); padding-top:10px }
+.trx > summary{ cursor:pointer; font-family:var(--font-mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); font-weight:600 }
+.trx-feed{ display:flex; flex-direction:column; gap:3px; margin-top:9px }
+.trx-line{ display:flex; gap:8px; align-items:baseline; padding:4px 7px; border-radius:7px; font-size:11.5px; line-height:1.5 }
+.trx-who{ font-family:var(--font-mono); font-size:8.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); flex:none; width:56px }
+.trx-id{ font-family:var(--font-mono); font-size:8.5px; color:var(--ink-3); flex:none }
+.trx-tx{ flex:1; color:var(--ink); overflow-wrap:anywhere }
+.trx-hit{ background:color-mix(in srgb,var(--cyan) 15%,transparent); border:1px solid color-mix(in srgb,var(--cyan) 40%,var(--rule)) }
+
 /* ---------- one call's summary ---------- */
 .faces{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:0 0 14px }
 .face{
@@ -553,6 +574,10 @@ export function initCounsel(section) {
     asking: false,
     askDraft: '',
     redactedNote: null,
+    callQuery: '',        // the Past-calls search box
+    searching: false,     // a search is fetching call bodies
+    expandTranscript: false, // open the transcript on the next render (a search hit)
+    jumpLine: null,       // a transcript line id to reveal + mark on the next render
   };
 
   /** meeting id -> the full meeting, so a citation can be read, not just shown. */
@@ -700,7 +725,30 @@ export function initCounsel(section) {
       return;
     }
 
+    // Search across the archive. Title and participants are already loaded;
+    // transcript and summary text need the call bodies, so runCallSearch fetches
+    // every one first — the match is over what was actually said, not just the
+    // summaries the list holds. Local, on this machine, like everything here.
+    const find = el('div', 'cn-find');
+    const sInput = el('input');
+    sInput.type = 'search';
+    sInput.id = 'cn-search';
+    sInput.placeholder = 'Search your calls — title, people, or what was said';
+    sInput.setAttribute('aria-label', 'Search saved calls');
+    sInput.value = S.callQuery;
+    sInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runCallSearch(sInput.value); } });
+    add(find, sInput, btn('btn sm p', S.searching ? 'Searching…' : 'Search', () => runCallSearch(sInput.value)));
+    if (S.callQuery) add(find, btn('btn sm g', 'Clear', () => { S.callQuery = ''; renderCalls(); }));
+    add(bd, find);
+
+    const q = S.callQuery.trim().toLowerCase();
+    if (q) add(bd, el('p', 'hint', `Showing calls that mention “${clipText(S.callQuery, 40)}”.`));
+
+    let shown = 0;
     for (const m of S.meetings) {
+      const matches = q ? callSearchMatches(m, q) : null;
+      if (q && (!matches || matches.length === 0)) continue;
+      shown += 1;
       const row = el('button', 'callrow');
       row.type = 'button';
       row.setAttribute('aria-current', String(S.selected === m.id));
@@ -724,9 +772,104 @@ export function initCounsel(section) {
       add(row, counts);
       row.addEventListener('click', () => { select(m.id); });
       add(bd, row);
+
+      // Match detail sits AFTER the row (a row is a <button>; a jump is another
+      // button, and buttons cannot nest). A transcript hit opens the call and
+      // lands on that line; a title/person/summary hit just names where it hit.
+      if (matches && matches.length) {
+        const ml = el('div', 'cn-matches');
+        for (const hit of matches.slice(0, 4)) {
+          if (hit.lineId) {
+            const jb = btn('cn-match cn-match-line', `“${clipText(hit.snippet, 64)}” →`, async (e) => {
+              e.stopPropagation();
+              S.expandTranscript = true;     // renderCall opens the transcript this once
+              await select(m.id);            // open the call (await, so the detail is in the DOM)
+              S.expandTranscript = false;    // a later plain row-click should not auto-open it
+              highlightTranscriptLine(hit.lineId);
+            });
+            jb.title = 'Open this call at that line';
+            add(ml, jb);
+          } else {
+            add(ml, el('span', 'cn-match', hit.snippet ? `${hit.where}: ${clipText(hit.snippet, 64)}` : `matched in ${hit.where}`));
+          }
+        }
+        add(bd, ml);
+      }
+    }
+
+    if (q && shown === 0) {
+      add(bd, emptyBlock('○', 'No call matched that.',
+        'The search ran across titles, people, and the words in every saved call — and none matched.'));
     }
 
     add(panelCalls, el('p', 'hint', 'One call is one Markdown file on this machine. Deleting one really deletes that file.'));
+  }
+
+  function clipText(s, n) {
+    const v = String(s == null ? '' : s);
+    return v.length > n ? v.slice(0, n) + '…' : v;
+  }
+
+  /** Reveal and mark one transcript line in the open call — used after a search
+   * result opens its call, so the owner lands on the exact line, not the top. */
+  function highlightTranscriptLine(lineId) {
+    if (!lineId) return;
+    const want = String(lineId);
+    // Iterate rather than build an attribute selector: line ids can contain '/'
+    // and this engine has no CSS.escape, so a direct compare is both safe and
+    // correct for every id shape the daemon mints.
+    let target = null;
+    for (const el of panelCall.querySelectorAll('.trx-line')) {
+      if (el.dataset.lineId === want) { target = el; }
+      else el.classList.remove('trx-hit');
+    }
+    if (!target) return;
+    const details = target.closest('details.trx');
+    if (details) details.open = true;
+    target.classList.add('trx-hit');
+    try { target.scrollIntoView({ block: 'center' }); } catch { /* older engines */ }
+  }
+
+  /** Every place `q` appears in this call: title, a participant, a transcript
+   * line (with its id, so search can jump to it), or a summary item. Transcript
+   * and summary matches need the call body, which runCallSearch has fetched. */
+  function callSearchMatches(m, q) {
+    const hits = [];
+    if ((m.title || '').toLowerCase().includes(q)) hits.push({ where: 'title', snippet: m.title });
+    for (const p of (m.participants || [])) if (String(p).toLowerCase().includes(q)) hits.push({ where: 'person', snippet: p });
+    const d = cache.get(m.id);
+    if (d) {
+      for (const u of (d.utterances || [])) if (String(u.text || '').toLowerCase().includes(q)) hits.push({ where: 'said', snippet: u.text, lineId: u.id });
+      const sum = d.summary || {};
+      const scan = (label, items) => { for (const it of (items || [])) if (String(it.text || '').toLowerCase().includes(q)) hits.push({ where: label, snippet: it.text }); };
+      scan('decision', sum.decisions);
+      scan('action', sum.actions);
+      scan('question', sum.questions);
+      scan('key point', sum.keyPoints);
+    }
+    return hits;
+  }
+
+  /** Read every call body not yet cached, so a search reaches transcripts. The
+   * archive is local and small; this is bounded by the number of saved calls. */
+  async function ensureAllDetails() {
+    const missing = S.meetings.filter((m) => !cache.has(m.id));
+    await Promise.all(missing.map(async (m) => {
+      const r = await call('GET', `/counsel/meetings/${encodeURIComponent(m.id)}`);
+      if (r.ok && r.data && r.data.meeting) cache.set(m.id, r.data.meeting);
+    }));
+  }
+
+  async function runCallSearch(value) {
+    S.callQuery = String(value || '').trim();
+    if (S.callQuery === '') { renderCalls(); return; }
+    S.searching = true;
+    renderCalls();
+    await ensureAllDetails();
+    S.searching = false;
+    renderCalls();
+    const box = document.getElementById('cn-search');
+    if (box) { box.focus(); const v = box.value; box.value = ''; box.value = v; }
   }
 
   /* =================================================================== *
@@ -959,6 +1102,27 @@ export function initCounsel(section) {
       add(it, el('div', 'sitem-tx', k.text), citesRow(k.cites, lines));
       return it;
     });
+
+    // The full transcript, browsable and line-addressable. Collapsed by default
+    // (the cited sections are the headline; this is the source underneath). Each
+    // line carries its id so search can open the call and jump straight to it.
+    const utteranceList = m.utterances || [];
+    if (utteranceList.length) {
+      const trx = el('details', 'trx');
+      if (S.expandTranscript) trx.open = true;
+      const sm = el('summary', null, `Full transcript · ${utteranceList.length} lines`);
+      add(trx, sm);
+      const feed = el('div', 'trx-feed');
+      for (const u of utteranceList) {
+        const lineEl = el('div', 'trx-line');
+        lineEl.dataset.lineId = u.id;
+        const who = el('span', 'trx-who', u.speaker || 'unknown');
+        add(lineEl, who, el('span', 'trx-id', `[${u.id}]`), el('span', 'trx-tx', u.text));
+        add(feed, lineEl);
+      }
+      add(trx, feed);
+      add(bd, trx);
+    }
 
     add(
       panelCall,
