@@ -1178,7 +1178,7 @@ export default { init };
 function boot() {
   const th = ld('th');
   if (th === 'dark' || th === 'light') R.setAttribute('data-theme', th);
-  if (ld('fl') === '1') { R.setAttribute('data-flat', '1'); F.tilt0 = 0; F.tilt = 0; F.rot = 0; }
+  if (ld('fl') === '1') R.setAttribute('data-flat', '1'); // reduce-transparency preference; the orb is unaffected
   bootMotion();
   const cmd = document.querySelector('[data-surface="command"]');
   if (cmd) init(cmd);
@@ -1215,12 +1215,14 @@ function wireControls() {
     if (!S.motion) { stopF(); draw(); } else { startF(); }
   });
 
+  // Reduce transparency: toggles data-flat, which glass/tokens.css consumes to
+  // drop backdrop-filter blur across the UI. It no longer touches the orb — the
+  // 2D orb view is retired; this is purely the glass accessibility escape hatch.
   const flat = document.getElementById('ctl-flat');
   if (flat) flat.addEventListener('click', () => {
     const on = R.getAttribute('data-flat') === '1';
     R.setAttribute('data-flat', on ? '0' : '1'); st('fl', on ? '0' : '1');
-    F.tilt0 = on ? 0.34 : 0; F.tilt = F.tilt0; F.rot = on ? 0.62 : 0;
-    syncControls(); if (!F.raf) draw();
+    syncControls();
   });
 
   const home = document.getElementById('home');

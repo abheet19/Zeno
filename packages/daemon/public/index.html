@@ -1792,12 +1792,17 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 
 /* =============================================================================
    REDESIGN (2026-09-11) — calm chat-first Command shell.
-   Step 1: declutter the top bar. The journey strip and the masked-mode control
-   are retired outright; the 2D control is hidden here pending its move to
-   Settings as a "reduce transparency" toggle. reduce-motion and theme relocate
-   to Settings in a later step.
+   The journey strip, masked-mode and 2D-orb controls are retired from the top
+   bar; reduce-motion, theme and "reduce transparency" live in Settings. The
+   #ctl-flat button stays in the DOM (hidden) only as the toggle that the
+   Settings "Reduce transparency" row forwards its click to — it drives the
+   glass blur, not the orb.
    ============================================================================= */
 #ctl-flat{ display:none !important; }
+/* Reduce transparency (Settings): blank the shared blur token so every surface
+   that uses backdrop-filter:var(--gl-blur) drops its frosted blur in one rule —
+   the vendored glass-base.css only covers the unused .glass class. */
+:root[data-flat="1"]{ --gl-blur:none !important; }
 
 /* Step 2: give the rail real icons (a proper icon set, not text-only). The
    .rail-n is already a flex row with a gap, so the icon sits before the label
@@ -1853,7 +1858,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
        showing it is a lie about what is available. So it is absent. -->
   <div class="bar-ctl" aria-label="Window controls">
     <button type="button" class="ctl" id="ctl-motion" aria-pressed="false" title="Reduce motion">↺ reduce motion</button>
-    <button type="button" class="ctl" id="ctl-flat" aria-pressed="false" title="Flatten the field to 2D">▱ 2D</button>
+    <button type="button" class="ctl" id="ctl-flat" aria-pressed="false" title="Reduce transparency — drop the glass blur">▱ reduce transparency</button>
     <button type="button" class="ctl" id="ctl-theme" title="Theme: system / light / dark">◑ theme</button>
   </div>
 </header>

@@ -769,8 +769,8 @@ function buildSettingsGroups(state) {
       preferenceSetting('ctl-theme', 'Theme', theme, 'Cycles System → Dark → Light. Stored in this browser profile and never synced.', false, true)),
     settingItem('general', 'Reduce motion', 'Stop the field from breathing and drifting on this device.', 'animation accessibility movement',
       preferenceSetting('ctl-motion', 'Reduce motion', reduce ? 'Reduced' : 'Full motion', 'An explicit choice here overrides the operating system setting in both directions.', reduce, false)),
-    settingItem('general', 'Flatten field', 'Draw the Command field face-on instead of in depth.', '2d three dimensional tilt rotation',
-      preferenceSetting('ctl-flat', 'Flatten field', flat ? '2D' : 'Depth', 'Flattening changes the picture only; every real node remains present.', flat, false)),
+    settingItem('general', 'Reduce transparency', 'Drop the frosted-glass blur behind panels on this device.', 'accessibility glass blur transparency contrast',
+      preferenceSetting('ctl-flat', 'Reduce transparency', flat ? 'Reduced' : 'Glass', 'For when the blur is hard to read against. It changes the surface only; nothing else, including the field, is affected.', flat, false)),
   ];
 
   const policy = [];
