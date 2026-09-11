@@ -349,6 +349,8 @@ export function initForge(section) {
     agents: null,        // GET /forge/agents, verbatim
     agentsErr: null,
     build: null,         // GET /state -> build { sha, version }, for the completion screen
+    schedule: null,      // GET /schedule -> { tasks[], now, timeZone, persisted }
+    scheduleErr: null,
 
     context: null,       // GET /skills, including selected-repository rules
     contextErr: null,
@@ -1641,9 +1643,69 @@ export function initForge(section) {
       command.setAttribute('data-go', 'command');
       add(topology, command);
       add(wrap, topology);
+
+      // Scheduled tasks. Each one is a TIMED TRIGGER that, when due, adds a work
+      // item — never an approved action, so a scheduled run cannot inherit broader
+      // approval. The work it creates waits at the same gate as everything else.
+      add(wrap, scheduledTasksPanel());
       return wrap;
     },
   };
+
+  function scheduledTasksPanel() {
+    const box = el('details', 'fgsched');
+    const sched = S.schedule;
+    const tasks = (sched && Array.isArray(sched.tasks)) ? sched.tasks : [];
+    add(box, el('summary', null, `Scheduled tasks · ${tasks.length}`));
+    add(box, el('div', 'hint',
+      'A scheduled task fires on its interval and ADDS a work item to the backlog — it never runs or approves anything on its own. '
+      + (sched && sched.persisted === false ? 'This daemon has no workspace, so tasks are not saved across restart. ' : 'Tasks are saved and survive a restart. ')
+      + (sched && sched.timeZone ? `Times are in ${sched.timeZone}.` : '')));
+    if (S.scheduleErr) add(box, renderNote(`Schedule unavailable: ${S.scheduleErr}`, 'rd'));
+
+    if (OWNER_TOKEN) {
+      const form = el('div', 'fgsched-form');
+      const title = el('input', 'fgsched-input');
+      title.type = 'text';
+      title.id = 'fgsched-title';
+      title.placeholder = 'What should be queued — e.g. “Run the test suite”';
+      const every = el('input', 'fgsched-num');
+      every.type = 'number';
+      every.min = '1';
+      every.max = '10080';
+      every.value = '60';
+      every.id = 'fgsched-every';
+      every.setAttribute('aria-label', 'Every N minutes');
+      const add1 = btn('btn sm', 'Schedule', () => {
+        const t = String(title.value || '').trim();
+        const m = Number(every.value);
+        if (t && Number.isFinite(m) && m >= 1) { title.value = ''; scheduleCreate(t, Math.round(m)); }
+      });
+      add(form, title, el('span', 'fgsched-lbl', 'every'), every, el('span', 'fgsched-lbl', 'min'), add1);
+      add(box, form);
+    }
+
+    if (!tasks.length) {
+      add(box, el('div', 'hint', 'No scheduled tasks yet.'));
+    } else {
+      for (const t of tasks) {
+        const row = el('div', 'fgsched-row');
+        add(row, glyph(t.paused ? '⏸' : (t.overdue ? '◉' : '●'), `fgsched-dot ${t.paused ? 'paused' : t.overdue ? 'due' : 'ok'}`));
+        const main = el('div', 'fgsched-main');
+        add(main, el('span', 'nm', t.title));
+        const when = t.paused ? 'paused' : `every ${t.everyMinutes} min · next ${clock(t.nextRunAt)}`;
+        add(main, el('span', 'hint', when + (t.lastResult ? ` · last: ${t.lastResult}` : '')));
+        add(row, main);
+        if (OWNER_TOKEN) {
+          add(row, btn('fgicon', t.paused ? '▶' : '⏸', () => void scheduleAction(t.id, 'toggle')));
+          add(row, btn('fgicon', '↻', () => void scheduleAction(t.id, 'run')));
+          add(row, btn('fgicon', '✕', () => void scheduleAction(t.id, 'delete')));
+        }
+        add(box, row);
+      }
+    }
+    return box;
+  }
 
   /* ---- the search box ---------------------------------------------------- *
    * Built ONCE and moved between repaints, never rebuilt. paintA() replaces the
@@ -4643,6 +4705,22 @@ export function initForge(section) {
     if (r.ok && r.data && r.data.build) { S.build = r.data.build; paintA(); }
   }
 
+  async function loadSchedule() {
+    const r = await api('/schedule');
+    if (r.ok) { S.schedule = r.data; S.scheduleErr = null; } else { S.schedule = null; S.scheduleErr = errText(r); }
+    paintA();
+  }
+  async function scheduleCreate(title, everyMinutes) {
+    const r = await api('/schedule', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title, everyMinutes }) });
+    if (r.ok) loadSchedule(); else { S.scheduleErr = errText(r); paintA(); }
+  }
+  async function scheduleAction(id, action) {
+    // action: 'toggle' | 'run' | 'delete'
+    const init = action === 'delete' ? { method: 'DELETE' } : { method: 'POST' };
+    await api(`/schedule/${encodeURIComponent(id)}${action === 'delete' ? '' : '/' + action}`, init);
+    loadSchedule();
+  }
+
   async function loadAgents() {
     const r = await api('/forge/agents');
     if (!r.ok) {
@@ -5598,6 +5676,7 @@ export function initForge(section) {
   void loadAgents();
   void loadContext();
   void loadBuildInfo();
+  void loadSchedule();
   void syncGates();
   openStream();
   openRunProgressStream();

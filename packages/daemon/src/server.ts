@@ -1062,6 +1062,47 @@ export function createServer(opts: DaemonOptions): Server {
   // every pull route would throw "before initialization". (ModelPullState is an
   // interface — compile-time only — so referencing it ahead of its text is fine.)
   const modelPulls = new Map<string, ModelPullState>();
+
+  // Scheduled tasks: a timed trigger that, when due, ADDS A WORK ITEM — never an
+  // approved action. This is the guardrail made structural: a scheduled run
+  // cannot inherit broader approval, because all it can do is put work in the
+  // backlog, and that work goes through the same gate as everything else.
+  // Persisted to the workspace so tasks survive a restart; a window missed while
+  // the daemon was down fires once and reschedules, it never replays a burst.
+  const schedulePath = opts.workspace !== undefined ? join(opts.workspace, 'schedule.json') : null;
+  const scheduledTasks = new Map<string, ScheduledTask>();
+  function loadSchedule(): void {
+    if (schedulePath === null || !existsSync(schedulePath)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(schedulePath, 'utf8')) as { tasks?: ScheduledTask[] };
+      for (const t of parsed.tasks ?? []) if (t && typeof t.id === 'string') scheduledTasks.set(t.id, t);
+    } catch { /* a corrupt schedule file starts empty rather than crashing the daemon */ }
+  }
+  function saveSchedule(): void {
+    if (schedulePath === null) return;
+    try { writeFileSync(schedulePath, JSON.stringify({ tasks: [...scheduledTasks.values()] }, null, 2)); } catch { /* best effort; the in-memory copy is still true */ }
+  }
+  function fireDueScheduledTasks(): void {
+    const now = Date.now();
+    let changed = false;
+    for (const t of scheduledTasks.values()) {
+      if (t.paused || t.nextRunAt > now) continue;
+      changed = true;
+      try {
+        const item = opts.work.add(`${t.title} (scheduled)`, t.body, ['scheduled']);
+        t.lastResult = `added work item ${item.id} — waiting for your approval like any other`;
+      } catch (err) {
+        t.lastResult = `failed to add work: ${err instanceof Error ? err.message : 'error'}`;
+      }
+      t.lastRunAt = now;
+      t.nextRunAt = now + t.everyMinutes * 60_000; // from now, so missed windows do not stack
+    }
+    if (changed) saveSchedule();
+  }
+  loadSchedule();
+  const scheduleTimer = setInterval(fireDueScheduledTasks, 30_000);
+  if (typeof scheduleTimer.unref === 'function') scheduleTimer.unref();
+
   // The test panel is an owner-triggered process surface. Serialize it so two
   // impatient clicks cannot start two repository suites and make both reports
   // describe a machine-load state neither one owns.
@@ -1588,6 +1629,7 @@ export function createServer(opts: DaemonOptions): Server {
   installBeforeServerClose(server, () => {
     for (const controller of activeForgeRuns.values()) controller.abort();
     activeForgeRuns.clear();
+    clearInterval(scheduleTimer);
   });
   return server;
 
@@ -1727,6 +1769,13 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/forge/models/pull') return serveForgeModelPulls(res, url);
     if (req.method === 'POST' && path === '/forge/models/remove') return await postForgeModelRemove(req, res, role);
     if (req.method === 'GET' && path === '/forge/models/host') return await serveForgeModelHost(res);
+    // Scheduled tasks: a timed trigger that adds a work item (which still needs
+    // approval). List is legible to either role; changing the schedule is owner-only.
+    if (req.method === 'GET' && path === '/schedule') return serveSchedule(res);
+    if (req.method === 'POST' && path === '/schedule') return await postSchedule(req, res, role);
+    if (req.method === 'POST' && path.startsWith('/schedule/') && path.endsWith('/toggle')) return scheduleToggle(res, role, path);
+    if (req.method === 'POST' && path.startsWith('/schedule/') && path.endsWith('/run')) return scheduleRunNow(res, role, path);
+    if (req.method === 'DELETE' && path.startsWith('/schedule/')) return scheduleDelete(res, role, path);
     if (req.method === 'POST' && path === '/forge/context') return await postForgeContext(req, res);
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(req, res, role);
@@ -2821,6 +2870,97 @@ export function createServer(opts: DaemonOptions): Server {
 
   async function serveForgeModelHost(res: ServerResponse): Promise<void> {
     json(res, 200, { totalMem: totalmem(), freeMem: freemem(), gpu: await probeGpu() });
+  }
+
+  // ---- scheduled tasks -----------------------------------------------------
+  interface ScheduledTask {
+    id: string;
+    title: string;
+    body: string;
+    everyMinutes: number;
+    nextRunAt: number;
+    lastRunAt: number | null;
+    lastResult: string | null;
+    paused: boolean;
+    createdAt: number;
+  }
+  function wireSchedule(t: ScheduledTask): Record<string, unknown> {
+    return {
+      id: t.id,
+      title: t.title,
+      body: t.body,
+      everyMinutes: t.everyMinutes,
+      nextRunAt: new Date(t.nextRunAt).toISOString(),
+      lastRunAt: t.lastRunAt === null ? null : new Date(t.lastRunAt).toISOString(),
+      lastResult: t.lastResult,
+      paused: t.paused,
+      overdue: !t.paused && t.nextRunAt <= Date.now(),
+    };
+  }
+  function serveSchedule(res: ServerResponse): void {
+    json(res, 200, {
+      tasks: [...scheduledTasks.values()].map(wireSchedule),
+      now: new Date().toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      persisted: schedulePath !== null,
+    });
+  }
+  function scheduleOwnerOnly(res: ServerResponse, what: string): void {
+    json(res, 403, { error: { code: 'owner-only', message: `Only the owner can ${what}.`, resolve: 'Do it from the Zeno window; an agent cannot schedule work.' } });
+  }
+  async function postSchedule(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') return scheduleOwnerOnly(res, 'schedule a task');
+    const body = await readJson(req);
+    const title = (str(body, 'title') ?? '').trim();
+    const everyMinutes = Math.round(Number(body['everyMinutes']));
+    if (title === '' || title.length > 200) {
+      return json(res, 400, { error: { code: 'bad-request', message: 'A scheduled task needs a title.', resolve: 'POST {"title":"…","everyMinutes":60}.' } });
+    }
+    if (!Number.isFinite(everyMinutes) || everyMinutes < 1 || everyMinutes > 10_080) {
+      return json(res, 400, { error: { code: 'bad-request', message: 'everyMinutes must be a whole number between 1 and 10080 (a week).', resolve: 'POST {"title":"…","everyMinutes":60}.' } });
+    }
+    const now = Date.now();
+    const task: ScheduledTask = {
+      id: `sch-${now.toString(36)}-${randomUUID().slice(0, 8)}`,
+      title,
+      body: (str(body, 'body') ?? '').slice(0, 2000),
+      everyMinutes,
+      nextRunAt: now + everyMinutes * 60_000,
+      lastRunAt: null,
+      lastResult: null,
+      paused: false,
+      createdAt: now,
+    };
+    scheduledTasks.set(task.id, task);
+    saveSchedule();
+    json(res, 200, { task: wireSchedule(task) });
+  }
+  function scheduleIdFrom(path: string, suffix: string): string {
+    return decodeURIComponent(path.slice('/schedule/'.length, suffix === '' ? undefined : -suffix.length));
+  }
+  function scheduleToggle(res: ServerResponse, role: Role, path: string): void {
+    if (role !== 'owner') return scheduleOwnerOnly(res, 'pause a scheduled task');
+    const task = scheduledTasks.get(scheduleIdFrom(path, '/toggle'));
+    if (task === undefined) return json(res, 404, { error: { code: 'not-found', message: 'No scheduled task with that id.', resolve: 'It may have been deleted; re-read GET /schedule.' } });
+    task.paused = !task.paused;
+    if (!task.paused) task.nextRunAt = Date.now() + task.everyMinutes * 60_000; // resume from now
+    saveSchedule();
+    json(res, 200, { task: wireSchedule(task) });
+  }
+  function scheduleRunNow(res: ServerResponse, role: Role, path: string): void {
+    if (role !== 'owner') return scheduleOwnerOnly(res, 'run a scheduled task now');
+    const task = scheduledTasks.get(scheduleIdFrom(path, '/run'));
+    if (task === undefined) return json(res, 404, { error: { code: 'not-found', message: 'No scheduled task with that id.', resolve: 'Re-read GET /schedule.' } });
+    task.nextRunAt = Date.now();
+    fireDueScheduledTasks(); // adds the work item now; it still goes through the gate
+    json(res, 200, { task: wireSchedule(task) });
+  }
+  function scheduleDelete(res: ServerResponse, role: Role, path: string): void {
+    if (role !== 'owner') return scheduleOwnerOnly(res, 'delete a scheduled task');
+    const id = scheduleIdFrom(path, '');
+    const existed = scheduledTasks.delete(id);
+    if (existed) saveSchedule();
+    json(res, 200, { id, deleted: existed });
   }
 
   /**
