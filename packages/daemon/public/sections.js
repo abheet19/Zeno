@@ -106,6 +106,29 @@ async function apiWrite(path, payload) {
   };
 }
 
+/* The owner forgetting their own note. DELETE /memory/<id> is owner-only and, by
+   design, leaves NO receipt — deleting your own memory is not an effect on the
+   world (memory-routes.ts). So this is permanent and unrecoverable, which the UI
+   says plainly before it arms. `forgotten:false` means the id was already gone. */
+async function apiDelete(path) {
+  const t = token();
+  const headers = { accept: 'application/json' };
+  if (t) headers['x-zeno-token'] = t;
+  let res;
+  try {
+    res = await fetch(path, { method: 'DELETE', headers, cache: 'no-store', credentials: 'same-origin' });
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: { message: (err && err.message) || 'the daemon could not be reached' } };
+  }
+  const data = await res.json().catch(() => null);
+  return {
+    ok: res.ok,
+    status: res.status,
+    data,
+    error: res.ok ? null : ((data && data.error) || { message: `The daemon answered ${res.status}.` }),
+  };
+}
+
 /* ---- text ------------------------------------------------------------------
    Every string that reaches innerHTML goes through esc() first. Branch names,
    file paths, note bodies, commit summaries and source details are all data
@@ -210,6 +233,15 @@ const CSS = `
 }
 .zs-add input::placeholder{ color:var(--ink-3,#6C7480); }
 .zs-add-status{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10.5px; color:var(--ink-3,#6C7480); }
+/* Forget sits at the end of a note row's header. Quiet until armed; armed it
+   turns red and names the permanence, so nothing about it reads as routine. */
+.zs-forget{ flex:none; font-size:10.5px; padding:2px 8px; }
+.zs-forget[data-armed="1"]{
+  color:var(--red,#D9634F);
+  border-color:color-mix(in srgb,var(--red,#D9634F) 55%,var(--rule-2,#2C363B));
+  background:color-mix(in srgb,var(--red,#D9634F) 12%,transparent);
+}
+.zs-forget:disabled{ opacity:.55; cursor:default; }
 .zs-more{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:10px; color:var(--ink-3,#6C7480); padding-left:2px; }
 .zs-hr{ height:1px; background:var(--rule,#242C31); border:0; margin:2px 0; }
 
@@ -391,9 +423,12 @@ function kvs(pairs) {
 
 function heading(t) { return '<p class="zs-k">' + esc(t) + '</p>'; }
 
-function row(mark, title, meta, why, facts) {
+function row(mark, title, meta, why, facts, action) {
+  // `action` is an optional right-aligned control in the row header. .zs-top is
+  // already flex/space-between, so a second child sits at the end without any
+  // per-row layout change. Callers pass raw, already-escaped HTML (a button).
   return '<div class="zs-row"><span class="zs-mark">' + esc(mark) + '</span><div class="zs-bd">'
-    + '<div class="zs-top"><div class="zs-t">' + title + '</div></div>'
+    + '<div class="zs-top"><div class="zs-t">' + title + '</div>' + (action || '') + '</div>'
     + (meta ? '<p class="zs-m">' + meta + '</p>' : '')
     + (why ? '<p class="zs-w">' + esc(why) + '</p>' : '')
     + (facts ? '<div class="zs-facts">' + facts + '</div>' : '')
@@ -504,7 +539,7 @@ function renderWorkstation(st) {
  * VAULT — governed local memory, and today's brief                    *
  * ================================================================== */
 
-function noteRow(n, score, matched) {
+function noteRow(n, score, matched, owner) {
   const tags = Array.isArray(n.tags) ? n.tags : [];
   const meta = [
     n.source ? 'source ' + esc(String(n.source)) : null,
@@ -515,7 +550,14 @@ function noteRow(n, score, matched) {
       ? 'matched: ' + esc(matched.join(', '))
       : null,
   ].filter(Boolean).join(' · ');
-  return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null);
+  // Forget is owner-only and only where the note has a stable id to address.
+  // It arms on the first click (see the delegated handler) because the delete
+  // is permanent and leaves no receipt.
+  const del = owner && n.id
+    ? '<button type="button" class="btn sm g zs-forget" data-vault-forget="' + esc(String(n.id)) + '" '
+      + 'title="Forget this note permanently. A deleted memory leaves no receipt and cannot be recovered.">Forget</button>'
+    : null;
+  return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null, del);
 }
 
 function renderVault(mem, brief, query) {
@@ -534,6 +576,7 @@ function renderVault(mem, brief, query) {
   if (!mem.ok) return plane('sec-vault', 'Vault', sub, unreadable('Memory', mem.error));
 
   const d = mem.data || {};
+  const owner = !!token(); // only the owner may forget a note (DELETE is owner-only)
   const searching = typeof d.query === 'string' && d.query !== '';
   const hits = Array.isArray(d.hits) ? d.hits : null;
   const notes = Array.isArray(d.notes) ? d.notes : null;
@@ -557,13 +600,13 @@ function renderVault(mem, brief, query) {
   if (searching) {
     body += heading('results for “' + clip(d.query, 40) + '” · ' + (hits ? hits.length : 0));
     body += hits && hits.length
-      ? '<div class="zs-rows">' + hits.map((h) => noteRow(h.note || {}, h.score, h.matched)).join('') + '</div>'
+      ? '<div class="zs-rows">' + hits.map((h) => noteRow(h.note || {}, h.score, h.matched, owner)).join('') + '</div>'
       : empty('○', 'No note matched that.',
         'The search ran and came back with nothing. That is an answer about your memory, not a failure to read it.');
   } else if (notes) {
     body += heading('recent notes · ' + notes.length);
     body += notes.length
-      ? '<div class="zs-rows">' + notes.map((n) => noteRow(n)).join('') + '</div>'
+      ? '<div class="zs-rows">' + notes.map((n) => noteRow(n, null, null, owner)).join('') + '</div>'
         + '<p class="zs-more">The daemon returns the 50 most recent; search reaches the rest.</p>'
       : empty('○', 'Your memory is empty.',
         'The vault was read and holds no notes. Anything Zeno is told to remember is written here as a '
@@ -1184,6 +1227,31 @@ function wire() {
           if (r.ok) { if (input) input.value = ''; if (status) status.textContent = 'Remembered.'; refresh(); }
           else if (status) status.textContent = 'Not saved: ' + ((r.error && r.error.message) || 'the daemon refused it');
         });
+      return;
+    }
+    if (t.closest('[data-vault-forget]')) {
+      const btn = t.closest('[data-vault-forget]');
+      const id = btn.getAttribute('data-vault-forget');
+      if (!id) return;
+      // Two-step, because DELETE is permanent and unreceipted. The first click
+      // arms and says exactly what the second one does; it disarms itself after
+      // a few seconds so a click now cannot delete a note minutes later.
+      if (btn.getAttribute('data-armed') !== '1') {
+        btn.setAttribute('data-armed', '1');
+        btn.textContent = 'Delete for good';
+        window.setTimeout(() => {
+          if (!btn.isConnected || btn.getAttribute('data-armed') !== '1') return;
+          btn.setAttribute('data-armed', '0');
+          btn.textContent = 'Forget';
+        }, 4000);
+        return;
+      }
+      btn.setAttribute('data-armed', '0');
+      btn.textContent = 'Forgetting…';
+      btn.disabled = true;
+      // forgotten:false just means the id was already gone — either way it is not
+      // here now, so a plain refresh is the honest outcome in both cases.
+      apiDelete('/memory/' + encodeURIComponent(id)).then(() => refresh());
       return;
     }
     if (t.closest('[data-vault-find]')) {
