@@ -1984,8 +1984,15 @@ export function initCounsel(section) {
 
   function discardCall() {
     if (!CALL || CALL.saving) return;
+    // Discarding throws away the whole recording, transcript and notes — there is
+    // no undo and nothing is written to Vault. Confirm before tearing it down so a
+    // mis-click during a live meeting cannot silently lose it.
+    const heard = Array.isArray(CALL.lines) ? CALL.lines.length : 0;
+    const warn = 'Discard this recording?\n\nThe transcript' + (heard ? ' (' + heard + ' line' + (heard === 1 ? '' : 's') + ' so far)' : '')
+      + ' and any notes are dropped and nothing is saved to Vault. This cannot be undone.';
+    if (typeof window.confirm === 'function' && !window.confirm(warn)) return;
     teardownCall();
-    announce('Recording stopped. Nothing was saved.');
+    announce('Recording discarded. Nothing was saved.');
   }
 
   /**
