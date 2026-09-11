@@ -191,25 +191,6 @@ body{
 .brand-word{ white-space:nowrap; }
 .brand-sub{ font-family:var(--font-mono); font-size:9px; color:var(--ink-3); letter-spacing:.14em; text-transform:uppercase; margin-left:5px; }
 
-/* ---- the journey breadcrumb -----------------------------------------------
-   The prototype's five-step stepper. Here it is NOT a demo control: field.js
-   drives it from real daemon state, and a step is only marked done when the
-   daemon actually reports that stage. It is a readout, not a scrubber, so the
-   steps are <span>s — nothing here is clickable, because clicking could not
-   change what the system has actually done. */
-.step{
-  display:flex; background:var(--wash); border:1px solid var(--gl-edge); border-radius:10px; padding:3px;
-  box-shadow:inset 0 1px 0 var(--wash-hi);
-}
-.step .stp{
-  font-family:var(--font-ui); font-size:10.5px; padding:4px 9px; border-radius:6px; color:var(--ink-3);
-  display:flex; gap:5px; align-items:center; white-space:nowrap;
-}
-.step .stp .d{ width:6px; height:6px; border-radius:50%; background:var(--g6); flex:none; }
-.step .stp.done .d{ background:var(--green); }
-.step .stp[aria-current="step"]{ background:var(--wash-2); color:var(--ink); border-radius:8px; box-shadow:inset 0 1px 0 var(--wash-hi); }
-.step .stp[aria-current="step"] .d{ background:var(--amber); }
-@media (max-width:1100px){ .step{ display:none; } }
 
 /* The product switcher — a segmented nav, glass-adjacent chrome. The active
    item is painted with FOUR redundant channels so the selection never rests on
@@ -522,12 +503,6 @@ body{
 .tnote{ font-size:11.5px; color:var(--ink-2); margin-top:12px; display:flex; gap:8px; padding-left:2px; line-height:1.55; }
 .tnote::before{ content:""; width:3px; background:var(--amber); border-radius:2px; flex:none; }
 
-/* masked mode: shape and counts stay, identifiers go */
-.mk{
-  display:inline-block; font-family:var(--font-mono); letter-spacing:-.06em;
-  color:var(--g7); background:var(--g4); border-radius:3px; padding:0 3px; user-select:none;
-}
-.item.mkd .m, .item.mkd .w{ color:var(--ink-3); font-style:italic; }
 
 /* ---- the summary strip: six tiles, each a real number ----------------------
    The dashboard's first line, and the only place the headline numbers live.
@@ -1312,62 +1287,6 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .rgA .kv{ grid-template-columns:minmax(0,1fr); gap:0; }
 .forge .rgA .kv dt{ font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; margin-top:6px; }
 
-/* ---- masked mode ---------------------------------------------------------
-   The shell's `masked` control sets data-lock on :root. This is the prototype's
-   own rule for it, scoped to Forge: the WORK SURFACES are veiled — the code, the
-   chat, the drawer, the tree, the tabs, the minimap — and nothing else is.
-
-   Note what it deliberately does NOT do. It does not stop the run, it does not
-   empty the panels and it does not claim the surfaces are gone: the layout, the
-   status bar and the region shapes stay exactly where they were, so masking
-   reads as "withheld from this screen", which is what it is. The pill says so in
-   words, because a blur alone could be mistaken for a rendering fault.
-
-   The veil must SNAP, never animate. tokens.css gives every element a 1ms
-   transition under reduced motion, and `transition-property` is `all` by
-   default — so without this the mask becomes a 1ms filter animation, which the
-   compositor does not reliably settle: the pane stays blurred after unmasking.
-   Masking is a privacy control; a stale veil that outlives the toggle is a bug
-   with real consequences, so these six surfaces opt out of transitions entirely
-   and the filter is applied and removed in one frame. */
-.forge .code, .forge .insp-bd, .forge .drawbody,
-.forge .panbody, .forge .tabs, .forge .mini,
-.forge .edmon, .forge .edaux{ transition-property:none; }
-:root[data-lock="1"] .forge .code,
-:root[data-lock="1"] .forge .insp-bd,
-:root[data-lock="1"] .forge .drawbody,
-:root[data-lock="1"] .forge .panbody,
-:root[data-lock="1"] .forge .tabs,
-:root[data-lock="1"] .forge .mini,
-/* The editor is a work surface like any other, and the most revealing one on
-   this screen. It was `.code` before rgB became Monaco; both are listed so a
-   build that falls back to the plain reader is masked too. Monaco's own
-   overlays (find, suggest, hover) sit INSIDE .edmon, and a filter on an
-   ancestor blurs even position:fixed descendants — so they are veiled by the
-   rule below along with the text. forge.js closes the ones it can close by
-   command as well, and drops focus out of the buffer. */
-:root[data-lock="1"] .forge .edmon,
-:root[data-lock="1"] .forge .edaux{
-  filter:blur(9px) saturate(60%); pointer-events:none; user-select:none;
-}
-/* The right-click menu is the exception: monaco mounts it on the BODY through
-   its context-view service, where no veil above can reach it. A menu is chrome,
-   not content, and it can simply be gone while masking is on — it would
-   otherwise sit sharp over a blurred pane, with the selected line's text in it. */
-:root[data-lock="1"] .context-view,
-:root[data-lock="1"] .monaco-menu-container{ display:none !important; }
-.forge .fglock{
-  position:absolute; left:50%; top:14px; transform:translateX(-50%); z-index:30;
-  display:flex; align-items:center; gap:8px; padding:9px 16px; border-radius:99px;
-  font-family:var(--font-mono); font-size:11px; color:var(--ink); white-space:nowrap;
-  background:var(--gl-tint); backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur);
-  border:1px solid var(--gl-edge); box-shadow:var(--gl-cast);
-}
-.forge .fglock .dot{ width:7px; height:7px; border-radius:50%; background:var(--amber); flex:none; }
-/* `display:flex` above outranks the UA's `[hidden]{display:none}`, so the pill
-   stayed on screen with masking off, announcing a state that was not true.
-   Visibility is the attribute, and this is what lets the attribute win. */
-.forge .fglock[hidden]{ display:none; }
 
 /* ==========================================================================
    THE AGENT-ONLY VIEW
@@ -1523,7 +1442,6 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
    node; keep the measure this pane chose rather than the editor's. */
 .forge .fgcode pre .monaco-tokenized-source{ font-family:inherit; font-size:inherit; }
 :root[data-forge-view="agent"] .forge .fgcode pre{ font-size:12px; }
-:root[data-lock="1"] .forge .fgcode{ filter:blur(9px) saturate(60%); }
 
 /* ---- the view switch in rgE ---------------------------------------------- */
 .forge .rgE .fgview{ font:inherit; font-size:9.5px; cursor:pointer; }
@@ -1539,8 +1457,6 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 :root[data-zeno-surface="forge"] .brand-sub{ font-size:9px; margin-left:3px; }
 :root[data-zeno-surface="forge"] .nav{ padding:2px; border-radius:7px; }
 :root[data-zeno-surface="forge"] .nav-item{ min-height:29px; padding:5px 11px; border-radius:5px; font-size:12px; gap:7px; }
-:root[data-zeno-surface="forge"] .step{ padding:2px; border-radius:7px; }
-:root[data-zeno-surface="forge"] .step .stp{ padding:4px 8px; border-radius:5px; font-size:10px; }
 :root[data-zeno-surface="forge"] .bar-ctl{ gap:3px; }
 :root[data-zeno-surface="forge"] .ctl{ padding:5px 8px; border-radius:6px; font-size:10px; }
 
@@ -1755,11 +1671,9 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 
 @media (max-width:1360px) and (min-width:901px){
   :root[data-zeno-surface="forge"] .forge{ grid-template-columns:var(--fexplorer,244px) minmax(0,1fr) var(--fsession,328px); }
-  :root[data-zeno-surface="forge"] .step .stp{ padding-inline:5px; }
 }
 @media (max-width:1120px) and (min-width:901px){
   :root[data-zeno-surface="forge"] .forge{ grid-template-columns:var(--fexplorer,220px) minmax(0,1fr) var(--fsession,296px); }
-  :root[data-zeno-surface="forge"] .step{ display:none; }
   :root[data-zeno-surface="forge"] .bar-ctl .ctl:not(#ctl-theme){ display:none; }
 }
 
@@ -1824,6 +1738,22 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   .surface{ padding:16px 16px 24px; }
   .nav-item{ padding:6px 11px; }
 }
+
+/* =============================================================================
+   REDESIGN (2026-09-11) — calm chat-first Command shell.
+   Step 1: declutter the top bar. The journey strip and the masked-mode control
+   are retired outright; the 2D control is hidden here pending its move to
+   Settings as a "reduce transparency" toggle. reduce-motion and theme relocate
+   to Settings in a later step.
+   ============================================================================= */
+#ctl-flat{ display:none !important; }
+
+/* Step 2: give the rail real icons (a proper icon set, not text-only). The
+   .rail-n is already a flex row with a gap, so the icon sits before the label
+   and the live count keeps its margin-left:auto. */
+.rail-n .ri{ width:16px; height:16px; flex:none; opacity:.85; }
+.rail-n:hover .ri{ opacity:1; }
+.rail-n[aria-current] .ri{ color:var(--cyan); opacity:1; }
 </style>
 </head>
 
@@ -1860,18 +1790,6 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
     </button>
   </nav>
 
-  <!-- The journey breadcrumb. field.js sets .done / aria-current="step" from
-       real daemon state — never from a demo counter. With nothing in flight
-       every step is inert and the first one is current, which is the truth:
-       the system is waiting for work, not part-way through some. -->
-  <div class="step" id="journey" role="group" aria-label="Where the work is">
-    <span class="stp" data-step="intake"><span class="d" aria-hidden="true"></span>Intake</span>
-    <span class="stp" data-step="context"><span class="d" aria-hidden="true"></span>Context</span>
-    <span class="stp" data-step="approve"><span class="d" aria-hidden="true"></span>Approve</span>
-    <span class="stp" data-step="build"><span class="d" aria-hidden="true"></span>Build</span>
-    <span class="stp" data-step="receipt"><span class="d" aria-hidden="true"></span>Receipt</span>
-  </div>
-
   <span class="bar-sp"></span>
   <!-- There was a ⌘K "Command palette (coming soon)" pill here. It was a live,
        focusable <button> with the same styling as the four real toggles beside
@@ -1883,7 +1801,6 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
        control which cannot act is absent rather than shown inert, because
        showing it is a lie about what is available. So it is absent. -->
   <div class="bar-ctl" aria-label="Window controls">
-    <button type="button" class="ctl" id="ctl-mask" aria-pressed="false" title="Masked mode — redact identifiers on screen">◐ masked</button>
     <button type="button" class="ctl" id="ctl-motion" aria-pressed="false" title="Reduce motion">↺ reduce motion</button>
     <button type="button" class="ctl" id="ctl-flat" aria-pressed="false" title="Flatten the field to 2D">▱ 2D</button>
     <button type="button" class="ctl" id="ctl-theme" title="Theme: system / light / dark">◑ theme</button>
@@ -1903,15 +1820,14 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
     <aside class="rail" aria-label="Command sections">
       <p class="k">Zeno Command</p>
       <nav>
-        <button type="button" class="rail-n" aria-current="true" data-jump="cmd-hero">Today &amp; Attention <span class="n" data-mount="rail-today"></span></button>
-        <button type="button" class="rail-n" data-jump="voice">Ask Zeno</button>
-        <button type="button" class="rail-n" data-jump="pending">Approvals <span class="n" data-mount="rail-approvals"></span></button>
-        <button type="button" class="rail-n" data-jump="timeline">Receipts</button>
-        <button type="button" class="rail-n" data-jump="sec-workstation">Workstation <span class="n" data-mount="rail-workstation"></span></button>
-        <button type="button" class="rail-n" data-jump="sec-vault">Vault <span class="n" data-mount="rail-vault"></span></button>
-        <button type="button" class="rail-n" data-jump="devices">Devices <span class="n" data-mount="rail-devices"></span></button>
-        <button type="button" class="rail-n" data-jump="sec-integrations">Integrations <span class="n" data-mount="rail-integrations"></span></button>
-        <button type="button" class="rail-n" data-jump="sec-settings">Settings</button>
+        <button type="button" class="rail-n" aria-current="true" data-jump="cmd-hero"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Today &amp; Attention <span class="n" data-mount="rail-today"></span></button>
+        <button type="button" class="rail-n" data-jump="pending"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>Approvals <span class="n" data-mount="rail-approvals"></span></button>
+        <button type="button" class="rail-n" data-jump="timeline"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h9l5 5v15H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>Receipts</button>
+        <button type="button" class="rail-n" data-jump="sec-workstation"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Workstation <span class="n" data-mount="rail-workstation"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-vault"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>Vault <span class="n" data-mount="rail-vault"></span></button>
+        <button type="button" class="rail-n" data-jump="devices"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>Devices <span class="n" data-mount="rail-devices"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-integrations"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Integrations <span class="n" data-mount="rail-integrations"></span></button>
+        <button type="button" class="rail-n" data-jump="sec-settings"><svg class="ri" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 11 3.09 2 2 0 0 1 13 3a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1 2 2 0 0 1 0 4 1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</button>
       </nav>
       <div class="legend">
         <span class="lg lg-green">verified</span>
@@ -1973,7 +1889,7 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
          viewport. Typed chat is always available; wake-word and command voice
          controls are an explicit disclosure and reopen automatically while a
          microphone session is armed. -->
-    <section class="cmdduo" id="voice" tabindex="-1" aria-label="Ask Zeno">
+    <section class="cmdduo" tabindex="-1" aria-label="Ask Zeno">
       <div class="cmd-ask" data-mount="ask"></div>
       <details class="cmd-voice-more">
         <summary>Voice commands &amp; wake word</summary>

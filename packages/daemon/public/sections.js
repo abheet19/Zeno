@@ -48,10 +48,7 @@
  *   S5  It writes into its own four mounts and nowhere else. The rail counts,
  *       the masthead and the tally belong to field.js — one writer per number.
  *
- * Masked mode (`:root[data-lock="1"]`) redacts what the prototype redacts:
- * titles, paths, note bodies and hashes go; the shape and every count stay,
- * because hiding that something exists is the one dishonesty masked mode must
- * not commit.
+ * One writer per number, and no surface redacts what another surface shows.
  *
  * No framework, no bundler, no CDN, no build step, and no request that leaves
  * this machine.
@@ -95,13 +92,7 @@ function esc(s) {
 }
 function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 function plural(n, one, many) { return n === 1 ? one : many; }
-function masked() { return R.getAttribute('data-lock') === '1'; }
-
-/** Masked text: the shape survives, the identifier does not. */
-function mk(s, n) {
-  if (!masked()) return esc(clip(s, n || 120));
-  return '<span class="mk">' + '█'.repeat(Math.min(18, Math.max(6, String(s || '').length))) + '</span>';
-}
+function mk(s, n) { return esc(clip(s, n || 120)); }
 
 function minutesSince(iso) {
   if (!iso) return null;
@@ -458,7 +449,7 @@ function renderWorkstation(st) {
     body += heading('recent commits')
       + '<div class="zs-rows">'
       + log.map((c) => row(
-        masked() ? '···' : String(c.sha || '·'),
+        String(c.sha || '·'),
         mk(c.summary || '(no message)', 96),
         null, null, null,
       )).join('')
@@ -484,20 +475,16 @@ function renderWorkstation(st) {
 
 function noteRow(n, score, matched) {
   const tags = Array.isArray(n.tags) ? n.tags : [];
-  const hide = masked();
-  // Under the mask the SHAPE survives and the content does not: how many tags
-  // there are is shape, what they say is content — and a tag is exactly the
-  // kind of word that names a person or a client.
   const meta = [
-    n.source ? 'source ' + (hide ? '████' : esc(String(n.source))) : null,
+    n.source ? 'source ' + esc(String(n.source)) : null,
     ageOf(n.updatedAt || n.createdAt),
-    tags.length ? tags.length + ' ' + plural(tags.length, 'tag', 'tags') + (hide ? '' : ': ' + esc(tags.join(', '))) : null,
+    tags.length ? tags.length + ' ' + plural(tags.length, 'tag', 'tags') + ': ' + esc(tags.join(', ')) : null,
     score != null ? 'score ' + esc(String(score)) : null,
     Array.isArray(matched) && matched.length
-      ? 'matched: ' + (hide ? matched.length + ' ' + plural(matched.length, 'term', 'terms') : esc(matched.join(', ')))
+      ? 'matched: ' + esc(matched.join(', '))
       : null,
   ].filter(Boolean).join(' · ');
-  return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, masked() ? null : clip(String(n.body || ''), 190), null);
+  return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null);
 }
 
 function renderVault(mem, brief, query) {
@@ -784,8 +771,6 @@ function buildSettingsGroups(state) {
       preferenceSetting('ctl-motion', 'Reduce motion', reduce ? 'Reduced' : 'Full motion', 'An explicit choice here overrides the operating system setting in both directions.', reduce, false)),
     settingItem('general', 'Flatten field', 'Draw the Command field face-on instead of in depth.', '2d three dimensional tilt rotation',
       preferenceSetting('ctl-flat', 'Flatten field', flat ? '2D' : 'Depth', 'Flattening changes the picture only; every real node remains present.', flat, false)),
-    settingItem('general', 'Mask identifiers', 'Redact titles, paths, and hashes while preserving counts and state.', 'privacy masked hide redaction screen',
-      preferenceSetting('ctl-mask', 'Mask identifiers', masked() ? 'Masked' : 'Visible', 'Masking never hides that something is waiting for you.', masked(), false)),
   ];
 
   const policy = [];
@@ -858,7 +843,7 @@ function renderSettingsGroups(groups, query, selectedId) {
   const count = visible.reduce((total, group) => total + group.items.length, 0);
   if (!count) {
     return '<div class="zs-settings-empty">' + empty('⌕', 'No settings match.',
-      'Try a setting name such as theme, masking, receipts, capabilities, or runtime.') + '</div>';
+      'Try a setting name such as theme, receipts, capabilities, or runtime.') + '</div>';
   }
   return visible.map((group) => '<section class="zs-settings-group" aria-labelledby="zs-settings-group-' + esc(group.id) + '">'
     + (terms.length ? '<div class="zs-settings-group-head"><h3 id="zs-settings-group-' + esc(group.id) + '">' + esc(group.label)
@@ -1235,11 +1220,11 @@ export function init() {
   });
   setInterval(() => { if (sectionsVisible()) refresh(); }, 15000);
 
-  // Masking changes what may be shown, not what is true: repaint from state
-  // already in hand. This never re-reads and never re-counts.
+  // A theme, reduce-motion or transparency toggle changes how things are shown,
+  // not what is true: repaint from state already in hand, never re-reading.
   try {
     new MutationObserver(() => repaint())
-      .observe(R, { attributes: true, attributeFilter: ['data-lock', 'data-theme', 'data-reduce', 'data-flat'] });
+      .observe(R, { attributes: true, attributeFilter: ['data-theme', 'data-reduce', 'data-flat'] });
   } catch { /* no MutationObserver: the sections simply do not repaint on a toggle */ }
 }
 

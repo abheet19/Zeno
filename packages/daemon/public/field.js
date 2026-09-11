@@ -71,7 +71,7 @@ function motionOn() {
   return true;
 }
 
-const S = { motion: true, sel: null, lock: false, fieldList: false };
+const S = { motion: true, sel: null, fieldList: false };
 const FIELD_FRAME_MS = 1000 / 30;
 const F = { c: null, x: null, rot: 0.62, tilt: 0.34, tilt0: 0.34, drag: 0, raf: 0, lastFrame: 0, hov: null, W: 0, H: 0, mx: 0, my: 0, ro: null, init: 0, _m: 0 };
 
@@ -614,7 +614,7 @@ function draw() {
 
     const lab = (sel || n.k === 'core' || att || d > 0.50);
     if (lab) {
-      const txt = S.lock ? (n.k === 'core' ? 'core' : n.k) : n.l;
+      const txt = n.l;
       const fs = (8.6 + 3.4 * d).toFixed(1);
       c.font = `500 ${fs}px "IBM Plex Mono",monospace`;
       const tw = c.measureText(txt).width;
@@ -1031,27 +1031,6 @@ function renderReadouts(state, work, forge, mem, agents) {
   railN('rail-workstation', changed);
   railN('rail-vault', (mem && Array.isArray(mem.notes)) ? mem.notes.length : 0);
   railN('rail-integrations', liveSources + ((agents && Array.isArray(agents.localModels)) ? agents.localModels.length : 0));
-
-  /* the journey breadcrumb — where the work actually is, right now.
-     A step is `done` only when the daemon reports the thing it names. */
-  const j = document.getElementById('journey');
-  if (j) {
-    const done = {
-      intake: liveSources > 0,
-      context: items.length > 0 || changed > 0,
-      approve: pending.length > 0,
-      build: changed > 0,
-      receipt: receipts.length > 0,
-    };
-    // "current" is the stage the system is actually sitting at; with nothing in
-    // flight it rests on intake, which is the truth: waiting for work to arrive.
-    const current = pending.length ? 'approve' : changed ? 'build' : items.length ? 'context' : 'intake';
-    j.querySelectorAll('.stp').forEach((el) => {
-      const k = el.getAttribute('data-step');
-      el.classList.toggle('done', !!done[k]);
-      if (k === current) el.setAttribute('aria-current', 'step'); else el.removeAttribute('aria-current');
-    });
-  }
 }
 
 /* ---- public entry ---------------------------------------------------------- */
@@ -1211,8 +1190,6 @@ function syncControls() {
   if (m) m.setAttribute('aria-pressed', S.motion ? 'false' : 'true'); // pressed = "reduce motion" is ON
   const f = document.getElementById('ctl-flat');
   if (f) f.setAttribute('aria-pressed', R.getAttribute('data-flat') === '1' ? 'true' : 'false');
-  const k = document.getElementById('ctl-mask');
-  if (k) k.setAttribute('aria-pressed', S.lock ? 'true' : 'false');
 }
 
 function wireControls() {
@@ -1242,13 +1219,6 @@ function wireControls() {
     R.setAttribute('data-flat', on ? '0' : '1'); st('fl', on ? '0' : '1');
     F.tilt0 = on ? 0.34 : 0; F.tilt = F.tilt0; F.rot = on ? 0.62 : 0;
     syncControls(); if (!F.raf) draw();
-  });
-
-  const mask = document.getElementById('ctl-mask');
-  if (mask) mask.addEventListener('click', () => {
-    S.lock = !S.lock;
-    R.setAttribute('data-lock', S.lock ? '1' : '0');
-    syncControls(); if (F.c) draw();
   });
 
   const home = document.getElementById('home');

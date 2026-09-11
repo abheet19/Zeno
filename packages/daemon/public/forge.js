@@ -696,10 +696,9 @@ export function initForge(section) {
      than a viewer. `edMon` is monaco's container; `edAux` is every other thing
      the pane can show, and exactly one of the two is ever visible.
 
-     These sit here, above the masked-mode block, and not down in the rgB
-     section where they are used: `syncLock` runs on the very next lines and
-     reaches for `ed`, and a `let` read before its declaration is a
-     ReferenceError, not an undefined. */
+     These sit here, above the pane wiring that reaches for them, and not down
+     in the rgB section where they are used, because a `let` read before its
+     declaration is a ReferenceError, not an undefined. */
   const edHost = el('div', 'edhost');
   const paneViews = [0, 1].map((index) => {
     const shell = el('section', 'edpane');
@@ -818,46 +817,6 @@ export function initForge(section) {
   paneViews[0].shell.dataset.focused = 'true';
   syncPaneVisibility();
 
-  /* ---- masked mode ------------------------------------------------------- *
-   * The shell's `masked` control sets data-lock on :root, and the CSS veils
-   * Forge's work surfaces the way the prototype does. This is the prototype's
-   * pill that goes with it, and it is here for one reason: a blur with no
-   * caption is indistinguishable from a broken render. The wording is the
-   * prototype's and it is precise — the surfaces are WITHHELD from this screen,
-   * not stopped. A run in flight keeps running; masking hides, it does not halt.
-   *
-   * An attribute observer rather than a click handler, so the pill is correct no
-   * matter who set the attribute — the control, a restored preference, another
-   * surface — and correct when Forge is opened with masking already on. */
-  const lockPill = el('div', 'fglock');
-  add(lockPill, glyph('', 'dot'), el('span', null, 'work surfaces withheld · masked'));
-  lockPill.hidden = true;
-  add(root, lockPill);
-  const syncLock = () => {
-    const masked = R.getAttribute('data-lock') === '1';
-    lockPill.hidden = !masked;
-    /* The editor's find widget, suggestions and parameter hints float above the
-       pane, and its right-click menu is mounted on the BODY by monaco's own
-       context-view service — outside anything the masked-mode CSS can veil. A
-       menu or a suggestion list left open would sit unblurred over a blurred
-       pane and show the very text the owner just withheld. So masking closes
-       the three that CAN be closed by command, and drops focus out of the
-       buffer, which dismisses the rest. The body-mounted menu is handled in
-       CSS, beside the rest of the veil, because it is not this editor's to
-       close. */
-    if (masked) {
-      for (const view of paneViews) {
-        if (!view.editor) continue;
-        view.editor.trigger('zeno.mask', 'closeFindWidget', null);
-        view.editor.trigger('zeno.mask', 'hideSuggestWidget', null);
-        view.editor.trigger('zeno.mask', 'closeParameterHints', null);
-      }
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement && rgB.contains(focused)) focused.blur();
-    }
-  };
-  syncLock();
-  new MutationObserver(syncLock).observe(R, { attributes: true, attributeFilter: ['data-lock'] });
 
   /* ================================================================ *
    * workbench bar — mode, real view shortcuts, and concurrent agents *

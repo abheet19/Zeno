@@ -20,7 +20,6 @@ import {
   spokenReply,
 } from './ask-voice-model.js';
 
-const R = document.documentElement;
 const MAX_TURNS = 80;
 const MAX_SPOKEN_CHARS = 2400;
 const VOICE_PREF_KEY = 'zeno.ask.systemVoice';
@@ -45,10 +44,6 @@ function el(tag, cls, text) {
   if (cls) node.className = cls;
   if (text !== undefined && text !== null) node.textContent = String(text);
   return node;
-}
-
-function masked() {
-  return R.getAttribute('data-lock') === '1';
 }
 
 function agentLabel(agentId) {
@@ -391,7 +386,7 @@ function renderDelegation(parent, delegated) {
     card,
     'FORGE · ' + agentLabel(delegated.agentId) + (delegated.model ? ' · ' + delegated.model : ''),
   );
-  const task = el('p', 'za-task', masked() ? 'Task withheld · masked' : '“' + String(delegated.task || '') + '”');
+  const task = el('p', 'za-task', '“' + String(delegated.task || '') + '”');
   task.style.cssText = 'margin:0;font-size:12px;overflow-wrap:anywhere';
   const state = el('p', 'za-delegate-state');
   state.setAttribute('role', 'status');
@@ -437,9 +432,9 @@ function renderResponse(data) {
   let text;
   let tone;
   if (payload.answer) {
-    text = masked() ? 'Answer withheld · masked' : String(payload.answer);
+    text = String(payload.answer);
   } else if (payload.flagged) {
-    text = masked() ? 'Reply withheld · masked' : String(payload.flagged);
+    text = String(payload.flagged);
     tone = 'warn';
   } else {
     text = payload.note ? String(payload.note) : 'No answer came back.';
@@ -542,7 +537,7 @@ function stopSpeaking(message) {
 }
 
 function speak(text) {
-  if (!voiceModeOn || !text || masked()) {
+  if (!voiceModeOn || !text) {
     return Promise.resolve();
   }
   const synthesis = window.speechSynthesis;
@@ -869,9 +864,7 @@ async function submit(rawQuestion, options) {
   }
 
   if (voiceModeOn) {
-    const words = masked()
-      ? 'The answer is hidden while masking is on. Read it after you turn masking off.'
-      : spokenReply(payload);
+    const words = spokenReply(payload);
     await speak(words);
     if (voiceModeOn) scheduleListen();
   }

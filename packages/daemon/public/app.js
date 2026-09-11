@@ -469,10 +469,6 @@ function settledDivider() {
 /** The one action whose capsule is on screen. null = none is open. */
 let openHash = null;
 
-function isMasked() {
-  return document.documentElement.getAttribute('data-lock') === '1';
-}
-
 function hhmm(d) {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -552,13 +548,9 @@ function updateRow(entry) {
     ? 'Risk tier recorded on this proposal'
     : 'This proposal carries no tier. That is what the daemon sent, not a default.';
 
-  // Masked mode redacts the sentence and keeps everything else, because hiding
-  // THAT something is waiting is the one dishonesty masking must not commit.
-  const masked = isMasked();
   const text = typeof p.summary === 'string' && p.summary ? p.summary : '(no summary on this proposal)';
-  parts.summary.textContent = masked ? '█'.repeat(20) : text;
-  parts.summary.classList.toggle('mk', masked);
-  parts.summary.title = masked ? 'Withheld — masked mode' : '';
+  parts.summary.textContent = text;
+  parts.summary.title = '';
 
   const [word, tone] = statusOf(entry);
   parts.pill.className = 'ist' + (tone ? ' ' + tone : '');
@@ -571,7 +563,7 @@ function updateRow(entry) {
   parts.open.textContent = isOpen ? 'Close' : entry.settled ? 'Read' : 'Open';
   parts.open.setAttribute(
     'aria-label',
-    (isOpen ? 'Close' : 'Open') + ' the full capsule for: ' + (masked ? 'a withheld action' : text),
+    (isOpen ? 'Close' : 'Open') + ' the full capsule for: ' + text,
   );
 }
 
@@ -1294,24 +1286,6 @@ function paintSummary() {
   mount.summary.replaceChildren(...specs.map(tileNode));
 }
 
-/**
- * Masked mode changes what may be SHOWN, not what is true.
- *
- * The top bar's ◐ masked toggles `data-lock` on the root. Nothing is re-read
- * and nothing is re-counted when it flips: the rows repaint from the state
- * already in hand, redacting the sentences and keeping the tiers,
- * the statuses and every count — because hiding that something is waiting on
- * you is the one dishonesty masking must never commit.
- */
-function installMaskWatch() {
-  try {
-    new MutationObserver(() => {
-      layoutPending();
-    }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-lock'] });
-  } catch {
-    /* No MutationObserver: the list simply does not repaint when masking flips. */
-  }
-}
 
 /** The tiles' one behaviour: move to the detail this number came from. */
 function installSummaryJumps() {
@@ -1889,7 +1863,6 @@ async function boot() {
   installRePreviewListener();
   installReceiptListener();
   installSummaryJumps();
-  installMaskWatch();
   paintSummary();
 
   // The four auxiliary reads. They are started here and never awaited: the

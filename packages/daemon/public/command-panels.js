@@ -13,7 +13,6 @@ function one(selector) {
 
 const groups = new Map([
   ['cmd-hero', [one('.hero'), one('.cmdduo'), one('#cmd-status'), one('#cmd-desk')]],
-  ['voice', [one('.cmdduo')]],
   ['pending', [one('#pending')]],
   ['timeline', [one('#timeline')]],
   ['sec-workstation', [one('#sec-workstation')]],
@@ -50,7 +49,7 @@ function show(id, options = {}) {
   const disclosure = target?.closest?.('details');
   if (disclosure) disclosure.open = true;
   if (options.focus && target?.focus) target.focus({ preventScroll: true });
-  if (previous && previous !== id && !['cmd-hero', 'voice'].includes(id)) {
+  if (previous && previous !== id && id !== 'cmd-hero') {
     const detail = { requestedBy: 'another Command section', waiters: [] };
     window.dispatchEvent(new CustomEvent('zeno:release-command-voice', { detail }));
   }

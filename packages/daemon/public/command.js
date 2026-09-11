@@ -42,13 +42,7 @@
  *   H5  It reads. It never writes: there is no fetch in this file that is not a
  *       GET, and no row on this list carries a control.
  *
- * Masked mode (`:root[data-lock="1"]`, the top bar's ◐ masked) redacts the same
- * things the prototype redacts — titles, refs, sources — and keeps the shape and
- * the counts, because hiding that something is waiting would be the one
- * dishonesty masked mode must not commit.
  */
-
-const R = document.documentElement;
 
 /* ---- auth: the same token the page was handed ----------------------------- */
 function token() {
@@ -73,8 +67,6 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 }
 function clip(s, n) { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
-function masked() { return R.getAttribute('data-lock') === '1'; }
-function blocks(n) { return '█'.repeat(n); }
 function plural(n, one, many) { return n === 1 ? one : many; }
 
 function minutesSince(iso) {
@@ -100,26 +92,12 @@ function shortHash(h) { const s = String(h == null ? '' : h); return s.length > 
    list is a pending action any more, so no caller passes it and no row here
    carries a control: the desk is a readout. */
 function it(b, t, m, w, stat, extra) {
-  let badge = b, title = t, meta = m, wait = w, pill = stat;
-  if (masked()) {
-    // Shape and counts survive; identifiers do not. Same rule as the prototype.
-    badge = '●';
-    title = '<span class="mk">' + blocks(14) + '</span>';
-    meta = 'item withheld · masked';
-    wait = '';
-    pill = stat ? [stat[0], 'withheld'] : null;
-    extra = null;
-  } else {
-    title = esc(title);
-    meta = esc(meta);
-    wait = wait ? esc(wait) : '';
-    badge = esc(badge);
-  }
+  let badge = esc(b), title = esc(t), meta = esc(m), wait = w ? esc(w) : '', pill = stat;
   const pillHtml = pill ? '<span class="ist ' + esc(pill[0]) + '">' + esc(pill[1]) + '</span>' : '';
   const chev = extra
     ? '<button type="button" class="ichev" data-jump-hash="' + esc(extra) + '">open the capsule ›</button>'
     : '';
-  return '<div class="pl item' + (masked() ? ' mkd' : '') + '">'
+  return '<div class="pl item">'
     + '<span class="b">' + badge + '</span>'
     + '<div class="ibd">'
     + '<div class="itop"><div class="t">' + title + '</div>' + pillHtml + '</div>'
@@ -296,7 +274,7 @@ function render(work, forge, stale) {
 
 /* ---- refresh --------------------------------------------------------------- */
 
-let lastGood = null;   // the last successfully read pair, for a masked-mode repaint
+let lastGood = null;   // the last successfully read pair, for the stale-read fallback
 let reading = false;
 
 async function refresh() {
@@ -356,14 +334,6 @@ export function init() {
   window.addEventListener('zeno:command-panel', () => { if (deskVisible()) refresh(); });
   document.getElementById('cmd-desk')?.addEventListener('toggle', () => { if (deskVisible()) refresh(); });
   setInterval(() => { if (deskVisible()) refresh(); }, 15000);
-
-  // Masked mode changes what may be shown, not what is true. Repaint from the
-  // state already in hand — this never re-reads and never re-counts.
-  try {
-    new MutationObserver(() => {
-      if (lastGood) render(lastGood.work, lastGood.forge, null);
-    }).observe(R, { attributes: true, attributeFilter: ['data-lock'] });
-  } catch { /* no MutationObserver: the list simply does not repaint on mask */ }
 }
 
 if (document.readyState === 'loading') {
