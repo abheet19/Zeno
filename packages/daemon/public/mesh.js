@@ -258,6 +258,15 @@ const WORDS = {
     'Run the real handshake against a second device SIMULATED inside the daemon. It proves the ' +
     'protocol converges — both sides derive the same verification code, and a peer given the wrong ' +
     'code derives a different one. It is not a device: it pairs nothing and stores nothing.',
+
+  /* The guardrail, always visible: the local device wins, structurally. */
+  localTitle: 'This device is in control',
+  localWins:
+    'The device you are sitting at always wins. Zeno Mesh carries converged DATA between paired devices — ' +
+    'it has no inbound remote-command channel, by design: nothing paired can run a command here, approve a ' +
+    'capsule here, or take this session over. A future phone will be able to SHOW what is waiting and PROPOSE, ' +
+    'never run or approve on your behalf. There is no switch to flip because there is nothing that could ' +
+    'override this one — the guarantee is the absence of the channel, not a setting.',
 };
 
 /* ================================================================== *
@@ -308,6 +317,26 @@ function button(label, glyph, kind, onClick, disabledWhy) {
 }
 
 /** This PC, drawn from what the daemon actually reports about its identity. */
+/* The always-visible local-control guarantee. Not a toggle — there is nothing to
+   toggle, because there is no inbound remote-command channel to switch off. It is
+   a standing statement of the structural guardrail, styled to read as one. */
+function localControlBlock() {
+  const wrap = el('div', 'zm-local');
+  wrap.style.cssText = [
+    'display:flex', 'flex-direction:column', 'gap:5px',
+    'padding:11px 13px', 'border-radius:11px',
+    'border:1px solid color-mix(in srgb,var(--green,#5FBF8F) 40%,var(--rule,#242C31))',
+    'border-left:3px solid var(--green,#5FBF8F)',
+    'background:color-mix(in srgb,var(--green,#5FBF8F) 8%,transparent)',
+  ].join(';');
+  const h = el('p', null, `● ${WORDS.localTitle}`);
+  h.style.cssText = 'margin:0;font:600 12.5px/1.3 system-ui,sans-serif;color:var(--green,#5FBF8F)';
+  const sub = el('p', null, WORDS.localWins);
+  sub.style.cssText = 'margin:0;font-size:11.5px;line-height:1.55;color:var(--ink-2,#9AA1AC)';
+  add(wrap, h, sub);
+  return wrap;
+}
+
 function thisDeviceRow(d) {
   const row = el('div', 'zm-dev');
   const body = el('div', 'zm-devbody');
@@ -424,6 +453,7 @@ function panel() {
   }
 
   add(root, thisDeviceRow(devices.thisDevice));
+  add(root, localControlBlock());
 
   // The paired list. Empty, and the reason is on the page — never left to be
   // read as a device that went away.
