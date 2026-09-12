@@ -740,8 +740,51 @@ async function bindForge() {
   }
 
   /* ============================================================ *
-   * 3 · EDITOR (Priority 1)                                        *
-   * ============================================================ */
+   * 3 · EDITOR — the REAL Monaco editor (regression repair)        *
+   * ============================================================ *
+   * The artifact shipped a static mock here: a hardcoded sample buffer
+   * inside #vs-code, four decorative .vstab elements, and a fabricated
+   * "held" diff in #vs-pane2. Zeno's real editor is VS Code's own editor
+   * core, served from this machine by monaco.js — loadMonaco()/ZENO_THEME/
+   * languageForPath/DIAGNOSED/onThemeChange are imported from it UNCHANGED
+   * (see the top of this file) rather than reimplemented. Nothing here
+   * invents a language, a theme colour, or a "which languages are really
+   * checked" answer — monaco.js still owns every one of those facts.
+   *
+   * A SAVE IS STILL A PROPOSAL, NEVER A WRITE. "Propose save" (or Ctrl+S
+   * inside the editor) POSTs the buffer to /previews with
+   * requestedBy:'forge-editor' — the SAME gate the real forge.js's editor
+   * and an agent's own write both cross. A routine (T0) edit comes back
+   * already committed with a receipt; anything larger, or anything
+   * touching a sensitive path, comes back as a capsule the daemon is
+   * HOLDING, and this pane says exactly that — it never claims a hold is a
+   * save. There is no path from here to disk that skips that gate.
+   */
+
+  let monacoNS = monacoIfLoaded();
+  let monacoErr = null;
+  let monacoLoadPromise = null;
+  function ensureMonaco() {
+    if (monacoNS) return Promise.resolve(monacoNS);
+    if (!monacoLoadPromise) {
+      monacoLoadPromise = loadMonaco().then(
+        (m) => { monacoNS = m; return m; },
+        (err) => {
+          monacoErr = err instanceof Error ? err : new Error(String((err && err.message) || err));
+          throw monacoErr;
+        },
+      );
+    }
+    return monacoLoadPromise;
+  }
+
+  const models = new Map();      // path -> monaco ITextModel, shared by both groups — a real
+                                  // split shows the SAME document, exactly like VS Code's own.
+  const dirtyPaths = new Set();  // paths whose buffer differs from the bytes /forge/file gave us
+  let saving = false;
+  let saveErr = null;
+  let focusedGroup = 0;
+  let splitOpen = false;
 
   const tabBar = $('.vsed .vstabs');
   const tabSpacer = tabBar ? tabBar.querySelector('.fgrow') : null;
@@ -749,54 +792,163 @@ async function bindForge() {
   // standing as if they were the sandbox's real open files.
   if (tabBar) $$('.vstab', tabBar).forEach((t) => t.remove());
 
-  const codeEl = $('#vs-code');
-  const vsPane = codeEl ? codeEl.closest('.vspane') : null;
-  const vsMini = vsPane ? vsPane.querySelector('.vsmini') : null;
-  if (vsMini) vsMini.remove(); // decorative fake minimap — no real line/edit map to draw
+  // Repurposed below as the real editor's language/diagnostics/save strip.
+  // There is no git-blame endpoint to draw the artifact's original claim
+  // from honestly, so this line now carries a truthful one instead.
   const vsBlame = $('.vsblame');
-  if (vsBlame) vsBlame.hidden = true; // no git-blame endpoint to draw this from honestly
-  const pane2 = $('#vs-pane2');
-  if (pane2) {
-    const body = pane2.querySelector('.fcode') || pane2;
-    fill(body, el('div', 'fempty', 'Split view is not wired to real file contents in this build.'));
-  }
-  if (truncNote === null && vsPane && codeEl) {
-    truncNote = el('div', 'vsnote');
-    truncNote.hidden = true;
-    codeEl.insertAdjacentElement('afterend', truncNote);
+  const splitBtn = $('#vs-split');
+
+  /** Build one Monaco group: a real editor host plus a message pane shown
+   *  instead of it (loading / failed / empty / binary / read-only), and the
+   *  group's own tabs, active file and per-file view state. `withHeader`
+   *  builds group 2's own small header (its tab strip + an unsplit button);
+   *  group 1 has no header — its tabs render into the artifact's existing
+   *  .vstabs bar instead. */
+  function makeGroup(paneEl, withHeader) {
+    if (!paneEl) return null;
+    fill(paneEl); // drop the mock content this pane shipped with (sample source, or a stale diff)
+    const g = {
+      paneEl, index: null, tabsHost: null, tabSpacer: null, mon: null, aux: null, trunc: null,
+      editor: null, tabs: [], file: null, viewStates: new Map(), mountedPath: null,
+    };
+    if (withHeader) {
+      const header = el('div', 'vspaneh');
+      g.tabsHost = el('div', 'vstabs');
+      g.tabsHost.setAttribute('role', 'tablist');
+      g.tabsHost.style.cssText = 'height:auto;border-bottom:0;background:none;flex:1;min-width:0;overflow:auto hidden;';
+      const unsplitBtn = el('button', 'fico', '✕ Unsplit');
+      unsplitBtn.type = 'button';
+      unsplitBtn.title = 'Close this split';
+      unsplitBtn.addEventListener('click', () => setSplit(false));
+      add(header, g.tabsHost, unsplitBtn);
+      add(paneEl, header);
+    }
+    g.mon = el('div', 'edmon');
+    g.mon.style.cssText = 'flex:1;min-height:0;';
+    g.mon.hidden = true;
+    g.aux = el('div', 'edaux');
+    g.aux.style.cssText = 'flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;'
+      + 'padding:10px 14px;font-family:var(--font-mono);font-size:12.5px;line-height:1.6;'
+      + 'color:var(--ink-2);white-space:pre-wrap;';
+    g.trunc = el('div', 'vsnote');
+    g.trunc.hidden = true;
+    add(paneEl, g.mon, g.aux, g.trunc);
+    paneEl.addEventListener('pointerdown', () => { focusedGroup = g.index; paintSaveBar(); });
+    return g;
   }
 
-  function renderTabs() {
-    if (!tabBar) return;
-    $$('[data-real-tab]', tabBar).forEach((n) => n.remove());
-    for (const path of openTabs) {
+  const codeMock = $('#vs-code');
+  const vsPaneEl = codeMock ? codeMock.closest('.vspane') : null;
+  const pane2El = $('#vs-pane2');
+  const groups = [makeGroup(vsPaneEl, false), makeGroup(pane2El, true)];
+  if (groups[0]) { groups[0].index = 0; groups[0].tabsHost = tabBar; groups[0].tabSpacer = tabSpacer; }
+  if (groups[1]) groups[1].index = 1;
+  if (pane2El) pane2El.hidden = true; // shown only once the split control turns it on
+  function groupIndexOf(g) { return g === groups[0] ? 0 : 1; }
+
+  /* ---- tabs, per group -------------------------------------------------- */
+
+  function renderGroupTabs(g) {
+    if (!g || !g.tabsHost) return;
+    $$('[data-real-tab]', g.tabsHost).forEach((n) => n.remove());
+    const isPrimary = g === groups[0];
+    for (const path of g.tabs) {
       const name = path.split('/').pop();
       const [cls, txt] = fileMeta(name);
       const tab = el('button', 'vstab');
       tab.type = 'button';
       tab.dataset.realTab = path;
-      tab.setAttribute('aria-selected', path === currentFile ? 'true' : 'false');
+      tab.setAttribute('aria-selected', path === g.file ? 'true' : 'false');
+      const dirty = el('span', 'vsdirty', '●');
+      dirty.hidden = !dirtyPaths.has(path);
+      add(tab, el('span', cls, txt), document.createTextNode(name), dirty);
+      let sideBtn = null;
+      if (isPrimary && splitOpen && groups[1]) {
+        sideBtn = el('span', 'x', '⇄');
+        sideBtn.title = 'Open in the split group too';
+        add(tab, sideBtn);
+      }
       const closeBtn = el('span', 'x', '×');
-      add(tab, el('span', cls, txt), document.createTextNode(name), closeBtn);
+      add(tab, closeBtn);
       tab.addEventListener('click', (e) => {
-        if (e.target === closeBtn) { e.stopPropagation(); closeTab(path); return; }
-        void openFile(path);
+        if (e.target === closeBtn) { e.stopPropagation(); closeGroupTab(g, path); return; }
+        if (sideBtn && e.target === sideBtn) { e.stopPropagation(); focusedGroup = 1; void openFile(path, false, 1); return; }
+        focusedGroup = isPrimary ? 0 : 1;
+        void openFile(path, false, focusedGroup);
       });
-      if (tabSpacer) tabBar.insertBefore(tab, tabSpacer); else tabBar.appendChild(tab);
+      if (g.tabSpacer) g.tabsHost.insertBefore(tab, g.tabSpacer); else g.tabsHost.appendChild(tab);
     }
   }
 
-  function closeTab(path) {
-    const i = openTabs.indexOf(path);
-    if (i === -1) return;
-    openTabs.splice(i, 1);
-    if (currentFile === path) {
-      const next = openTabs[i] || openTabs[i - 1] || null;
-      if (next) { void openFile(next); return; }
-      currentFile = null;
-      renderEditorEmpty('No file open. Pick one from the Explorer.');
+  function closeGroupTab(g, path) {
+    const idx = g.tabs.indexOf(path);
+    if (idx === -1) return;
+    const elsewhereOpen = groups.some((other) => other && other !== g && other.tabs.includes(path));
+    if (dirtyPaths.has(path) && !elsewhereOpen) {
+      const discard = window.confirm(`"${path}" has unsaved edits.\n\nDiscard them and close the tab?`);
+      if (!discard) return;
     }
-    renderTabs();
+    g.tabs.splice(idx, 1);
+    g.viewStates.delete(path);
+    const groupIndex = groupIndexOf(g);
+    if (g.file === path) {
+      const next = g.tabs[idx] || g.tabs[idx - 1] || null;
+      if (next) {
+        void openFile(next, false, groupIndex);
+      } else {
+        g.file = null;
+        if (groupIndex === 0) currentFile = null;
+        renderGroupTabs(g);
+        renderEditorEmptyIn(g, 'No file open. Pick one from the Explorer.');
+      }
+    } else {
+      renderGroupTabs(g);
+    }
+    if (!elsewhereOpen) {
+      dirtyPaths.delete(path);
+      const model = models.get(path);
+      if (model && !model.isDisposed()) {
+        for (const other of groups) if (other && other.editor && other.editor.getModel() === model) other.editor.setModel(null);
+        model.dispose();
+      }
+      models.delete(path);
+    }
+  }
+
+  /* ---- what each pane shows: the real editor, or an honest message ------ */
+
+  function showAux(g, nodes) {
+    if (!g) return;
+    if (g.mon) g.mon.hidden = true;
+    g.aux.hidden = false;
+    fill(g.aux, ...nodes);
+  }
+  function showEditorHost(g) {
+    if (!g) return;
+    g.aux.hidden = true;
+    if (g.mon) { g.mon.hidden = false; if (g.editor) g.editor.layout(); }
+  }
+
+  /** The hand-rolled tokeniser this binder already carries (see section 0),
+   *  reused as an honest degraded view — never a placeholder — while monaco
+   *  is still loading or could not load at all. It reads the same bytes
+   *  /forge/file handed us; it is a worse editor, not a wrong one. */
+  function plainFallbackNodes(path, data, banner) {
+    const nodes = [el('div', 'vsnote', banner)];
+    const pre = el('pre', 'fcode');
+    pre.style.cssText = 'margin:0;flex:1;min-height:0;overflow:auto;';
+    const kids = [];
+    const lines = String(data.contents ?? '').split('\n');
+    const colour = highlightable(path);
+    const st = { block: false };
+    lines.forEach((text, i) => {
+      kids.push(el('span', 'ln', String(i + 1)));
+      kids.push(lineNode(text === '' ? ' ' : text, colour, st));
+      if (i < lines.length - 1) kids.push(document.createTextNode('\n'));
+    });
+    fill(pre, ...kids);
+    nodes.push(pre);
+    return nodes;
   }
 
   function renderBreadcrumb(path) {
@@ -815,67 +967,317 @@ async function bindForge() {
     setText('#tb-cmd', `sandbox — ${path}`);
   }
 
+  function renderEditorEmptyIn(g, message) {
+    if (!g) return;
+    if (g.editor) g.editor.setModel(null);
+    showAux(g, [el('span', null, message)]);
+    if (g.trunc) g.trunc.hidden = true;
+    if (g === groups[0]) {
+      const bc = $('.vscrumbs');
+      if (bc) fill(bc, el('span', null, 'sandbox'));
+      setText('#tb-cmd', 'sandbox');
+      renderFileStatusBits('', null);
+    }
+    paintSaveBar();
+  }
+
   function renderEditorEmpty(message) {
     currentFile = null;
-    renderTabs();
-    const bc = $('.vscrumbs');
-    if (bc) fill(bc, el('span', null, 'sandbox'));
-    setText('#tb-cmd', 'sandbox');
-    if (codeEl) fill(codeEl, el('span', null, message));
-    if (truncNote) truncNote.hidden = true;
-    renderFileStatusBits('', null);
+    if (!groups[0]) return;
+    groups[0].file = null;
+    renderGroupTabs(groups[0]);
+    renderEditorEmptyIn(groups[0], message);
   }
 
-  function renderEditorContent(path) {
-    if (!codeEl) return;
+  async function renderEditorContent(g, path) {
     const rec = fileCache.get(path);
     if (!rec) return;
-    if (rec.error) { fill(codeEl, el('span', null, rec.error)); if (truncNote) truncNote.hidden = true; return; }
+    if (g === groups[0]) renderFileStatusBits(path, rec.data);
+    if (rec.error) { showAux(g, [el('span', null, rec.error)]); if (g.trunc) g.trunc.hidden = true; paintSaveBar(); return; }
     const data = rec.data;
-    if (!data) { fill(codeEl, el('span', null, `${path} could not be read.`)); if (truncNote) truncNote.hidden = true; return; }
+    if (!data) { showAux(g, [el('span', null, `${path} could not be read.`)]); if (g.trunc) g.trunc.hidden = true; paintSaveBar(); return; }
     if (data.binary) {
-      fill(codeEl, el('span', null, `${path} is a binary file (${bytesLabel(data.bytes)}) — not shown.`));
-      if (truncNote) truncNote.hidden = true;
-      renderFileStatusBits(path, data);
+      if (g.editor) g.editor.setModel(null);
+      showAux(g, [el('span', null, `${path} is a binary file (${bytesLabel(data.bytes)}) — not shown.`)]);
+      if (g.trunc) g.trunc.hidden = true;
+      paintSaveBar();
       return;
     }
-    const nodes = [];
-    const lines = String(data.contents ?? '').split('\n');
-    const colour = highlightable(path);
-    const st = { block: false };
-    lines.forEach((text, i) => {
-      nodes.push(el('span', 'ln', String(i + 1)));
-      nodes.push(lineNode(text === '' ? ' ' : text, colour, st));
-      if (i < lines.length - 1) nodes.push(document.createTextNode('\n'));
-    });
-    fill(codeEl, ...nodes);
-    if (truncNote) {
+    if (g.trunc) {
       if (data.truncated) {
-        truncNote.hidden = false;
-        truncNote.textContent = `Showing the first ${lines.length} of ${data.lines} lines — the file continues.`;
+        g.trunc.hidden = false;
+        g.trunc.textContent = `Showing the first ${String(data.contents ?? '').split('\n').length} of ${data.lines} lines — the file continues.`;
       } else {
-        truncNote.hidden = true;
+        g.trunc.hidden = true;
       }
     }
-    renderFileStatusBits(path, data);
+
+    if (!monacoNS && !monacoErr) {
+      showAux(g, plainFallbackNodes(path, data, 'Loading the real editor…'));
+      try { await ensureMonaco(); } catch { /* monacoErr is now set; handled just below */ }
+      if (g.file !== path) return; // a later open superseded this one while monaco was loading
+    }
+    if (monacoErr) {
+      showAux(g, plainFallbackNodes(path, data, `The real editor could not load — ${monacoErr.message}`));
+      paintSaveBar();
+      return;
+    }
+
+    mountRealEditor(g, path, data);
+    showEditorHost(g);
+    paintSaveBar();
   }
 
-  async function openFile(path, force) {
+  /* ---- monaco itself: one model per path, one editor per group ---------- */
+
+  function modelFor(path, text, eol) {
+    const uri = monacoNS.Uri.parse(`zeno-sandbox:/${String(path).replace(/^\/+/, '')}`);
+    let model = models.get(path);
+    if (!model || model.isDisposed()) {
+      model = monacoNS.editor.getModel(uri) || monacoNS.editor.createModel(text ?? '', languageForPath(path) || undefined, uri);
+      models.set(path, model);
+    } else if (!dirtyPaths.has(path) && model.getValue(monacoNS.editor.EndOfLinePreference.LF) !== (text ?? '')) {
+      // Only ever overwrite a CLEAN buffer — a repaint must never discard
+      // edits nobody asked to discard.
+      model.setValue(text ?? '');
+    }
+    model.setEOL(eol === 'CRLF' ? monacoNS.editor.EndOfLineSequence.CRLF : monacoNS.editor.EndOfLineSequence.LF);
+    return model;
+  }
+
+  function updateDirty(path) {
+    const model = models.get(path);
+    const rec = fileCache.get(path);
+    if (!model || !rec || !rec.data) return;
+    const disk = rec.data.contents ?? '';
+    if (model.getValue(monacoNS.editor.EndOfLinePreference.LF) === disk) dirtyPaths.delete(path);
+    else dirtyPaths.add(path);
+  }
+
+  function registerEditorActions(g) {
+    const editor = g.editor;
+    if (!monacoNS || !editor) return;
+    editor.addAction({
+      id: 'zeno.proposeSave',
+      label: 'Propose this save to the kernel',
+      keybindings: [monacoNS.KeyMod.CtrlCmd | monacoNS.KeyCode.KeyS],
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 1,
+      run: () => { void proposeSave(g); },
+    });
+    editor.addAction({
+      id: 'zeno.discard',
+      label: 'Discard these edits and re-read the file from the sandbox',
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 2,
+      run: () => {
+        const path = g.file;
+        if (!path) return;
+        dirtyPaths.delete(path);
+        void openFile(path, true, groupIndexOf(g));
+      },
+    });
+    editor.addAction({
+      id: 'zeno.splitEditor',
+      label: 'Split or unsplit editor',
+      keybindings: [monacoNS.KeyMod.CtrlCmd | monacoNS.KeyCode.Backslash],
+      contextMenuGroupId: 'zeno',
+      contextMenuOrder: 3,
+      run: () => setSplit(!splitOpen),
+    });
+  }
+
+  function mountRealEditor(g, path, data) {
+    if (!g.editor) {
+      g.editor = monacoNS.editor.create(g.mon, {
+        theme: ZENO_THEME,
+        automaticLayout: true,
+        fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
+        fontSize: 13,
+        lineHeight: 20,
+        minimap: { enabled: true, renderCharacters: false },
+        folding: true,
+        contextmenu: true,
+        renderWhitespace: 'selection',
+        scrollBeyondLastLine: false,
+        fixedOverflowWidgets: true,
+        tabSize: 2,
+      });
+      registerEditorActions(g);
+      g.editor.onDidFocusEditorWidget(() => { focusedGroup = groupIndexOf(g); paintSaveBar(); });
+      g.editor.onDidChangeModelContent(() => {
+        const p = g.file;
+        if (!p) return;
+        updateDirty(p);
+        renderGroupTabs(g);
+        paintSaveBar();
+      });
+    }
+    const priorModel = g.editor.getModel();
+    if (g.mountedPath && g.mountedPath !== path && priorModel) g.viewStates.set(g.mountedPath, g.editor.saveViewState());
+    const model = modelFor(path, data.contents ?? '', data.eol);
+    if (priorModel !== model) {
+      g.editor.setModel(model);
+      const vs = g.viewStates.get(path);
+      if (vs) g.editor.restoreViewState(vs);
+    }
+    g.mountedPath = path;
+    const ro = !OWNER
+      ? 'This window has no owner token, so it can read the sandbox but cannot propose a change to it.'
+      : (data.truncated ? 'Only part of this file was read (it is truncated), so saving would propose it with the rest cut off.' : null);
+    g.editor.updateOptions({ readOnly: ro !== null, readOnlyMessage: ro ? { value: ro } : undefined });
+  }
+
+  /* ---- the save, still a proposal, never a write ------------------------ */
+
+  function paintSaveBar() {
+    if (!vsBlame) return;
+    const g = groups[focusedGroup];
+    fill(vsBlame);
+    if (!g || !g.file) { vsBlame.hidden = true; return; }
+    vsBlame.hidden = false;
+    if (monacoErr) { add(vsBlame, el('span', null, `plain view — ${monacoErr.message}`)); return; }
+    if (!monacoNS) { add(vsBlame, el('span', null, 'loading the real editor…')); return; }
+    const model = models.get(g.file);
+    const lang = model ? model.getLanguageId() : null;
+    if (lang) add(vsBlame, el('span', null, lang === 'plaintext' ? 'plain text' : lang));
+    if (lang && model && DIAGNOSED.has(lang)) {
+      const marks = monacoNS.editor.getModelMarkers({ resource: model.uri });
+      const errs = marks.filter((m) => m.severity === monacoNS.MarkerSeverity.Error).length;
+      add(vsBlame, document.createTextNode(errs ? ` · ${errs} ${errs === 1 ? 'error' : 'errors'}` : ' · no syntax errors'));
+    }
+    const rec = fileCache.get(g.file);
+    const data = rec && rec.data;
+    const ro = !OWNER
+      ? 'read-only — no owner token'
+      : (data && data.truncated ? 'read-only — file truncated on read' : null);
+    if (ro) {
+      add(vsBlame, document.createTextNode(` · ${ro}`));
+    } else {
+      const dirty = dirtyPaths.has(g.file);
+      if (dirty) add(vsBlame, document.createTextNode(' · unsaved edits'));
+      const saveBtn = el('button', 'laction cy', saving ? 'Proposing…' : 'Propose save');
+      saveBtn.type = 'button';
+      saveBtn.disabled = saving || !dirty;
+      saveBtn.title = 'Ctrl+S. Sends the buffer to /previews — the same governed gate an agent write crosses. This never writes to the sandbox directly.';
+      saveBtn.addEventListener('click', () => void proposeSave(g));
+      add(vsBlame, document.createTextNode(' '), saveBtn);
+    }
+    if (saveErr) add(vsBlame, document.createTextNode(` · ${saveErr}`));
+  }
+
+  async function proposeSave(g) {
+    if (!g || saving) return;
+    const path = g.file;
+    if (!path || !OWNER || !monacoNS) return;
+    const model = models.get(path);
+    if (!model) return;
+    const rec = fileCache.get(path);
+    const data = rec && rec.data;
+    if (data && data.truncated) return; // read-only: this buffer is not the whole file
+    const disk = (data && data.contents) ?? '';
+    if (model.getValue(monacoNS.editor.EndOfLinePreference.LF) === disk) return; // nothing to propose
+    const contents = model.getValue(); // the file's own line endings, not forced to LF
+
+    saving = true;
+    saveErr = null;
+    paintSaveBar();
+
+    const r = await postJSON('/previews', {
+      relPath: path,
+      contents,
+      summary: `Forge editor: edit ${path}`,
+      requestedBy: 'forge-editor',
+    });
+    saving = false;
+
+    if (!r.ok) {
+      saveErr = `not proposed: ${r.error || 'unknown error'}`;
+      paintSaveBar();
+      return;
+    }
+    const preview = r.data && r.data.preview;
+    if (!preview || typeof preview.actionHash !== 'string') {
+      saveErr = 'the daemon answered without a preview, so nothing can be shown for this save.';
+      paintSaveBar();
+      return;
+    }
+    const receipt = r.data.receipt || null;
+    const secretNote = r.data.secretWarning ? ` ${r.data.secretWarning}` : '';
+    if (receipt) {
+      // A routine (T0) edit: the kernel committed and receipted it on the
+      // spot. The buffer now matches the sandbox — re-read it and clear dirty.
+      dirtyPaths.delete(path);
+      saveErr = r.data.secretWarning ? String(r.data.secretWarning) : null;
+      void loadStatus();
+      void openFile(path, true, groupIndexOf(g));
+    } else {
+      // Anything larger, or touching a sensitive path, is a capsule the
+      // daemon is now HOLDING — an approval, never a write. The buffer stays
+      // dirty until the owner approves it in Command.
+      saveErr = `held for approval (tier ${preview.tier || '?'}) — open Command → Approvals to decide.${secretNote}`;
+    }
+    paintSaveBar();
+  }
+
+  /* ---- split control: a second, independent Monaco group ---------------- */
+
+  function setSplit(open) {
+    if (!groups[1]) return;
+    splitOpen = Boolean(open);
+    pane2El.hidden = !splitOpen;
+    if (splitBtn) splitBtn.setAttribute('aria-pressed', splitOpen ? 'true' : 'false');
+    renderGroupTabs(groups[0]); // the primary strip gains/loses the "open to the side" control
+    if (splitOpen) {
+      focusedGroup = 1;
+      const seed = groups[1].file || groups[0].file;
+      if (seed) {
+        void openFile(seed, false, 1);
+      } else {
+        renderGroupTabs(groups[1]);
+        renderEditorEmptyIn(groups[1], 'No file open in this group yet. Use ⇄ on a primary tab to open it here too.');
+      }
+    } else {
+      focusedGroup = 0;
+    }
+    paintSaveBar();
+    requestAnimationFrame(() => {
+      if (groups[0].editor) groups[0].editor.layout();
+      if (groups[1] && groups[1].editor) groups[1].editor.layout();
+    });
+  }
+  if (splitBtn) splitBtn.addEventListener('click', () => setSplit(!splitOpen));
+
+  /* ---- open/close a file, in a given group (group 0 unless said otherwise) */
+
+  async function openFile(path, force, groupIndex = 0) {
     if (!path) return;
-    currentFile = path;
+    const g = groups[groupIndex];
+    if (!g) return;
+    if (groupIndex === 0) currentFile = path;
     if (force) fileCache.delete(path);
-    if (!openTabs.includes(path)) openTabs.push(path);
-    renderTabs();
-    renderBreadcrumb(path);
-    fileRowByPath.forEach((row, p) => row.classList.toggle('on', p === path));
+    if (!g.tabs.includes(path)) g.tabs.push(path);
+    g.file = path;
+    renderGroupTabs(g);
+    if (groupIndex === 0) {
+      renderBreadcrumb(path);
+      fileRowByPath.forEach((row, p) => row.classList.toggle('on', p === path));
+    }
     if (!fileCache.has(path)) {
-      fill(codeEl, el('span', null, `Reading ${path}…`));
+      showAux(g, [el('span', null, `Reading ${path}…`)]);
       const r = await getJSON(`/forge/file?path=${encodeURIComponent(path)}`);
       fileCache.set(path, r.ok ? { data: r.data, error: null } : { data: null, error: `${path} could not be read: ${r.error}` });
-      if (currentFile !== path) return; // a later open superseded this one
+      if (g.file !== path) return; // a later open superseded this one
     }
-    renderEditorContent(path);
+    await renderEditorContent(g, path);
   }
+
+  // One kick at init, matching real forge.js: load monaco once, up front,
+  // rather than waiting for the first file open to discover whether it works.
+  void ensureMonaco().then(
+    () => { onThemeChange(() => paintSaveBar()); },
+    () => { paintSaveBar(); },
+  );
 
   /* ============================================================ *
    * 4 · TERMINAL (Priority 1)                                      *
