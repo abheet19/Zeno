@@ -2761,6 +2761,36 @@ export function createServer(opts: DaemonOptions): Server {
   }
 
   /**
+   * Per-model VRAM footprints for the Compare picker's GPU meter. Ollama's
+   * /api/tags reports each model's on-disk byte size (≈ the resident weight
+   * memory); we add a headroom margin for the KV cache and CUDA context to get a
+   * usable "will these fit at once" estimate. Names-only `installedLocalModels`
+   * stays unchanged for the picker's existing paths; this is a separate, richer
+   * read fed only to the capability meter (an estimate, never a guarantee — real
+   * resident VRAM varies with context length and quantisation).
+   */
+  async function installedModelSizes(): Promise<{ name: string; sizeBytes: number; estVramBytes: number; parameterSize?: string; quantization?: string }[]> {
+    try {
+      const r = await fetch(ollamaEndpoint('/api/tags'), { signal: AbortSignal.timeout(OLLAMA_PROBE_TIMEOUT_MS) });
+      if (!r.ok) return [];
+      const body = (await r.json()) as { models?: { name?: string; size?: number; details?: { parameter_size?: string; quantization_level?: string } }[] };
+      return (body.models ?? [])
+        .filter((m): m is { name: string; size?: number; details?: { parameter_size?: string; quantization_level?: string } } => typeof m.name === 'string' && m.name !== '')
+        .map((m) => {
+          const sizeBytes = Number.isFinite(m.size) ? Number(m.size) : 0;
+          // Footprint ≈ weights (file size) + ~10% KV cache + ~300 MB CUDA context.
+          const estVramBytes = sizeBytes > 0 ? Math.round(sizeBytes * 1.1 + 300 * 1024 * 1024) : 0;
+          const out: { name: string; sizeBytes: number; estVramBytes: number; parameterSize?: string; quantization?: string } = { name: m.name, sizeBytes, estVramBytes };
+          if (m.details?.parameter_size) out.parameterSize = m.details.parameter_size;
+          if (m.details?.quantization_level) out.quantization = m.details.quantization_level;
+          return out;
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * A live model pull, keyed by model name. Pulling a model is a streaming
    * download from the Ollama registry — network egress AND a multi-gigabyte disk
    * write — so the route that starts one is owner-only and the window discloses
@@ -2919,7 +2949,8 @@ export function createServer(opts: DaemonOptions): Server {
   }
 
   async function serveForgeModelHost(res: ServerResponse): Promise<void> {
-    json(res, 200, { totalMem: totalmem(), freeMem: freemem(), gpu: await probeGpu() });
+    const [gpu, models] = await Promise.all([probeGpu(), installedModelSizes()]);
+    json(res, 200, { totalMem: totalmem(), freeMem: freemem(), gpu, models });
   }
 
   // ---- scheduled tasks -----------------------------------------------------

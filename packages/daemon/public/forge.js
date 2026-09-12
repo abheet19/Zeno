@@ -138,6 +138,53 @@ function glyph(text, cls) {
   return g;
 }
 
+/* Inline SVG icons for the restyled composer and the model picker. Built with
+ * createElementNS from developer-authored path specs — never from a markup
+ * string — so this file's no-innerHTML rule holds even for glyphs. */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICONS = {
+  attach: { sw: 2, s: ['M12 5v14M5 12h14'] },
+  mic: { sw: 1.7, s: [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], 'M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8'] },
+  send: { sw: 1.9, s: ['M12 19V5M6 11l6-6 6 6'] },
+  search: { sw: 1.8, s: [['circle', { cx: 11, cy: 11, r: 7 }], 'M21 21l-4.3-4.3'] },
+  chip: { sw: 1.7, s: [['rect', { x: 4, y: 3, width: 16, height: 10, rx: 2 }], 'M2 20h20M8 17h8'] },
+  cloud: { sw: 1.7, s: ['M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4 4 0 0 1 0 9H7z'] },
+  route: { sw: 1.7, s: [['circle', { cx: 6, cy: 19, r: 2 }], ['circle', { cx: 18, cy: 5, r: 2 }], 'M8 19h5a4 4 0 0 0 4-4v-2a4 4 0 0 1 4-4h-5'] },
+  gpu: { sw: 1.7, s: [['rect', { x: 4, y: 4, width: 16, height: 12, rx: 2 }], 'M8 20h8M9 16v4M15 16v4M8 8h4M8 11h6'] },
+  parallel: { sw: 1.8, s: ['M4 8h13M4 16h13M14 4l4 4-4 4M14 12l4 4-4 4'] },
+  sequential: { sw: 1.8, s: ['M4 7h11l-3-3M4 7l3 3M20 17H9l3-3M20 17l-3 3'] },
+};
+function svgIcon(shapes, strokeWidth) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', String(strokeWidth || 1.8));
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const shape of shapes) {
+    const isPath = typeof shape === 'string';
+    const node = document.createElementNS(SVG_NS, isPath ? 'path' : shape[0]);
+    const attrs = isPath ? { d: shape } : shape[1];
+    for (const k of Object.keys(attrs)) node.setAttribute(k, String(attrs[k]));
+    svg.appendChild(node);
+  }
+  return svg;
+}
+/** A named icon from ICONS, or the attach glyph as a visible fallback. */
+function fgIcon(name) {
+  const spec = ICONS[name] || ICONS.attach;
+  return svgIcon(spec.s, spec.sw);
+}
+
+/** Grow a single-row composer textarea to its content, capped by its max-height. */
+function autosize(ta) {
+  if (!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+}
+
 /** The owner token the daemon injected into the shell, or '' on a read-only page. */
 const OWNER_TOKEN = (() => {
   const m = document.querySelector('meta[name="zeno-token"]');
@@ -348,6 +395,8 @@ export function initForge(section) {
     readAt: null,        // Date of the last completed read, so reload can prove it ran
     agents: null,        // GET /forge/agents, verbatim
     agentsErr: null,
+    host: null,          // GET /forge/models/host, verbatim — GPU/RAM capability for the Compare VRAM meter
+    hostBusy: false,
     build: null,         // GET /state -> build { sha, version }, for the completion screen
     schedule: null,      // GET /schedule -> { tasks[], now, timeZone, persisted }
     scheduleErr: null,
@@ -2800,13 +2849,24 @@ export function initForge(section) {
     add(transcript, INSPECTOR[S.insp] ? INSPECTOR[S.insp]() : INSPECTOR.chat());
     add(bd, transcript);
 
-    /* The sticky composer keeps the primary task and next action visible. */
-    const compose = el('div', 'compose');
+    /* The sticky composer — restyled to the Zeno design system: a rounded compact
+       shell with SVG icon buttons and a mono pill row. Behaviour is unchanged —
+       the same #zf-task textarea and listeners, the same doRun/canRun, the same
+       session fields (agentId/model/effort/autoRoute/memoryEnabled). Only the
+       chrome and the routing controls (now pills that open popovers) are new. */
+    const composer = el('div', 'composer compact');
+    const row = el('div', 'row');
+
+    const attach = btn('cbtn attach', null, openSkillsCatalog);
+    add(attach, fgIcon('attach'));
+    attach.setAttribute('aria-label', 'Add context from rules and skills');
+    attach.title = 'Add context from the repository Skills catalog';
+
     const input = el('textarea');
-    input.rows = 2;
+    input.rows = 1;
     input.maxLength = 16_000;
     input.id = 'zf-task';
-    input.placeholder = session.routing ? 'Choosing the route…' : session.running ? 'This agent is running…' : 'Ask Zeno to inspect, explain, or change this repository';
+    input.placeholder = session.routing ? 'Choosing the route…' : session.running ? 'This agent is running…' : 'Ask Zeno to change the codebase…';
     input.setAttribute('aria-label', 'Task for the agent');
     input.value = session.draft;
     input.disabled = session.routing || session.running || !OWNER_TOKEN;
@@ -2816,41 +2876,83 @@ export function initForge(section) {
       invalidateRunContext(session);
       if (S.insp === 'lens') scheduleRunContext(session);
       sendBtn.disabled = !canRun(session);
+      autosize(input);
     });
     input.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter' && !ev.shiftKey && canRun(session)) { ev.preventDefault(); void doRun(session); }
     });
-    add(compose, input);
+    // Size to the restored draft once the textarea is in the DOM and measurable.
+    requestAnimationFrame(() => autosize(input));
 
-    const controls = el('div', 'composer-actions');
-    const addContext = btn('fgicon', '+', openSkillsCatalog);
-    addContext.setAttribute('aria-label', 'Add context from rules and skills');
-    addContext.title = 'Add context from the repository Skills catalog';
-    const exactContext = btn('fgicon', '@', () => selectInspector('lens'));
-    exactContext.setAttribute('aria-label', 'Inspect exact context');
-    exactContext.title = 'Inspect the exact bounded prompt, repository rules, and Vault recall';
-    add(controls, addContext, exactContext, el('span', 'sp'));
-
-    const locationChip = el('span', 'fgroute-state', composerLocation(session));
-    locationChip.title = session.autoRoute && !(session.route && session.route.agentId)
-      ? 'Zeno will choose from providers proved available for this task.'
-      : 'Where the currently selected provider runs.';
-    add(controls, locationChip);
-    const voice = btn('fgicon', '◉', () => {
+    // Voice keeps the existing behaviour: open Command and focus its local PTT.
+    const mic = btn('cbtn mic', null, () => {
       document.querySelector('[data-nav="command"]')?.click();
       requestAnimationFrame(() => document.querySelector('.zv-ptt')?.focus());
     });
-    voice.setAttribute('aria-label', 'Open voice input');
-    voice.title = 'Open Command and focus its local hold-to-talk control';
-    const sendBtn = btn('fgsend', '↑', () => void doRun(session));
+    add(mic, fgIcon('mic'));
+    mic.setAttribute('aria-label', 'Open voice input');
+    mic.title = 'Open Command and focus its local hold-to-talk control';
+    mic.disabled = !OWNER_TOKEN;
+
+    const sendBtn = btn('cbtn send', null, () => void doRun(session));
+    add(sendBtn, fgIcon('send'));
     sendBtn.setAttribute('aria-label', session.routing ? 'Routing task' : session.running ? 'Task running' : 'Submit task');
     sendBtn.title = 'Submit task · Enter';
     sendBtn.disabled = !canRun(session);
-    add(controls, voice, sendBtn);
 
-    const routingControls = el('div', 'composer-routing');
-    add(routingControls, buildPickers(session));
+    add(row, attach, input, mic, sendBtn);
 
+    /* The mono pill row: model + effort open popovers; skills/tools is a live count. */
+    const foot = el('div', 'foot');
+
+    const info = modelPillInfo(session);
+    const modelPill = btn('pill ' + info.tone, null, null);
+    modelPill.dataset.modelPill = 'caret';
+    const dot = el('span', 'd');
+    if (info.tone === 'am') { dot.style.background = 'var(--amber)'; dot.style.boxShadow = '0 0 7px 1px var(--amber)'; }
+    add(modelPill, dot, document.createTextNode(`${info.text} ▾`));
+    modelPill.title = 'Model & routing — choose Single, Compare, or Route';
+    modelPill.disabled = session.running || session.routing || !OWNER_TOKEN;
+
+    const effortPill = btn('pill wt', null, null);
+    effortPill.dataset.effortPill = '1';
+    add(effortPill, document.createTextNode(`effort: ${session.effort || '—'} ▾`));
+    effortPill.title = 'Effort — higher consumes more tokens';
+    const effChosen = provider(session.agentId);
+    const supportsEffort = !effChosen || effChosen.supportsEffort !== false;
+    effortPill.disabled = session.running || session.routing || !supportsEffort || !OWNER_TOKEN;
+    if (!supportsEffort) effortPill.title = 'This agent does not take an effort level.';
+
+    // Skills/tools loaded for this run — real counts only. Skills come from the
+    // owner's selection (S.skillIds); tools are shown only once the MCP connector
+    // catalog has actually been read (S.connectors), never guessed.
+    const skillsN = S.skillIds.size;
+    let toolsN = null;
+    if (S.connectors && Array.isArray(S.connectors.servers)) {
+      toolsN = S.connectors.servers.reduce((n, srv) => n + (Array.isArray(srv.tools) ? srv.tools.length : 0), 0);
+    }
+    const skillsPill = btn('pill wt', null, () => selectInspector('skills'));
+    add(skillsPill, document.createTextNode(
+      toolsN === null
+        ? `${skillsN} skill${skillsN === 1 ? '' : 's'} ▾`
+        : `${skillsN} skill${skillsN === 1 ? '' : 's'} · ${toolsN} tool${toolsN === 1 ? '' : 's'} ▾`));
+    skillsPill.title = 'Skills, rules and MCP connectors loaded for this run';
+
+    add(foot, modelPill, effortPill, el('span', 'grow'), skillsPill);
+    add(composer, row, foot);
+
+    // The environment row: where the run executes, the sandbox invariant, and the
+    // real per-session Vault memory switch value.
+    const sessfoot = el('div', 'sessfoot');
+    const loc = composerLocation(session);
+    const locPill = el('span', 'pill wt', `${loc === 'Cloud' ? '☁' : '⌂'} ${loc}`);
+    locPill.title = 'Where the selected route executes.';
+    const sandboxPill = el('span', 'pill wt', '▣ sandbox');
+    sandboxPill.title = 'Forge works in an isolated worktree; nothing touches your repository until you approve in Command.';
+    const memNote = el('span', null, `Vault memory: ${session.memoryEnabled !== false ? 'on' : 'off'}`);
+    add(sessfoot, locPill, sandboxPill, el('span', 'grow'), memNote);
+
+    // The route rationale stays available for the reader who wants the "why".
     const route = el('details', 'fgroute');
     add(route, el('summary', null, `${composerLocation(session)} · route details`));
     add(route, el('div', null,
@@ -2859,10 +2961,11 @@ export function initForge(section) {
         : session.autoRoute
           ? 'Automatic routing uses task type, privacy, and providers proved available on this machine. A hosted choice still asks before code is sent.'
           : 'Manual routing uses the selected provider, model, and effort.'));
-    const composerShell = el('div', 'composer-shell');
+
+    const composeArea = el('div', 'sesscompose');
     const hostedGate = session.hostedConfirmation ? renderHostedConfirmation(session) : null;
-    add(composerShell, hostedGate, compose, controls, routingControls, route);
-    rgC.replaceChildren(ses, sessionRail, tabs, bd, composerShell);
+    add(composeArea, hostedGate, composer, sessfoot, route);
+    rgC.replaceChildren(ses, sessionRail, tabs, bd, composeArea);
     paintTop();
   }
 
@@ -2906,117 +3009,525 @@ export function initForge(section) {
     return gate;
   }
 
-  function buildPickers(session = activeSession()) {
-    const box = el('span', 'fgpickers');
-    if (S.agentsErr) {
-      add(box, el('span', null, `agents unavailable — ${S.agentsErr}`));
-      return box;
-    }
-    if (!S.agents) {
-      add(box, el('span', null, 'reading the available agents…'));
-      return box;
-    }
-    const autoLabel = el('label', 'fgauto');
-    const auto = el('input');
-    auto.type = 'checkbox';
-    auto.checked = session.autoRoute;
-    auto.disabled = session.running || session.routing;
-    auto.addEventListener('change', () => {
-      session.autoRoute = auto.checked;
-      session.hostedConfirmation = null;
-      session.route = auto.checked ? null : { rationale: 'Manual routing is active; the controls below are the route.' };
-      paintC();
-    });
-    add(autoLabel, auto, document.createTextNode(' Auto'));
-    autoLabel.title = 'Automatically choose provider, model, and effort from the task; clear this to override them manually.';
-    add(box, autoLabel);
-    const agents = S.agents.agents || [];
-    const agentSel = el('select');
-    agentSel.setAttribute('aria-label', 'Agent');
-    for (const a of agents) {
-      const unavailable = a.available === false;
-      const o = el('option', null, `${a.label || a.id}${unavailable ? ' — unavailable' : ''}`);
-      o.value = a.id;
-      o.disabled = unavailable;
-      if (unavailable && a.unavailableReason) o.title = a.unavailableReason;
-      if (a.id === session.agentId) o.selected = true;
-      add(agentSel, o);
-    }
-    agentSel.disabled = session.running || session.routing || !agents.some((a) => a && a.available !== false);
-    const selectedProvider = agents.find((a) => a && a.id === session.agentId);
-    if (selectedProvider && selectedProvider.available === false) {
-      agentSel.title = selectedProvider.unavailableReason || 'This provider is not runnable on this machine.';
-    }
-    agentSel.addEventListener('change', () => {
-      session.agentId = agentSel.value; session.model = ''; session.autoRoute = false;
-      session.hostedConfirmation = null;
-      session.route = { rationale: 'Manual routing is active; you selected the provider.' };
-      paintC(); paintE();
-    });
+  /* ================================================================== *
+   * MODEL PICKER — Single / Compare / Route popover                     *
+   * ================================================================== *
+   * Replaces the old <select> pickers. Every choice writes the SAME real
+   * session fields the run consumes (agentId / model / effort / autoRoute); the
+   * popover is chrome over that state, not a second source of truth. Built with
+   * the DOM helpers, never innerHTML, so this file's no-innerHTML rule holds.
+   *   Single  -> session.agentId + session.model, session.autoRoute = false
+   *   Route   -> session.autoRoute = true (local-first; cloud only after egress)
+   *   Compare -> pick 2–3, preview the real GPU/VRAM budget; RUN currently starts
+   *              the single run on the first pick (see TODO(compare-run)).
+   * The model list is S.agents (installed local models + each agent's models);
+   * the VRAM meter is fed by the real GPU capability from GET /forge/models/host. */
+  let mpEl = null, mpdEl = null, mpAnchor = null, effEl = null;
+  let MPMODE = 'single';                 // 'single' | 'compare' | 'route'
+  const CMP = new Set();                 // Compare selection, keyed `${agentId}::${model}`
+  let RUNMODE = 'parallel';              // Compare run-mode preference (see TODO(compare-run))
 
-    const modelSel = el('select');
-    modelSel.setAttribute('aria-label', 'Model');
-    const chosen = agents.find((a) => a.id === session.agentId);
-    const models = session.agentId === 'local' ? (S.agents.localModels || []) : ((chosen && chosen.models) || []);
-    if (models.length === 0) {
-      const o = el('option', null, session.agentId === 'local' ? 'no local model installed' : 'the agent’s default');
-      o.value = '';
-      add(modelSel, o);
-      modelSel.disabled = true;
-      modelSel.title = session.agentId === 'local'
-        ? 'Ollama listed no installed models, so there is nothing to pick.'
-        : 'This agent chooses its own model; the daemon offers no list.';
-    } else {
-      const dflt = el('option', null, 'the agent’s default');
-      dflt.value = '';
-      add(modelSel, dflt);
-      for (const m of models) {
-        const o = el('option', null, m);
-        o.value = m;
-        if (m === session.model) o.selected = true;
-        add(modelSel, o);
+  function modelKey(agentId, model) { return `${agentId}::${model || ''}`; }
+  function isLocalAgent(id) {
+    if (id === 'local') return true;
+    const p = provider(id);
+    return Boolean(p && p.hosted === false);
+  }
+
+  /** The pill's label + tone from the real session route. */
+  function modelPillInfo(session) {
+    if (session.autoRoute && !(session.route && session.route.agentId)) {
+      return { text: 'Route by policy', tone: 'cy' };
+    }
+    const routedId = session.route && session.route.agentId ? session.route.agentId : session.agentId;
+    const local = isLocalAgent(routedId);
+    const p = provider(routedId);
+    const primary = session.model || (local ? 'default' : (p && p.label) || routedId || 'default');
+    return { text: `${primary} · ${local ? 'local' : 'cloud'}`, tone: local ? 'cy' : 'am' };
+  }
+
+  /** Every selectable model row, straight from S.agents — no invented entries. */
+  function pickerModels() {
+    const rows = [];
+    const locals = (S.agents && Array.isArray(S.agents.localModels)) ? S.agents.localModels : [];
+    for (const name of locals) {
+      rows.push({ key: modelKey('local', name), agentId: 'local', model: name, name, sub: 'Ollama · on this machine', where: 'local', group: 'On this machine', available: true });
+    }
+    const agents = (S.agents && Array.isArray(S.agents.agents)) ? S.agents.agents : [];
+    for (const a of agents) {
+      if (a.id === 'local') continue;
+      const where = a.hosted === false ? 'local' : 'cloud';
+      const group = a.label || a.id;
+      const avail = a.available !== false;
+      const models = Array.isArray(a.models) ? a.models : [];
+      if (models.length === 0) {
+        rows.push({ key: modelKey(a.id, ''), agentId: a.id, model: '', name: `${group} · default`, sub: group, where, group, available: avail, reason: a.unavailableReason });
+      } else {
+        for (const m of models) rows.push({ key: modelKey(a.id, m), agentId: a.id, model: m, name: m, sub: group, where, group, available: avail, reason: a.unavailableReason });
       }
     }
-    if ((chosen && chosen.available === false) || session.running || session.routing) modelSel.disabled = true;
-    modelSel.addEventListener('change', () => {
-      session.model = modelSel.value; session.autoRoute = false;
-      session.hostedConfirmation = null;
-      session.route = { rationale: 'Manual routing is active; you selected the model.' };
-      paintC(); paintE();
-    });
+    return rows;
+  }
 
-    const effortSel = el('select');
-    effortSel.setAttribute('aria-label', 'Effort');
-    for (const e of S.agents.efforts || []) {
-      const o = el('option', null, `effort: ${e}`);
-      o.value = e;
-      if (e === session.effort) o.selected = true;
-      add(effortSel, o);
+  // Per-model VRAM footprint for the Compare meter. Prefer the REAL figure from
+  // the backend capability read (/forge/models/host returns models[].estVramBytes,
+  // parsed from Ollama /api/tags's on-disk size + a KV/context margin); fall back
+  // to the shipped catalog's approximate run-memory only for models the backend
+  // didn't report. Unknown models contribute no guessed number (null).
+  function approxModelVram(name) {
+    const hostModels = (S.host && Array.isArray(S.host.models)) ? S.host.models : null;
+    if (hostModels) {
+      const real = hostModels.find((m) => m && m.name === name);
+      if (real && Number.isFinite(real.estVramBytes) && real.estVramBytes > 0) return real.estVramBytes;
     }
-    const supports = !chosen || chosen.supportsEffort !== false;
-    const runnable = !chosen || chosen.available !== false;
-    effortSel.disabled = session.running || session.routing || !supports || !runnable;
-    if (!supports) effortSel.title = 'This agent does not take an effort level.';
-    else if (!runnable) effortSel.title = chosen.unavailableReason || 'This provider is unavailable.';
-    effortSel.addEventListener('change', () => {
-      session.effort = effortSel.value; session.autoRoute = false;
-      session.hostedConfirmation = null;
-      session.route = { rationale: 'Manual routing is active; you selected the effort.' };
-      paintC(); paintE();
-    });
+    const hit = MODEL_CATALOG.find((c) => c.name === name);
+    return hit ? hit.needs : null; // bytes, or null when unknown — never guessed
+  }
 
-    add(box, agentSel, modelSel, effortSel);
-    // Add-a-model lives beside the model picker: local models are Ollama's, and
-    // this is where the owner would look to get one they don't yet have.
+  /** Cache the real GPU/RAM capability for the Compare meter (owner-only route). */
+  async function loadHost() {
+    if (S.hostBusy || !OWNER_TOKEN) return;
+    S.hostBusy = true;
+    const r = await api('/forge/models/host');
+    S.hostBusy = false;
+    S.host = r.ok ? r.data : null;
+    if (mpEl && MPMODE === 'compare') syncFoot();
+  }
+
+  function closeModelPicker() {
+    if (mpdEl) { mpdEl.remove(); mpdEl = null; }
+    if (mpEl) { mpEl.remove(); mpEl = null; }
+    mpAnchor = null;
+  }
+  function closeEffortMenu() { if (effEl) { effEl.remove(); effEl = null; } }
+
+  function setRoute(session) {
+    session.autoRoute = true;
+    session.route = null;
+    session.hostedConfirmation = null;
+    paintC(); paintE();
+  }
+
+  function openModelPicker(anchor) {
+    if (mpEl && mpAnchor === anchor) { closeModelPicker(); return; }
+    closeModelPicker();
+    closeEffortMenu();
+    const session = activeSession();
+    mpAnchor = anchor;
+    MPMODE = session.autoRoute ? 'route' : 'single';
+    CMP.clear();
+
+    mpEl = el('div', 'mp');
+    mpEl.setAttribute('role', 'dialog');
+    mpEl.setAttribute('aria-label', 'Choose a model');
+
+    const search = el('div', 'mp-search');
+    add(search, fgIcon('search'));
+    const q = el('input');
+    q.id = 'mp-q';
+    q.placeholder = 'Search all models';
+    q.setAttribute('aria-label', 'Search models');
+    q.autocomplete = 'off';
+    const total = pickerModels().length;
+    const count = el('span', null, `${total} model${total === 1 ? '' : 's'}`);
+    count.style.fontFamily = 'var(--font-mono)';
+    count.style.fontSize = '9.5px';
+    add(search, q, count);
+    add(mpEl, search);
+
+    const mode = el('div', 'mp-mode');
+    mode.setAttribute('role', 'group');
+    const modes = [
+      ['single', 'Single', 'One model does the run'],
+      ['compare', 'Compare', 'Preview the same task on two or three models, keep the diff you prefer'],
+      ['route', 'Route', 'Local first; a cloud model only after you approve the egress'],
+    ];
+    for (const [id, label, tip] of modes) {
+      const b = btn(null, label, null);
+      b.dataset.mpm = id;
+      b.title = tip;
+      b.setAttribute('aria-pressed', id === MPMODE ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        MPMODE = id;
+        mode.querySelectorAll('[data-mpm]').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+        if (id === 'route') setRoute(session);
+        if (id === 'compare' && !S.host && !S.hostBusy) void loadHost();
+        renderMp(q.value);
+        syncFoot();
+      });
+      add(mode, b);
+    }
+    add(mpEl, mode);
+
+    const list = el('div', 'mp-list');
+    list.id = 'mp-list';
+    add(mpEl, list);
+
+    const foot = el('div', 'mp-foot');
+    foot.id = 'mp-foot';
+    add(mpEl, foot);
+
+    // Keep the model manager reachable: pull/manage local models from here.
     if (OWNER_TOKEN) {
-      const manage = btn('fgmodels-open', '＋ Models', () => openModelManager());
-      manage.title = 'Add or manage local models — pull one from Ollama without leaving Zeno';
-      add(box, manage);
+      const addWrap = el('div', 'mp-add');
+      const addBtn = btn('mp-addbtn', '＋ Add a local model', () => { closeModelPicker(); openModelManager(); });
+      addBtn.title = 'Pull or manage a local model from Ollama without leaving Zeno';
+      add(addWrap, addBtn);
+      add(mpEl, addWrap);
     }
-    if (chosen && chosen.available === false) {
-      add(box, el('span', 'fgprovider-note', chosen.unavailableReason || 'This provider is unavailable.'));
+
+    document.body.append(mpEl);
+    q.addEventListener('input', () => renderMp(q.value));
+    renderMp('');
+    syncFoot();
+
+    const r = anchor.getBoundingClientRect();
+    const w = 360, h = Math.min(520, mpEl.offsetHeight || 460);
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    const top = r.top > h + 12 ? r.top - h - 8 : r.bottom + 8;
+    mpEl.style.left = `${left}px`;
+    mpEl.style.top = `${Math.max(8, top)}px`;
+    requestAnimationFrame(() => q.focus());
+  }
+
+  function renderMp(query) {
+    if (!mpEl) return;
+    const list = mpEl.querySelector('#mp-list');
+    if (!list) return;
+    list.replaceChildren();
+    const session = activeSession();
+    if (S.agentsErr) { add(list, el('div', 'mp-empty', `Agents unavailable — ${S.agentsErr}`)); return; }
+    if (!S.agents) { add(list, el('div', 'mp-empty', 'Reading the available agents…')); return; }
+    if (MPMODE === 'route') { renderRoutePanel(list); return; }
+
+    const rows = pickerModels();
+    const ql = String(query || '').trim().toLowerCase();
+    const curKey = session.autoRoute ? null : modelKey(session.agentId, session.model);
+    let lastG = null;
+    let shown = 0;
+    for (const m of rows) {
+      if (ql && !`${m.name} ${m.sub || ''}`.toLowerCase().includes(ql)) continue;
+      if (m.group && m.group !== lastG) { add(list, el('div', 'mp-g', m.group)); lastG = m.group; }
+      const b = btn('mp-row', null, null);
+      b.setAttribute('role', MPMODE === 'compare' ? 'menuitemcheckbox' : 'menuitemradio');
+      const checked = MPMODE === 'compare' ? CMP.has(m.key) : m.key === curKey;
+      b.setAttribute('aria-checked', checked ? 'true' : 'false');
+      if (!m.available) { b.dataset.locked = '1'; if (m.reason) b.title = m.reason; }
+      const mi = el('span', 'mi');
+      add(mi, fgIcon(m.where === 'local' ? 'chip' : 'cloud'));
+      const mn = el('span', 'mn');
+      add(mn, document.createTextNode(m.name), el('span', null, m.sub || ''));
+      const tierText = !m.available ? (m.reason || 'unavailable') : m.where === 'local' ? 'free · on-device' : 'T3 egress';
+      const mt = el('span', `mt ${m.available ? (m.where === 'local' ? 'loc' : 'eg') : ''}`.trim(), tierText);
+      add(b, mi, mn, mt);
+      b.addEventListener('mouseenter', () => showMpd(m, b));
+      b.addEventListener('focus', () => showMpd(m, b));
+      b.addEventListener('click', () => {
+        if (!m.available) return; // locked row: title explains why
+        if (MPMODE === 'compare') {
+          if (CMP.has(m.key)) CMP.delete(m.key);
+          else { if (CMP.size >= 3) return; CMP.add(m.key); }
+          b.setAttribute('aria-checked', CMP.has(m.key) ? 'true' : 'false');
+          syncFoot();
+          return;
+        }
+        session.agentId = m.agentId;
+        session.model = m.model;
+        session.autoRoute = false;
+        session.hostedConfirmation = null;
+        session.route = { rationale: 'Manual routing is active; you selected the model.' };
+        list.querySelectorAll('.mp-row').forEach((x) => x.setAttribute('aria-checked', x === b ? 'true' : 'false'));
+        paintC(); paintE();
+      });
+      add(list, b);
+      shown += 1;
     }
-    return box;
+    if (shown === 0) add(list, el('div', 'mp-empty', rows.length ? 'No model matches that search.' : 'No models available yet — use “＋ Add a local model”.'));
+  }
+
+  function renderRoutePanel(list) {
+    const locals = (S.agents && Array.isArray(S.agents.localModels)) ? S.agents.localModels : [];
+    const localName = locals[0] || 'a local model';
+    const clouds = ((S.agents && S.agents.agents) || []).filter((a) => a.id !== 'local' && a.hosted !== false);
+    const wrap = el('div', 'rt');
+
+    const lead = el('div', 'rt-lead');
+    add(lead, el('b', null, 'Local-first.'), document.createTextNode(' Zeno runs your task on-device and only reaches a cloud model '), el('b', null, 'after you approve the egress'), document.createTextNode(' — nothing leaves this machine unless you say so.'));
+    add(wrap, lead);
+
+    const ladder = el('div', 'rt-ladder');
+
+    const s1 = el('div', 'rt-step local');
+    add(s1, el('span', 'n', '1'));
+    const s1b = el('div');
+    const t1 = el('div', 'rt-t');
+    add(t1, fgIcon('chip'), document.createTextNode(localName), el('span', 'tag loc', 'free · on-device'));
+    add(s1b, t1, el('div', 'rt-s', 'Tries here first. Private, no bill, no egress tier — most tasks finish here.'));
+    add(s1, s1b);
+    add(ladder, s1);
+
+    const s2 = el('div', 'rt-step cloud');
+    add(s2, el('span', 'n', '2'));
+    const s2b = el('div');
+    const t2 = el('div', 'rt-t');
+    add(t2, fgIcon('cloud'), document.createTextNode('Escalate only if the local model can’t'));
+    add(s2b, t2, el('div', 'rt-s', clouds.length
+      ? `Zeno proposes a cloud model and asks you before anything is sent. Available on this machine: ${clouds.map((c) => c.label || c.id).join(', ')}.`
+      : 'No cloud agent is configured on this machine, so Route stays fully local.'));
+    add(s2, s2b);
+    add(ladder, s2);
+
+    add(wrap, ladder);
+
+    const eg = el('div', 'rt-egress');
+    add(eg, fgIcon('cloud'));
+    const egt = el('span');
+    add(egt, document.createTextNode('A cloud call is a '), el('b', null, 'T3 egress'), document.createTextNode(' effect: previewed, approved once, sealed in a receipt. Route never sends silently.'));
+    add(eg, egt);
+    add(wrap, eg);
+
+    list.append(wrap);
+  }
+
+  /** A small, honest hover card: identity + the real privacy/egress fact. No cost
+   *  or benchmark figures — the daemon does not report them, so none are shown. */
+  function showMpd(m, row) {
+    if (mpdEl) { mpdEl.remove(); mpdEl = null; }
+    if (!m || !mpEl) return;
+    mpdEl = el('div', 'mpd');
+    add(mpdEl, el('div', 'mpd-h', ''));
+    mpdEl.firstChild.append(el('b', null, m.name));
+    add(mpdEl, el('div', 'mpd-m', ''));
+    mpdEl.lastChild.append(el('span', null, m.sub || ''), el('span', null, m.where === 'local' ? 'runs on this machine' : 'runs in the cloud'));
+    if (!m.available && m.reason) add(mpdEl, el('div', 'mpd-k', m.reason));
+    const priv = el('div', `mpd-priv ${m.where === 'local' ? 'loc' : 'eg'}`);
+    add(priv, fgIcon(m.where === 'local' ? 'chip' : 'cloud'), el('span', null, m.where === 'local'
+      ? 'Never leaves this machine. No egress tier, no key, no bill — receipts still sign the model hash.'
+      : 'Leaves this machine. Every call is a T3 egress effect: previewed, approved once, sealed in a receipt.'));
+    add(mpdEl, priv);
+    document.body.append(mpdEl);
+    const r = row.getBoundingClientRect();
+    const mr = mpEl.getBoundingClientRect();
+    const w = 330;
+    const left = mr.left > w + 16 ? mr.left - w - 8 : mr.right + 8;
+    mpdEl.style.left = `${left}px`;
+    mpdEl.style.top = `${Math.min(Math.max(8, r.top - 40), window.innerHeight - (mpdEl.offsetHeight || 160) - 8)}px`;
+    mpdEl.addEventListener('mouseleave', () => { if (mpdEl) { mpdEl.remove(); mpdEl = null; } });
+  }
+
+  function syncFoot() {
+    if (!mpEl) return;
+    const foot = mpEl.querySelector('#mp-foot');
+    if (!foot) return;
+    foot.replaceChildren();
+    const session = activeSession();
+    if (MPMODE === 'compare') { foot.style.display = 'block'; buildCompareFoot(foot, session); return; }
+    foot.style.display = '';
+    // Recall Vault memory — the real per-session switch (session.memoryEnabled).
+    const lab = el('span');
+    add(lab, document.createTextNode('Recall Vault memory'), el('span', 'sub', 'Ground this run in your notes · nothing leaves the machine'));
+    const on = session.memoryEnabled !== false;
+    const tgl = el('button', `mp-toggle${on ? ' on' : ''}`);
+    tgl.type = 'button';
+    tgl.setAttribute('role', 'switch');
+    tgl.setAttribute('aria-checked', on ? 'true' : 'false');
+    tgl.setAttribute('aria-label', 'Recall Vault memory for this session');
+    add(tgl, el('span', 'k'));
+    const flip = () => {
+      const next = !(session.memoryEnabled !== false);
+      session.memoryEnabled = next;
+      session.hostedConfirmation = null;
+      invalidateRunContext(session);
+      tgl.classList.toggle('on', next);
+      tgl.setAttribute('aria-checked', next ? 'true' : 'false');
+      paintC();
+      scheduleRunContext(session);
+    };
+    tgl.addEventListener('click', flip);
+    tgl.addEventListener('keydown', (ev) => { if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); flip(); } });
+    add(foot, lab, tgl);
+  }
+
+  /* Compare footer: the real GPU/VRAM budget + an honest Parallel/Sequential
+     preference. Per-model VRAM is approximate (see approxModelVram / TODO). */
+  function buildCompareFoot(foot, session) {
+    const rows = pickerModels();
+    const selected = [...CMP].map((k) => rows.find((r) => r.key === k)).filter(Boolean);
+    const localsSel = selected.filter((r) => r.where === 'local');
+    const cloudN = selected.length - localsSel.length;
+
+    const host = S.host;
+    const gpu = host && host.gpu && host.gpu.detected ? host.gpu : null;
+    const hasGpu = Boolean(gpu && typeof gpu.totalVram === 'number' && gpu.totalVram > 0);
+
+    // Approximate per-model VRAM from the catalog; unknown -> no guessed number.
+    const approx = localsSel.map((r) => approxModelVram(r.model));
+    const anyUnknown = approx.some((v) => v == null);
+    const sumApprox = approx.reduce((s, v) => s + (v || 0), 0); // bytes (known only)
+
+    // Budget = total VRAM minus a display/context reserve — stable, unlike the
+    // volatile instantaneous free reading. The question is capacity ("will these
+    // models fit on this GPU at once?"), the same basis the design artifact uses.
+    const RESERVE = 1.5 * GB;
+    const usable = hasGpu ? Math.max(gpu.totalVram - RESERVE, gpu.totalVram * 0.75) : 0;
+    let fit = 'ok';
+    if (hasGpu && localsSel.length && !anyUnknown) {
+      fit = sumApprox <= usable * 0.85 ? 'ok' : sumApprox <= usable ? 'tight' : 'over';
+    }
+
+    const vram = el('div', `mp-vram fit-${fit === 'over' ? 'over' : fit === 'tight' ? 'tight' : 'ok'}`);
+    const head = el('div', 'mp-vram-head');
+    const gpuLabel = el('span', 'mp-vram-gpu');
+    add(gpuLabel, fgIcon('gpu'));
+    if (hasGpu) add(gpuLabel, document.createTextNode(`${gpu.name || 'GPU'} · ${(gpu.totalVram / GB).toFixed(0)} GB VRAM`));
+    else if (S.hostBusy || !host) add(gpuLabel, document.createTextNode('Reading GPU capability…'));
+    else add(gpuLabel, document.createTextNode('No GPU detected · Ollama uses system RAM'));
+    add(head, gpuLabel);
+    if (hasGpu) {
+      const numTxt = (localsSel.length && !anyUnknown)
+        ? `${(sumApprox / GB).toFixed(1)} / ${(gpu.totalVram / GB).toFixed(0)} GB`
+        : `${(gpu.totalVram / GB).toFixed(0)} GB total`;
+      add(head, el('span', 'mp-vram-num', numTxt));
+    }
+    add(vram, head);
+
+    if (hasGpu) {
+      const total = gpu.totalVram;
+      const bar = el('div', 'mp-vram-bar');
+      const fillPart = el('div', 'mp-vram-fill');
+      // Fill = the selected local models' summed footprint against total VRAM,
+      // one segment per model (proportional to its share of the sum).
+      fillPart.style.width = `${Math.min(100, (localsSel.length && !anyUnknown && sumApprox > 0) ? (sumApprox / total) * 100 : 0)}%`;
+      if (localsSel.length && !anyUnknown && sumApprox > 0) {
+        for (const r of localsSel) {
+          const v = approxModelVram(r.model);
+          if (v) { const s = el('i', 'seg'); s.style.width = `${(v / sumApprox) * 100}%`; s.title = `${r.model} · ≈${(v / GB).toFixed(1)} GB`; add(fillPart, s); }
+        }
+      }
+      if (!fillPart.childElementCount) add(fillPart, el('i', 'seg'));
+      add(bar, fillPart);
+      // The usable-budget cap marker (total minus display reserve).
+      const cap = el('span', 'mp-vram-cap');
+      cap.style.left = `${Math.min(100, (usable / total) * 100)}%`;
+      cap.title = `Usable budget ≈ ${(usable / GB).toFixed(1)} GB — the rest is reserved for the display`;
+      add(bar, cap);
+      add(vram, bar);
+    }
+
+    const note = el('div', 'mp-vram-note');
+    add(note, el('span', 'mp-vram-dot'));
+    let noteText;
+    if (!hasGpu) {
+      noteText = selected.length ? `${localsSel.length} local · ${cloudN} cloud selected — cloud runs off-GPU` : 'Select 2 or 3 models to compare';
+    } else if (localsSel.length === 0) {
+      noteText = cloudN ? 'Cloud models only — no local VRAM used' : 'Select 2 or 3 models to compare';
+    } else if (anyUnknown) {
+      noteText = 'Approx VRAM unknown for a selected model — projection unavailable';
+    } else {
+      noteText = fit === 'ok' ? (localsSel.length > 1 ? '≈ fits — local models run together' : '≈ fits comfortably on this GPU')
+               : fit === 'tight' ? ('≈ fits — little headroom' + (localsSel.length > 1 ? ', runs together' : ''))
+               : '≈ won’t fit at once — locals run one at a time';
+      if (cloudN) noteText += ` · +${cloudN} cloud off-GPU`;
+    }
+    add(note, document.createTextNode(noteText));
+    add(vram, note);
+    add(foot, vram);
+
+    // Honest run mode: if the known locals clearly overflow, force sequential.
+    const overflow = hasGpu && localsSel.length > 1 && !anyUnknown && fit === 'over';
+    if (overflow) RUNMODE = 'sequential';
+    const rm = el('div', 'mp-runmode');
+    rm.setAttribute('role', 'group');
+    rm.setAttribute('aria-label', 'How to run the comparison');
+    const par = btn(null, null, null);
+    par.type = 'button';
+    par.dataset.run = 'parallel';
+    add(par, fgIcon('parallel'), document.createTextNode('Parallel'));
+    par.setAttribute('aria-pressed', RUNMODE === 'parallel' ? 'true' : 'false');
+    if (overflow) { par.disabled = true; par.title = 'The selected local models exceed this GPU’s VRAM budget — they can’t be held at once'; }
+    const seqB = btn(null, null, null);
+    seqB.type = 'button';
+    seqB.dataset.run = 'sequential';
+    add(seqB, fgIcon('sequential'), document.createTextNode('Sequential'));
+    seqB.setAttribute('aria-pressed', RUNMODE === 'sequential' ? 'true' : 'false');
+    for (const b of [par, seqB]) b.addEventListener('click', () => { if (b.disabled) return; RUNMODE = b.dataset.run; syncFoot(); });
+    add(rm, par, seqB);
+    add(foot, rm);
+
+    const frow = el('div', 'mp-foot-row');
+    const flab = el('span');
+    add(flab, document.createTextNode('Compare'), el('span', 'sub', selected.length
+      ? `One task · ${selected.length} model${selected.length > 1 ? 's' : ''} · isolated worktrees`
+      : 'Select 2 or 3 models to run side by side'));
+    const run = btn('btn p sm', selected.length ? `Compare ${selected.length} →` : 'Compare →', () => startCompare(session));
+    run.disabled = selected.length < 2;
+    add(frow, flab, run);
+    add(foot, frow);
+  }
+
+  function startCompare(session) {
+    const keys = [...CMP];
+    if (keys.length < 2) return;
+    // TODO(compare-run): a true concurrent multi-model comparison (parallel or
+    // sequential worktrees per RUNMODE, then keep the diff you prefer) needs a
+    // backend endpoint Forge does not have yet. Until then, keep the action REAL
+    // by starting the existing single run on the first selected model rather than
+    // faking a side-by-side comparison.
+    const first = pickerModels().find((r) => r.key === keys[0]);
+    if (!first) return;
+    session.agentId = first.agentId;
+    session.model = first.model;
+    session.autoRoute = false;
+    session.hostedConfirmation = null;
+    session.route = { rationale: 'Manual routing is active; you selected the model (Compare run pending backend support).' };
+    closeModelPicker();
+    paintC(); paintE();
+    if (canRun(session)) void doRun(session);
+  }
+
+  /* One delegated listener: the composer pill/effort pill are rebuilt on every
+     paintC, so open them by delegation and close popovers on any outside click. */
+  document.addEventListener('click', (ev) => {
+    const target = ev.target;
+    if (!target || !target.closest) return;
+    const mp = target.closest('[data-model-pill]');
+    if (mp && !section.hidden) { ev.preventDefault(); openModelPicker(mp); return; }
+    const ef = target.closest('[data-effort-pill]');
+    if (ef && !section.hidden) { ev.preventDefault(); openEffortMenu(ef); return; }
+    if (mpEl && !target.closest('.mp,.mpd')) closeModelPicker();
+    if (effEl && !target.closest('.effmenu')) closeEffortMenu();
+  });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { closeModelPicker(); closeEffortMenu(); } });
+
+  function openEffortMenu(anchor) {
+    if (effEl) { closeEffortMenu(); return; }
+    closeModelPicker();
+    const session = activeSession();
+    const efforts = (S.agents && Array.isArray(S.agents.efforts)) ? S.agents.efforts : [];
+    effEl = el('div', 'effmenu');
+    effEl.setAttribute('role', 'menu');
+    if (efforts.length === 0) add(effEl, el('div', 'mp-empty', 'No effort levels reported.'));
+    for (const e of efforts) {
+      const b = btn(null, e, () => {
+        session.effort = e;
+        session.autoRoute = false;
+        session.hostedConfirmation = null;
+        session.route = { rationale: 'Manual routing is active; you selected the effort.' };
+        closeEffortMenu();
+        paintC(); paintE();
+      });
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', e === session.effort ? 'true' : 'false');
+      add(effEl, b);
+    }
+    document.body.append(effEl);
+    const r = anchor.getBoundingClientRect();
+    const w = Math.max(170, effEl.offsetWidth || 170);
+    const h = effEl.offsetHeight || 120;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    const top = r.top > h + 12 ? r.top - h - 6 : r.bottom + 6;
+    effEl.style.left = `${left}px`;
+    effEl.style.top = `${Math.max(8, top)}px`;
   }
 
   /* ================================================================== *
