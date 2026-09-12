@@ -6,6 +6,11 @@
 <title>Zeno</title>
 <meta name="zeno-token" content="">
 <link rel="icon" href="/brand/mark.svg">
+<!-- Resolves the owner's saved theme BEFORE any CSS is parsed. The artifact lift
+     dropped this tag, which left the window pinned to the hardcoded dark default
+     until bind/settings.js ran — so a saved Glass Dawn arrived as a visible flash
+     of the wrong theme, and never arrived at all if that binder failed. -->
+<script src="/theme-boot.js"></script>
 <link rel="stylesheet" href="/glass/tokens.css">
 <link rel="stylesheet" href="/screens/artifact.css">
 <style>
@@ -48,23 +53,14 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
-/* Command's context rail, calmed down.
-   It was four stacked blocks competing at equal weight. The rail answers one
-   question — what needs me now — so "Needs you" and "Running" lead, the day's
-   counts sit quieter beneath them, and the field legend is reference material
-   behind a disclosure rather than a permanent wall of colour swatches. */
-.hside{gap:14px; padding:16px 14px 20px}
-.hside .hs-h{font-size:9px; letter-spacing:.13em}
-.hs-stats div{padding:5px 0; font-size:12px}
-.hs-stats dd{font-size:12px}
-.hs-key{border-top:1px solid var(--rule); padding-top:12px; margin-top:2px}
-.hs-key summary{color:var(--ink-3)}
-.hs-key summary::after{content:" ▾"; opacity:.6}
+/* Command's context rail keeps the artifact's own proportions.
+   A previous pass shrank the headings, tightened the stats and collapsed the
+   field legend behind a disclosure. That left the rail's lower half empty and
+   drifted from the design, so it is back to the artifact exactly: full-size
+   headings, the artifact's spacing, and the colour key open by default —
+   the key is what makes the orb readable, so it is not reference material. */
+.hs-key summary::after{content:" ▾"; opacity:.55}
 .hs-key[open] summary::after{content:" ▴"}
-/* The legend only earns full colour once it is actually opened. */
-.hs-key:not([open]) .orb-key{display:none}
-.lcard{padding:11px 12px; gap:5px}
-.lcard .lm{font-size:10.5px}
 
 /* Switching product should feel like moving between rooms in one building, not
    a page swap. The outgoing surface is simply replaced (it is display:none'd by
@@ -856,7 +852,7 @@ button{font:inherit; color:inherit}
 
 <div class="app">
   <header class="top">
-    <div class="brand"><span class="mk">Z</span><span class="wm">Zeno</span><span class="env">Local</span></div>
+    <div class="brand"><span class="mk">Z</span><span class="wm"><span class="brand-word">Zeno Command</span></span><span class="env">Local</span></div>
     <nav class="seg" aria-label="Product">
       <button aria-current="page" data-product="command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><circle cx="12" cy="12" r="3"/></svg>Command</button>
       <button data-product="forge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Forge</button>
@@ -936,9 +932,7 @@ button{font:inherit; color:inherit}
             <section class="hs-sec"><div class="hs-h">Today</div>
               <dl class="hs-stats"><div><dt>verified</dt><dd class="gr">3</dd></div><div><dt>in the sandbox</dt><dd class="cy">2</dd></div><div><dt>backlog</dt><dd>5</dd></div><div><dt>memories</dt><dd>12</dd></div><div><dt>left this machine</dt><dd>0</dd></div></dl>
             </section>
-            <!-- Collapsed by default: the legend is reference, not status. The rail's
-                 job is what needs you now; the key is there when the orb confuses. -->
-            <details class="hs-key"><summary class="hs-h">Reading the field <span class="sum">colour = state</span></summary>
+            <details class="hs-key" open><summary class="hs-h">Reading the field <span class="sum">colour = state</span></summary>
               <div class="orb-key">
                 <span class="k go"><i></i>Zeno core · routes, never approves</span>
                 <span class="k cy"><i></i>agent · pulsing = running</span>

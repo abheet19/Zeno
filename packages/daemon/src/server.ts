@@ -4059,7 +4059,19 @@ export function createServer(opts: DaemonOptions): Server {
           skipped.push({ path: rel, reason: candidate.reason, note: candidate.note });
           continue;
         }
-        const out = await proposeFileWrite(rel, candidate.contents, `Forge (${result.agentId}): ${ownerTask.slice(0, 60)}`, `forge:${result.agentId}`);
+        // A held proposal's summary is the ONE line the owner decides from, so it
+        // must name the EFFECT. Leading with the task text meant a run whose
+        // `ownerTask` carried the composed prompt produced a summary that read
+        // "Forge (local): PROJECT RULES FROM THE SELECTED REPOSITORY follow. Apply
+        // the" — a system-prompt fragment presented as a description of a file
+        // write. The path is what is being changed; the task is context after it.
+        const why = ownerTask.replace(/\s+/g, ' ').trim().slice(0, 48);
+        const out = await proposeFileWrite(
+          rel,
+          candidate.contents,
+          `Forge (${result.agentId}): write ${rel}${why ? ` — ${why}` : ''}`,
+          `forge:${result.agentId}`,
+        );
         const pv = out['preview'] as { actionHash: string; tier: string; auto: boolean };
         proposed.push({ path: rel, actionHash: pv.actionHash, tier: pv.tier, auto: pv.auto });
       }

@@ -117,7 +117,11 @@ export async function bind() {
       });
       if (res.ok) {
         const s = await res.json();
-        const repo = s.repo || s.name || 'sandbox';
+        // /forge/status reports `repo` as a BOOLEAN ("is this a repository"), not a
+        // name — reading it as a label printed the literal "true · master" in the
+        // chip. The name is the last segment of the real root path.
+        const root = typeof s.root === 'string' ? s.root : '';
+        const repo = root ? root.split(/[\\/]/).filter(Boolean).pop() : 'sandbox';
         const branch = s.branch ? ` · ${s.branch}` : '';
         const label = proj.querySelector('span') || proj;
         if (label === proj) {

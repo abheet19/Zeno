@@ -213,9 +213,14 @@ function bindAppearance(modal) {
     const row = rowByLabel(pane, 'Theme');
     const seg = row && $('.segsm', row);
     if (seg) {
+      // Reconcile ONLY against a real saved choice. The bare `else` here used to
+      // strip data-theme whenever nothing was stored, which silently turned every
+      // first run into "follow the OS" — on a light desktop the documented
+      // Graphite default never appeared, and it contradicted theme-boot.js, which
+      // correctly leaves the default alone when there is nothing saved.
       const stored = zget('th');
       if (stored === 'dark' || stored === 'light') root.setAttribute('data-theme', stored);
-      else root.removeAttribute('data-theme');
+      else if (stored === 'system') root.removeAttribute('data-theme');
 
       const buttons = $$('button', seg);
       const wanted = (label) => (label === 'Light' ? 'light' : label === 'Dark' ? 'dark' : null);

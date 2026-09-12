@@ -10,34 +10,46 @@ const html = readFileSync(join(publicDir, 'index.html'), 'utf8');
 const visibleHtml = html.replace(/<!--[\s\S]*?-->/g, '');
 const themeBoot = readFileSync(join(publicDir, 'theme-boot.js'), 'utf8');
 
-test('every Command rail CTA resolves to a real section or mount', () => {
-  const rail = visibleHtml.match(/<aside class="rail"[\s\S]*?<\/aside>/)?.[0] || '';
-  const targets = [...rail.matchAll(/<button[^>]+data-jump="([^"]+)"[^>]*>([\s\S]*?)<\/button>/g)];
-  assert.ok(targets.length > 0, 'the Command rail must expose real destinations');
-  for (const [, target] of targets) {
-    const exists = target === 'cmd-hero'
-      ? visibleHtml.includes('<section class="hero"')
-      : visibleHtml.includes(`id="${target}"`) || visibleHtml.includes(`data-mount="${target}"`);
-    assert.equal(exists, true, `rail target ${target} must resolve to rendered content`);
+/*
+ * The renderer was rebuilt on the design artifact's markup, which names things
+ * differently: a rail button is `data-screen`, not `data-jump`; a product button
+ * is `data-product`, not `data-nav`; a surface is `.product[data-product]`, not
+ * `<section data-surface>`. These tests were pinned to the OLD vocabulary, so
+ * they failed for a naming reason while the thing they exist to protect — no
+ * navigation control may lead nowhere — went unchecked. Re-expressed against the
+ * shipped vocabulary, and widened: every rail across all three products, not
+ * just Command's.
+ */
+
+test('every rail CTA in every product resolves to a real screen', () => {
+  const rails = [...visibleHtml.matchAll(/<button class="nav-i[^"]*"[^>]*data-screen="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(rails.length > 0, 'the rails must expose real destinations');
+  for (const target of new Set(rails)) {
+    const hasScreen = new RegExp(`<section[^>]+class="[^"]*\\bscreen\\b[^"]*"[^>]*data-screen="${target}"`).test(visibleHtml)
+      || new RegExp(`<div[^>]+class="[^"]*\\bscreen\\b[^"]*"[^>]*data-screen="${target}"`).test(visibleHtml);
+    assert.equal(hasScreen, true, `rail target "${target}" must resolve to a rendered screen`);
   }
-  const timeline = targets.find(([, target]) => target === 'timeline');
-  assert.match(timeline?.[2] || '', /Receipts/i, 'the receipt timeline must not be labelled as an agent runner');
+  assert.ok(rails.includes('receipts'), 'the receipt ledger must be reachable from the rail');
 });
 
-test('product navigation has one real surface and loadable module for every CTA', () => {
-  const navNames = [...visibleHtml.matchAll(/<button[^>]+data-nav="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(navNames, ['command', 'forge', 'counsel']);
+test('product navigation has one real surface for every CTA', () => {
+  const navNames = [...visibleHtml.matchAll(/<button[^>]*data-product="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(navNames)], ['command', 'forge', 'counsel']);
   for (const name of navNames) {
-    const surface = visibleHtml.match(new RegExp(`<section[^>]+data-surface="${name}"[^>]*>`))?.[0] || '';
+    const surface = new RegExp(`<div class="product[^"]*"[^>]*data-product="${name}"`).test(visibleHtml);
     assert.ok(surface, `${name} navigation must have a surface`);
-    const modulePath = surface.match(/data-init="\/([^"]+)"/)?.[1];
-    if (modulePath) assert.equal(existsSync(join(publicDir, modulePath)), true, `${name} module must exist`);
   }
 });
 
 test('the shipped wordmark is compound and no visible button promises coming-soon behavior', () => {
+  // Compound, because one window holds three products: the title bar and the
+  // taskbar entry have to say WHICH one you are looking at.
   assert.match(visibleHtml, /<span class="brand-word">Zeno Command<\/span>/);
-  assert.doesNotMatch(visibleHtml, /<span class="brand-word">Zeno<\/span>/);
+  assert.doesNotMatch(visibleHtml, /<span class="wm">Zeno<\/span>/);
+  // …and it is kept in step with the surface, not left at its initial value.
+  const bind = readFileSync(join(publicDir, 'bind.js'), 'utf8');
+  assert.match(bind, /\.brand \.brand-word/);
+  assert.match(bind, /document\.title = `Zeno \$\{word\}`/);
   assert.doesNotMatch(visibleHtml, /<button[^>]*>[\s\S]*?coming soon[\s\S]*?<\/button>/i);
 });
 

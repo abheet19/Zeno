@@ -90,6 +90,7 @@ const BINDERS = [
   './bind/devices.js',
   './bind/settings.js',
   './bind/controls.js',
+  './bind/ask.js',
 ];
 
 const loaded = [];
@@ -245,6 +246,25 @@ async function bindRailBadges() {
  * its canvas and then leaves it at the browser default 300x150 — a blank orb.
  * Mirroring the state keeps every reused module working unchanged.
  */
+/** The three surfaces, named the way the owner refers to them. */
+const SURFACE_TITLE = { command: 'Command', forge: 'Forge', counsel: 'Counsel' };
+
+/**
+ * The wordmark and the window title name the surface you are actually on.
+ *
+ * The artifact ships a single static "Zeno" wordmark, so every surface looked
+ * identical in the title bar and in the taskbar — with three products in one
+ * window that is a real navigation cost, not a cosmetic one. Both are written
+ * from the same source as `data-zeno-surface`, so they cannot disagree.
+ */
+function nameSurface(name) {
+  const word = SURFACE_TITLE[name];
+  if (!word) return;
+  const wm = document.querySelector('.brand .brand-word');
+  if (wm) wm.textContent = `Zeno ${word}`;
+  document.title = `Zeno ${word}`;
+}
+
 function bridgeSurfaceAttr() {
   const root = document.documentElement;
   const sync = () => {
@@ -252,6 +272,7 @@ function bridgeSurfaceAttr() {
     const name = on && on.getAttribute('data-product');
     if (name && root.getAttribute('data-zeno-surface') !== name) {
       root.setAttribute('data-zeno-surface', name);
+      nameSurface(name);
       // Modules that stopped their loops while "hidden" listen for this.
       window.dispatchEvent(new CustomEvent('zeno:surface', { detail: { surface: name } }));
       document.dispatchEvent(new CustomEvent('zeno:command-panel', { detail: { surface: name } }));
