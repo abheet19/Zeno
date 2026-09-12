@@ -48,6 +48,28 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
+/* Model picker, Compare mode.
+   .mp-foot is a flex ROW (label left, button right) for Single/Route. Compare
+   adds three stacked blocks — the VRAM meter, the Parallel/Sequential control and
+   the compare row — and as flex children they were squeezing into vertical
+   slivers with the Compare button pushed off the edge. Stack them whenever the
+   meter is present, and let the picker grow a little to hold them. */
+.mp-foot:has(.mp-vram){display:block}
+.mp:has(.mp-vram){width:380px; max-width:calc(100vw - 16px)}
+.mp-foot:has(.mp-vram) .mp-foot-row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:11px}
+.mp-foot:has(.mp-vram) .mp-foot-row .btn{flex:none; white-space:nowrap}
+.mp-vram, .mp-runmode{box-sizing:border-box; width:100%}
+.mp-vram-head{flex-wrap:wrap; row-gap:2px}
+/* The model list must scroll inside the popover, never push the footer away. */
+.mp{display:flex; flex-direction:column; max-height:min(640px, calc(100vh - 70px))}
+.mp .mp-list{flex:1 1 auto; min-height:0; overflow-y:auto}
+.mp .mp-search, .mp .mp-mode, .mp .mp-foot{flex:none}
+/* Row text must wrap on its own line, not fold into a one-word column. */
+.mp-row{align-items:flex-start}
+.mp-row .mn{min-width:0; flex:1 1 auto}
+.mp-row .mn span{display:block; white-space:normal; overflow-wrap:anywhere}
+.mp-row .mt{flex:none; white-space:nowrap; align-self:center}
+
 /* Composer proportions — Devin-like, but our own: a wider, taller input that the
    owner can also drag to resize. Devin's is a single cramped line; a task
    description is usually several. Start at ~3 lines and let it grow. */

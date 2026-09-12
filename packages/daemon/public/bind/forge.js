@@ -516,6 +516,69 @@ async function bindForge() {
   if (quickEl) new MutationObserver(renderQuickIfOpen).observe(quickEl, { attributes: true, attributeFilter: ['hidden'] });
 
   /* ============================================================ *
+   * 2c · SEARCH view — real git grep via GET /forge/search         *
+   * ============================================================ *
+   * The artifact ships this view with a fabricated result already
+   * showing (query "INGEST_TOKEN", two matches in ingest.ts/
+   * ingest.spec.ts via <mark>) — exactly the standing-mock case the
+   * honesty rule forbids, so it is cleared unconditionally before
+   * anything else runs, real search or not. Match text is set via
+   * textContent, never innerHTML, since it is daemon-derived (repo
+   * content) — the query is not highlighted inline as the mock did.
+   * There is no real "Replace"; the field is disabled and says so. */
+  const searchView = $('.vsview[data-vsview="search"]', ide);
+  if (searchView) {
+    const searchIns = $$('.vsinput', searchView);
+    const queryIn = searchIns[0] || null;
+    const replaceIn = searchIns[1] || null;
+    const resWrap = $('.vsres', searchView);
+    const noteEl = $('.vsnote', searchView);
+    if (queryIn) { queryIn.value = ''; queryIn.placeholder = 'Search (git grep) — Enter to run'; }
+    if (replaceIn) { replaceIn.value = ''; replaceIn.disabled = true; replaceIn.placeholder = 'Replace is not available — Forge only searches, it does not edit in place'; }
+    if (resWrap) fill(resWrap);
+    if (noteEl) noteEl.textContent = 'Type a query and press Enter to search the sandbox with git grep.';
+    let searchSeq = 0;
+    async function runSearch() {
+      const q = queryIn ? queryIn.value.trim() : '';
+      const seq = ++searchSeq;
+      if (!q) {
+        if (resWrap) fill(resWrap);
+        if (noteEl) noteEl.textContent = 'Type a query and press Enter to search the sandbox with git grep.';
+        return;
+      }
+      if (noteEl) noteEl.textContent = `Searching for "${q}"…`;
+      const r = await getJSON(`/forge/search?q=${encodeURIComponent(q)}`);
+      if (seq !== searchSeq) return; // a newer query superseded this one
+      if (!r.ok) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = `Search failed: ${r.error}`; return; }
+      const d = r.data || {};
+      if (d.repo === false) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = d.note || 'The sandbox is not a git repository.'; return; }
+      const matches = Array.isArray(d.matches) ? d.matches : [];
+      if (!matches.length) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = `No results for "${q}".`; return; }
+      const order = [];
+      const byPath = new Map();
+      for (const m of matches) {
+        if (!byPath.has(m.path)) { byPath.set(m.path, []); order.push(m.path); }
+        byPath.get(m.path).push(m);
+      }
+      const nodes = [];
+      for (const path of order) {
+        const rows = byPath.get(path);
+        const name = path.split('/').pop();
+        const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+        const head = el('div', 'vsresf');
+        add(head, el('span', 'chev', '▾'), document.createTextNode(name), el('em', null, dir ? ` ${dir}` : ''), el('span', null, String(rows.length)));
+        nodes.push(head);
+        for (const m of rows) nodes.push(el('div', 'vsresl', typeof m.text === 'string' ? m.text : ''));
+      }
+      if (resWrap) fill(resWrap, ...nodes);
+      const files = typeof d.files === 'number' ? d.files : byPath.size;
+      const total = typeof d.total === 'number' ? d.total : matches.length;
+      if (noteEl) noteEl.textContent = `${total} result${total === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${d.truncated ? ' — showing the first matches' : ''}`;
+    }
+    if (queryIn) queryIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } });
+  }
+
+  /* ============================================================ *
    * 3 · EDITOR (Priority 1)                                        *
    * ============================================================ */
 
