@@ -1108,6 +1108,26 @@ export function createServer(opts: DaemonOptions): Server {
   const scheduleTimer = setInterval(fireDueScheduledTasks, 30_000);
   if (typeof scheduleTimer.unref === 'function') scheduleTimer.unref();
 
+  // Owner-configured MCP servers — the "customize" surface, Claude-Code shaped.
+  // Persisted to the workspace. This RECORDS a server's configuration; it does
+  // NOT ambiently load or auto-run it. Whether a configured server is admitted
+  // into a governed run is a separate, gated layer — the UI says so plainly, so
+  // a recorded server is never mistaken for a connected one.
+  const mcpConfigPath = opts.workspace !== undefined ? join(opts.workspace, 'mcp-servers.json') : null;
+  const mcpServers = new Map<string, McpServerConfig>();
+  function loadMcpServers(): void {
+    if (mcpConfigPath === null || !existsSync(mcpConfigPath)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(mcpConfigPath, 'utf8')) as { servers?: McpServerConfig[] };
+      for (const s of parsed.servers ?? []) if (s && typeof s.id === 'string') mcpServers.set(s.id, s);
+    } catch { /* a corrupt file starts empty rather than crashing the daemon */ }
+  }
+  function saveMcpServers(): void {
+    if (mcpConfigPath === null) return;
+    try { writeFileSync(mcpConfigPath, JSON.stringify({ servers: [...mcpServers.values()] }, null, 2)); } catch { /* best effort */ }
+  }
+  loadMcpServers();
+
   // The test panel is an owner-triggered process surface. Serialize it so two
   // impatient clicks cannot start two repository suites and make both reports
   // describe a machine-load state neither one owns.
@@ -1781,6 +1801,11 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'POST' && path.startsWith('/schedule/') && path.endsWith('/toggle')) return scheduleToggle(res, role, path);
     if (req.method === 'POST' && path.startsWith('/schedule/') && path.endsWith('/run')) return scheduleRunNow(res, role, path);
     if (req.method === 'DELETE' && path.startsWith('/schedule/')) return scheduleDelete(res, role, path);
+    // Owner-configured MCP servers (the Customize surface). Recorded config only;
+    // admitting a server into a governed run is a separate gated layer.
+    if (req.method === 'GET' && path === '/forge/mcp/servers') return serveMcpServers(res);
+    if (req.method === 'POST' && path === '/forge/mcp/servers') return await postMcpServer(req, res, role);
+    if (req.method === 'DELETE' && path.startsWith('/forge/mcp/servers/')) return deleteMcpServer(res, role, path);
     if (req.method === 'POST' && path === '/forge/context') return await postForgeContext(req, res);
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(req, res, role);
@@ -2985,6 +3010,62 @@ export function createServer(opts: DaemonOptions): Server {
     const id = scheduleIdFrom(path, '');
     const existed = scheduledTasks.delete(id);
     if (existed) saveSchedule();
+    json(res, 200, { id, deleted: existed });
+  }
+
+  // ---- MCP servers: the owner's "customize" list (Claude-Code shaped) -------
+  interface McpServerConfig {
+    id: string;
+    name: string;
+    transport: 'stdio' | 'sse' | 'http';
+    command: string;
+    args: string[];
+    url: string;
+    /** Environment VARIABLE NAMES the server needs — never values. The value is
+     * read from the process environment at connect time, so no secret is ever
+     * written to the config file. */
+    env: string[];
+    createdAt: number;
+  }
+  function wireMcp(s: McpServerConfig): Record<string, unknown> {
+    return { id: s.id, name: s.name, transport: s.transport, command: s.command, args: s.args, url: s.url, envKeys: s.env, createdAt: new Date(s.createdAt).toISOString() };
+  }
+  function serveMcpServers(res: ServerResponse): void {
+    json(res, 200, {
+      servers: [...mcpServers.values()].map(wireMcp),
+      persisted: mcpConfigPath !== null,
+      note: 'These are RECORDED configurations. Zeno does not ambiently load MCP — recording a server here does not connect it or run it; admitting one into a governed run is a separate, gated layer. Only environment variable NAMES are stored, never their values.',
+    });
+  }
+  async function postMcpServer(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') return json(res, 403, { error: { code: 'owner-only', message: 'Only the owner can add an MCP server.', resolve: 'Add it from the Zeno window.' } });
+    const body = await readJson(req);
+    const name = (str(body, 'name') ?? '').trim();
+    const transport = str(body, 'transport') ?? 'stdio';
+    if (name === '' || name.length > 120) return json(res, 400, { error: { code: 'bad-request', message: 'An MCP server needs a name.', resolve: 'POST {"name":"…","transport":"stdio","command":"…"}.' } });
+    if (transport !== 'stdio' && transport !== 'sse' && transport !== 'http') return json(res, 400, { error: { code: 'bad-request', message: 'transport must be stdio, sse or http.', resolve: 'Pick one of the three.' } });
+    const command = (str(body, 'command') ?? '').trim();
+    const url = (str(body, 'url') ?? '').trim();
+    if (transport === 'stdio' && command === '') return json(res, 400, { error: { code: 'bad-request', message: 'A stdio MCP server needs a command.', resolve: 'e.g. npx -y @modelcontextprotocol/server-filesystem /path' } });
+    if ((transport === 'sse' || transport === 'http') && !/^https?:\/\//.test(url)) return json(res, 400, { error: { code: 'bad-request', message: 'An sse/http MCP server needs an http(s) URL.', resolve: 'e.g. https://host/mcp' } });
+    const listOf = (key: string): string[] => Array.isArray(body[key]) ? (body[key] as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 50) : [];
+    const now = Date.now();
+    const server: McpServerConfig = {
+      id: `mcp-${now.toString(36)}-${randomUUID().slice(0, 8)}`,
+      name, transport, command, url,
+      args: listOf('args'),
+      env: listOf('env'), // variable names only
+      createdAt: now,
+    };
+    mcpServers.set(server.id, server);
+    saveMcpServers();
+    json(res, 200, { server: wireMcp(server) });
+  }
+  function deleteMcpServer(res: ServerResponse, role: Role, path: string): void {
+    if (role !== 'owner') return json(res, 403, { error: { code: 'owner-only', message: 'Only the owner can remove an MCP server.', resolve: 'Remove it from the Zeno window.' } });
+    const id = decodeURIComponent(path.slice('/forge/mcp/servers/'.length));
+    const existed = mcpServers.delete(id);
+    if (existed) saveMcpServers();
     json(res, 200, { id, deleted: existed });
   }
 
