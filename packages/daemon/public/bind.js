@@ -89,6 +89,7 @@ const BINDERS = [
   './bind/counsel.js',
   './bind/devices.js',
   './bind/settings.js',
+  './bind/controls.js',
 ];
 
 const loaded = [];

@@ -749,9 +749,15 @@ async function bindForge() {
   }
 
   // ---- take over the model / effort pills ui.js wired to its mock picker ----
-  const modelPillEls = $$('[data-model-pill]');
+  // Scoped to #ide: [data-model-pill]/[data-effort-pill] also label the
+  // top bar chip and the Home/Chats/Settings composer pills (one shared
+  // "default model" concept outside Forge). An unscoped query here would
+  // steal those buttons — strip ui.js's mock listener off them too and
+  // repaint them from Forge's own per-session state, which is wrong for
+  // every screen but this one. Only #s-model and the hero pill are Forge's.
+  const modelPillEls = $$('[data-model-pill]', ide);
   modelPillEls.forEach((p) => p.removeAttribute('data-model-pill'));
-  const effortPillEls = $$('[data-effort-pill]');
+  const effortPillEls = $$('[data-effort-pill]', ide);
   effortPillEls.forEach((p) => p.removeAttribute('data-effort-pill'));
 
   function modelPillInfo(session) {
