@@ -106,8 +106,55 @@ async function runBinder(path) {
   }
 }
 
+/**
+ * The rail/mobile count badges.
+ *
+ * These are shared chrome rather than any one screen's, and the artifact ships
+ * them with invented numbers (Approvals 1, Chats 3, Work 5, Vault 12, Devices 1,
+ * Integrations 4). A stale mock count in the rail is a lie the owner acts on, so
+ * every badge is cleared first and then written ONLY from a read that answered.
+ * A count that could not be read stays blank — never a hopeful 0.
+ */
+async function bindRailBadges() {
+  const badge = (screen, value) => {
+    for (const sel of [`.rail .nav-i[data-screen="${screen}"] .ct`, `.mtabs [data-screen="${screen}"] .mbadge`]) {
+      const node = document.querySelector(sel);
+      if (!node) continue;
+      const show = Number.isFinite(value) && value > 0;
+      node.textContent = show ? String(value) : '';
+      node.hidden = !show;
+    }
+  };
+  // Clear every mock count up front: nothing survives that we did not just read.
+  for (const s of ['approvals', 'chats', 'work', 'vault', 'devices', 'integrations']) badge(s, null);
+
+  const [state, work, memory, agents] = await Promise.all([
+    getJSON('/state'), getJSON('/work'), getJSON('/memory'), getJSON('/forge/agents'),
+  ]);
+  if (state.ok) badge('approvals', Array.isArray(state.data?.pending) ? state.data.pending.length : null);
+  if (work.ok) {
+    const items = state.ok && Array.isArray(work.data?.items) ? work.data.items : work.data?.items;
+    badge('work', Array.isArray(items) ? items.length : null);
+  }
+  if (memory.ok) {
+    const notes = memory.data?.notes ?? memory.data?.memories ?? memory.data?.items;
+    badge('vault', Array.isArray(notes) ? notes.length : null);
+  }
+  if (agents.ok) {
+    const list = agents.data?.agents;
+    badge('integrations', Array.isArray(list) ? list.length : null);
+  }
+  // Chats live in this browser, not the daemon — count what is actually stored.
+  try {
+    const raw = localStorage.getItem('zeno-chats');
+    const arr = raw ? JSON.parse(raw) : [];
+    badge('chats', Array.isArray(arr) ? arr.length : null);
+  } catch { /* storage blocked: the badge simply stays blank */ }
+}
+
 async function boot() {
   await Promise.all(BINDERS.map(runBinder));
+  try { await bindRailBadges(); } catch (err) { failed.push({ path: 'rail-badges', error: String(err && err.message) }); }
   // Surfaced for the verification pass — which screens are real, which are not.
   window.__zenoBind = { loaded, failed };
   if (failed.length) console.warn('[zeno] binders not applied:', failed);
