@@ -164,7 +164,7 @@ function bindRunning(forgeRes, sec) {
 
 /* ---- "Today": verified / in the sandbox / backlog / memories / left this
    machine — each an honest count, or an em dash when that read failed. ---- */
-function bindToday(st, workRes, forgeRes, memRes, agentsRes, sec) {
+function bindToday(st, workRes, forgeRes, memRes, sec) {
   if (!sec) return;
   const dl = sec.querySelector('.hs-stats');
   if (!dl) return;
@@ -182,11 +182,17 @@ function bindToday(st, workRes, forgeRes, memRes, agentsRes, sec) {
 
   const memories = memRes.ok && Array.isArray(memRes.data.notes) ? memRes.data.notes.length : null;
 
-  const sources = workOk && Array.isArray(workRes.data.sources) ? workRes.data.sources : [];
-  const egressSources = workOk ? sources.filter((s) => s && s.state !== 'not-configured' && s.name !== 'local').length : null;
-  const agentsArr = agentsRes.ok && Array.isArray(agentsRes.data.agents) ? agentsRes.data.agents : null;
-  const egressAgents = agentsArr ? agentsArr.filter((a) => a && a.id !== 'local').length : null;
-  const egress = (egressSources == null || egressAgents == null) ? null : egressSources + egressAgents;
+  /* "left this machine" must count what ACTUALLY left.
+     It used to add up configured non-local work sources and installed hosted
+     agents, which is a count of what COULD leave — so a fresh workspace with an
+     empty ledger read "left this machine: 2" purely because the claude and codex
+     CLIs are installed. On the one surface whose entire promise is that nothing
+     leaves without a receipt, that number was the worst kind of wrong.
+     The ledger is the only honest source: T2 is defined in policy.ts as the
+     first tier that demands an authenticator, i.e. the tier at which the bytes
+     leave, so a sealed receipt at T2 or above is a thing that actually left. */
+  const EGRESS_TIERS = new Set(['T2', 'T3', 'T4']);
+  const egress = st.ok ? st.receipts.filter((r) => r && EGRESS_TIERS.has(r.tier)).length : null;
 
   [verified, changed, backlog, memories, egress].forEach((v, i) => {
     if (dds[i]) dds[i].textContent = v == null ? '—' : String(v);
@@ -261,7 +267,7 @@ export async function bind() {
   try { bindAttnKernelOrb(st); } catch (err) { console.warn('[zeno home] attn/kernel/orb-state', err); }
   try { bindNeedsYou(st, secs[0]); } catch (err) { console.warn('[zeno home] needs-you', err); }
   try { bindRunning(forgeRes, secs[1]); } catch (err) { console.warn('[zeno home] running', err); }
-  try { bindToday(st, workRes, forgeRes, memRes, agentsRes, secs[2]); } catch (err) { console.warn('[zeno home] today', err); }
+  try { bindToday(st, workRes, forgeRes, memRes, secs[2]); } catch (err) { console.warn('[zeno home] today', err); }
   try { bindModelPill(agentsRes); } catch (err) { console.warn('[zeno home] model pill', err); }
   try { await mountField(); } catch (err) { console.warn('[zeno home] field mount', err); }
 }

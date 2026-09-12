@@ -96,6 +96,7 @@ const BINDERS = [
   './bind/voice.js',
   './bind/controls.js',
   './bind/ask.js',
+  './bind/compare.js',
   // Last: it re-runs the others, so it must not run before they have run once.
   './bind/live.js',
 ];
@@ -139,7 +140,16 @@ export async function refreshChrome() {
 
 async function bindRailBadges() {
   const badge = (screen, value) => {
-    for (const sel of [`.rail .nav-i[data-screen="${screen}"] .ct`, `.mtabs [data-screen="${screen}"] .mbadge`]) {
+    /* Three places, because the artifact hardcodes the same invented number in
+       three: the rail, the mobile tab bar, and the mobile "More" sheet. The
+       sheet was missed, so on a narrow window Vault still read 12 and Work 5 —
+       fixtures presented as the owner's own state, in the one surface whose
+       entire value is being true. It is written from the same read as the rail. */
+    for (const sel of [
+      `.rail .nav-i[data-screen="${screen}"] .ct`,
+      `.mtabs [data-screen="${screen}"] .mbadge`,
+      `#msheet .nav-i[data-mscreen="${screen}"] .ct`,
+    ]) {
       const node = document.querySelector(sel);
       if (!node) continue;
       const show = Number.isFinite(value) && value > 0;

@@ -26,8 +26,10 @@ const HERE = fileURLToPath(new URL('.', import.meta.url));
 export const REPO = resolve(HERE, '../../..');
 const DAEMON_ENTRY = resolve(REPO, 'packages/daemon/dist/src/main.js');
 
-/** Ports well clear of anything a developer or the desktop app would pick. */
-const PORT_BASE = 7600;
+/* Ports well clear of anything a developer or the desktop app would pick.
+   ZENO_E2E_PORT_BASE moves the whole range so two runs (say, two people working
+   on different flows at once) cannot collide on a listening socket. */
+const PORT_BASE = Number(process.env.ZENO_E2E_PORT_BASE) || 7600;
 
 export class Daemon {
   constructor({ port, dir, proc, url, token }) {
