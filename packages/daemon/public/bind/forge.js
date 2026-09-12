@@ -214,6 +214,15 @@ async function bindForge() {
    * 2 · EXPLORER + STATUS BAR + TIMELINE (Priority 1)              *
    * ============================================================ */
 
+  // Activity-rail badges: the SCM one is real (git's own changed-file count,
+  // filled in once /forge/status answers, below); the Zeno one claims a
+  // pending-approval count this binder has no way to verify, so it is
+  // hidden rather than left standing as an unread number.
+  const scmBadge = $('.vsact [data-vsview="scm"] .vsbadge');
+  if (scmBadge) setTrailingText(scmBadge, '—');
+  const zenoBadge = $('.vsact [data-vsview="zeno"] .vsbadge');
+  if (zenoBadge) zenoBadge.hidden = true;
+
   const explorerView = $('.vsside .vsview[data-vsview="explorer"]');
   const explorerSections = explorerView ? $$('.vssect', explorerView) : [];
   const sandboxHeader = explorerSections.find((s) => /SANDBOX/.test(s.textContent || ''));
@@ -225,7 +234,11 @@ async function bindForge() {
   // `.fico`), so wiring it here adds behaviour rather than replacing any.
   if (sandboxHeader) {
     const refreshBtn = sandboxHeader.querySelector('button[title="Refresh"]');
-    if (refreshBtn) refreshBtn.addEventListener('click', (e) => { e.stopPropagation(); void loadStatus(); });
+    if (refreshBtn) refreshBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      void loadStatus();
+      if (currentFile) void openFile(currentFile, true);
+    });
   }
 
   // Outline: real forge.js says plainly there is no symbol index. Same here.
@@ -319,10 +332,11 @@ async function bindForge() {
     const tree = explorerView ? $('.vstree', explorerView) : null;
     if (!tree) return;
     fileRowByPath.clear();
-    if (statusErr) { fill(tree, el('div', 'fempty', `The tree could not be read: ${statusErr}`)); return; }
-    if (!statusData) { fill(tree, el('div', 'fempty', 'Reading the sandbox from the daemon…')); return; }
+    if (statusErr) { fill(tree, el('div', 'fempty', `The tree could not be read: ${statusErr}`)); renderTimeline(); return; }
+    if (!statusData) { fill(tree, el('div', 'fempty', 'Reading the sandbox from the daemon…')); renderTimeline(); return; }
     if (!statusData.repo) {
       fill(tree, el('div', 'fempty', statusData.note || 'The sandbox is not a git repository, so there is no file list here.'));
+      renderTimeline();
       return;
     }
     const changed = new Map();
@@ -381,6 +395,7 @@ async function bindForge() {
       if (statEls.checkout) setTrailingText(statEls.checkout, '(none)');
       if (statEls.sync) setTrailingText(statEls.sync, '⟳ —');
       if (statEls.lastCommit) setTrailingText(statEls.lastCommit, 'no commits yet');
+      if (scmBadge) setTrailingText(scmBadge, '0');
       return;
     }
     if (statEls.rem) {
@@ -388,11 +403,12 @@ async function bindForge() {
       setTrailingText(statEls.rem, 'sandbox');
     }
     if (statEls.checkout) setTrailingText(statEls.checkout, statusData.branch || '(unknown)');
+    const n = Array.isArray(statusData.changed) ? statusData.changed.length : 0;
     if (statEls.sync) {
-      const n = Array.isArray(statusData.changed) ? statusData.changed.length : 0;
       statEls.sync.title = `${n} uncommitted change${n === 1 ? '' : 's'} in the sandbox working tree`;
       setTrailingText(statEls.sync, `⟳ ${n}`);
     }
+    if (scmBadge) setTrailingText(scmBadge, String(n));
     if (statEls.lastCommit) {
       const log = Array.isArray(statusData.log) ? statusData.log : [];
       setTrailingText(statEls.lastCommit, log.length ? `${log[0].summary} · ${log[0].sha}` : 'no commits yet');
@@ -544,9 +560,10 @@ async function bindForge() {
     renderFileStatusBits(path, data);
   }
 
-  async function openFile(path) {
+  async function openFile(path, force) {
     if (!path) return;
     currentFile = path;
+    if (force) fileCache.delete(path);
     if (!openTabs.includes(path)) openTabs.push(path);
     renderTabs();
     renderBreadcrumb(path);
@@ -1124,8 +1141,11 @@ async function bindForge() {
     if (!sHist) return;
     const header = sHist.querySelector('.vsvh');
     $$('.dvsess', sHist).forEach((n) => n.remove());
+    const oldNote = sHist.querySelector('[data-forge-hist-empty]');
+    if (oldNote) oldNote.remove();
     if (!sessions.length) {
       const note = el('div', 'fnote', 'No sessions yet in this window.');
+      note.dataset.forgeHistEmpty = '1';
       if (header) header.insertAdjacentElement('afterend', note); else sHist.appendChild(note);
       return;
     }

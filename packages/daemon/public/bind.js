@@ -260,6 +260,72 @@ function bridgeSurfaceAttr() {
   addEventListener('resize', () => window.dispatchEvent(new CustomEvent('zeno:surface', { detail: { surface: root.getAttribute('data-zeno-surface') } })));
 }
 
+/**
+ * Last line of defence: no invented content may survive to the screen.
+ *
+ * Every binder is supposed to replace the artifact's placeholders, but a binder
+ * that is missing, throws, or simply does not reach one corner leaves fabricated
+ * rows sitting there looking exactly like real state — the worst thing this
+ * product can do. So after binding, anything still carrying a known mock string
+ * is removed and replaced with an honest empty state. This only ever DELETES
+ * invented content; it never writes a number of its own.
+ */
+const MOCK_MARKERS = [
+  'INGEST-12', 'Rotate the ingest token', 'patch.task', 'forge.run — codex',
+  'vault.remember', 'Design review — Command home', 'createIngestClient',
+  'Scaffold the App shell', 'Add ingest tests', 'Bump vitest',
+];
+const looksMock = (node) => !!node && MOCK_MARKERS.some((m) => node.textContent.includes(m));
+
+function sweepMockRemnants() {
+  const replace = (node, message) => {
+    if (!looksMock(node)) return false;
+    const n = el('div', 'fnote', message);
+    node.replaceChildren(n);
+    return true;
+  };
+
+  // Forge session history + the open conversation.
+  replace(document.querySelector('#s-history'), 'No past sessions on this machine yet.');
+  replace(document.querySelector('#s-turns'), 'No run yet. Describe a task below and Zeno will plan it in an isolated worktree.');
+  const title = document.querySelector('#s-title');
+  if (looksMock(title)) title.textContent = 'New session';
+  const status = document.querySelector('#s-status');
+  if (status && looksMock(document.querySelector('#s-turns'))) status.textContent = '';
+
+  // Forge's Runs and Lens tabs ship fabricated run history and a fabricated
+  // prompt hash — both read as evidence, which is worse than being empty.
+  replace(document.querySelector('.sessview[data-stab="runs"]'), 'No runs yet on this machine.');
+  replace(document.querySelector('.sessview[data-stab="lens"]'), 'No run context yet. Lens shows the exact bounded prompt once a run starts.');
+  replace(document.querySelector('.sessview[data-stab="plan"]'), 'No plan yet. Describe a task and Zeno will propose one.');
+  replace(document.querySelector('.sessview[data-stab="actions"]'), 'No held actions for this session.');
+
+  // The split editor pane and terminal buffer carry sample source/output.
+  const pane2 = document.querySelector('#vs-pane2');
+  if (looksMock(pane2)) pane2.hidden = true;
+  for (const term of document.querySelectorAll('.vsp .fterm')) {
+    if (looksMock(term)) term.replaceChildren(el('span', null, 'No commands run in this session yet.'));
+  }
+
+  // Counsel's meeting list and its post-meeting view.
+  replace(document.querySelector('.cnlist'), 'No meetings recorded yet.');
+  const post = document.querySelector('.cnview[data-cnview="post"]');
+  if (looksMock(post)) {
+    const t = post.querySelector('#cn-post-title');
+    if (t) t.textContent = 'No meeting selected';
+    const meta = post.querySelector('#cn-post-meta');
+    if (meta) meta.textContent = 'Record or open a meeting to see its cited summary.';
+    for (const pane of post.querySelectorAll('.cnp')) {
+      if (looksMock(pane)) pane.replaceChildren(el('div', 'fnote', 'Nothing to show until a meeting has been recorded.'));
+    }
+  }
+
+  // Any remaining row that is purely an artifact fixture.
+  for (const row of document.querySelectorAll('.dvsess, .cnrow')) {
+    if (looksMock(row)) row.remove();
+  }
+}
+
 async function boot() {
   bridgeSurfaceAttr();
   await Promise.all(BINDERS.map(runBinder));
@@ -273,6 +339,8 @@ async function boot() {
      default 300x150: mounted, but never sized, i.e. a blank orb. Re-assert the
      attribute and fire a resize so anything measuring a container measures it
      now that layout is settled. */
+  try { sweepMockRemnants(); } catch (err) { failed.push({ path: 'mock-sweep', error: String(err && err.message) }); }
+
   const nudge = () => {
     const root = document.documentElement;
     const surface = root.getAttribute('data-zeno-surface');
