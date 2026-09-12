@@ -172,10 +172,17 @@ async function bindRailBadges() {
     const notes = memory.data?.notes ?? memory.data?.memories ?? memory.data?.items;
     badge('vault', Array.isArray(notes) ? notes.length : null);
   }
-  if (agents.ok) {
-    const list = agents.data?.agents;
-    badge('integrations', Array.isArray(list) ? list.length : null);
-  }
+  /* Integrations carries NO badge, deliberately.
+     The artifact hardcoded "4" for visual balance, and reading it from the
+     agent list only moved the problem: the rail then said 3 while the screen
+     listed work sources, the local runtime, three agents and the skills
+     section — a number the owner acts on that agrees with nothing they can
+     open. Every other badge here answers a real question ("how many are waiting
+     on me", "how many do I have"), and both are meaningless for a catalogue
+     whose size is fixed by what is installed and never needs attention. A
+     number that needs a paragraph to explain is decoration, and this rail does
+     not decorate. */
+  badge('integrations', null);
   // Chats live in this browser, not the daemon — count what is actually stored.
   try {
     const raw = localStorage.getItem('zeno-chats');
