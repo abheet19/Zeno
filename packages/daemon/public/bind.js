@@ -96,6 +96,8 @@ const BINDERS = [
   './bind/voice.js',
   './bind/controls.js',
   './bind/ask.js',
+  // Last: it re-runs the others, so it must not run before they have run once.
+  './bind/live.js',
 ];
 
 const loaded = [];
@@ -122,6 +124,19 @@ async function runBinder(path) {
  * every badge is cleared first and then written ONLY from a read that answered.
  * A count that could not be read stays blank — never a hopeful 0.
  */
+/**
+ * Re-read the chrome every surface shares: the rail counts, the Forge badges,
+ * the model chip, the kernel line.
+ *
+ * Exported because bind/live.js has to be able to call it. These counts are not
+ * owned by any one screen binder, so re-running the screens after a stream
+ * event left the rail showing whatever it read at boot — a queue that had grown
+ * still displayed nothing, which is the exact number the owner acts on.
+ */
+export async function refreshChrome() {
+  await bindRailBadges();
+}
+
 async function bindRailBadges() {
   const badge = (screen, value) => {
     for (const sel of [`.rail .nav-i[data-screen="${screen}"] .ct`, `.mtabs [data-screen="${screen}"] .mbadge`]) {

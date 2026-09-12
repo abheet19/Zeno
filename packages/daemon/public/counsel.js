@@ -26,18 +26,24 @@
  * was said and answers questions about calls that already happened. It
  * never feeds you a line mid-sentence.
  *
- * WHAT THIS RELAYOUT ALSO CUT, because the artifact's Counsel screen does
- * not show a control for it and the brief for this pass is "build ONLY
- * what the artifact shows for this screen": the archive search box, the
- * meeting-window attach/detect flow, per-line speaker tagging (every live
- * line is "unknown" — nobody is detected, same as before, just with no way
- * to relabel a line in this view), a mid-recording Discard, and per-call
- * Delete. The daemon's DELETE route still exists and files can still be
- * removed by hand; this surface just has no button for it any more. The
- * live notes textarea is NOT sent anywhere — POST /counsel/meetings never
- * carried a notes field, so the copy here says so instead of claiming
- * (as the artifact's demo copy did) that notes are "saved with the
- * transcript".
+ * WHAT THIS RELAYOUT CUT, THEN HAD TO GIVE BACK. An earlier pass of this
+ * relayout also dropped the meeting-window attach/detect flow and the
+ * mid-recording Discard, on the theory that the artifact's Counsel screen
+ * showed no control for either. Both guard real invariants (a stale
+ * "attached meeting" cannot silently start capture; an owner must be able to
+ * throw away a live recording with a confirmation, not just live with a
+ * mis-click) and both are restored here: the preflight re-verifies a picked
+ * meeting window immediately before capture opens, and the live bar has a
+ * Discard button beside Pause/End. Per-line speaker tagging is still "every
+ * live line is unknown, with no way to relabel a line in this view" — the
+ * commit/segment-start plumbing that would attribute a line correctly if a
+ * speaker were ever selected is real, but there is still no control to select
+ * one. The archive search box and per-call Delete remain cut; the daemon's
+ * DELETE route still exists and files can still be removed by hand, this
+ * surface just has no button for it. The live notes textarea is NOT sent
+ * anywhere — POST /counsel/meetings never carried a notes field, so the copy
+ * here says so instead of claiming (as the artifact's demo copy did) that
+ * notes are "saved with the transcript".
  *
  * THE ROUTES IT TALKS TO, and no others:
  *   GET    /counsel/meetings      -> { meetings[], failed[] }
@@ -210,6 +216,37 @@ function counselSpeechPrompt(title, participants) {
   return clean.join(', ').slice(0, 512);
 }
 
+/** Treat even the trusted preload response as bounded data at the renderer edge. */
+function normalizeMeetingPresence(value) {
+  const status = value && ['detected', 'none', 'unavailable'].includes(value.status)
+    ? value.status
+    : 'unavailable';
+  const candidates = [];
+  const seen = new Set();
+  const raw = value && Array.isArray(value.candidates) ? value.candidates : [];
+  for (const item of raw.slice(0, 8)) {
+    const key = String((item && item.key) || '');
+    const provider = String((item && item.provider) || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 48);
+    const title = String((item && item.title) || '')
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160);
+    if (!/^[a-f0-9]{24}$/.test(key) || !provider || !title || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ key, provider, title });
+  }
+  return {
+    status: status === 'detected' && candidates.length === 0 ? 'unavailable' : status,
+    candidates,
+    checkedAt: value && typeof value.checkedAt === 'string' ? value.checkedAt : null,
+  };
+}
+
 /* ================================================================== *
  * 2 · vocabulary.                                                     *
  * ================================================================== */
@@ -318,8 +355,10 @@ export function initCounsel(section) {
   const liveStatePill = pill('cy', 'mic: live');
   const liveFgrow = el('span', 'fgrow');
   const livePauseBtn = btn('btn g sm', 'Pause', () => togglePause());
+  const liveDiscardBtn = btn('btn g sm', 'Discard', () => discardCall());
+  liveDiscardBtn.title = 'Throw away this recording — no undo, nothing saved to Vault.';
   const liveEndBtn = btn('btn dz sm', 'End meeting', () => endCall());
-  add(livebar, liveDot, liveLabel, liveTimer, liveMicPill, liveStatePill, liveFgrow, livePauseBtn, liveEndBtn);
+  add(livebar, liveDot, liveLabel, liveTimer, liveMicPill, liveStatePill, liveFgrow, livePauseBtn, liveDiscardBtn, liveEndBtn);
   const liveSplit = el('div', 'cnlive');
   const liveTrans = el('div', 'cntrans');
   const liveTransHead = el('div', 'cnth');
@@ -1030,8 +1069,14 @@ export function initCounsel(section) {
       title: '',
       consentTold: false,
       consentMicOnly: false,
-      mic: { state: 'checking', text: 'checking…' },
-      model: { state: 'checking', text: 'checking…' },
+      meetingCandidates: [],
+      selectedMeetingKey: '',
+      beginPending: false,
+      checks: {
+        mic: { state: 'checking', text: 'checking…' },
+        model: { state: 'checking', text: 'checking…' },
+        meeting: { state: 'checking', text: 'checking local meeting windows…' },
+      },
     };
     showView('preflight');
     renderPreflight();
@@ -1039,8 +1084,8 @@ export function initCounsel(section) {
   }
 
   function runChecks(p) {
-    function setMic(state, text) { if (PRE === p) { p.mic = { state, text }; renderPreflight(); } }
-    function setModel(state, text) { if (PRE === p) { p.model = { state, text }; renderPreflight(); } }
+    function setMic(state, text) { if (PRE === p) { p.checks.mic = { state, text }; renderPreflight(); } }
+    function setModel(state, text) { if (PRE === p) { p.checks.model = { state, text }; renderPreflight(); } }
 
     if (!SpeechRecognition) { setMic('no', 'no speech engine in this browser'); }
     else if (localSpeech) { setMic('unverified', 'local Whisper — checked when capture starts'); }
@@ -1073,24 +1118,71 @@ export function initCounsel(section) {
       const shown = models.slice(0, 2).join(', ') + (models.length > 2 ? ` +${models.length - 2}` : '');
       return setModel('ok', `local ✓ · ${shown}`);
     })();
+
+    (async () => {
+      const presence = await readMeetingPresence();
+      if (PRE !== p) return; // the dialog closed, or a newer preflight opened, under us
+      p.meetingCandidates = presence.candidates;
+      if (p.selectedMeetingKey && !presence.candidates.some((c) => c.key === p.selectedMeetingKey)) {
+        p.selectedMeetingKey = '';
+      }
+      if (presence.status === 'detected') {
+        p.checks.meeting = {
+          state: 'ok',
+          text: `${presence.candidates.length} supported meeting window${presence.candidates.length === 1 ? '' : 's'} found`,
+        };
+      } else if (presence.status === 'none') {
+        p.checks.meeting = { state: 'unverified', text: 'no supported meeting window found · manual capture only' };
+      } else {
+        p.checks.meeting = { state: 'unverified', text: 'window detection unavailable · manual capture only' };
+      }
+      renderPreflight();
+    })();
   }
 
   function closePreflight() {
     PRE = null;
   }
 
+  /** Every row this dialog shows reports a check that was actually made; a row that cannot be verified says so. */
+  function prow(parent, label, check, note) {
+    const r = el('div', 'prow');
+    r.dataset.check = check.state;
+    add(r, el('span', 'pl', label), el('span', 'pv', check.text));
+    add(parent, r);
+    if (note) add(parent, el('div', 'prenote', note));
+  }
+
+  function canBegin() {
+    return whyNotBegin() === null;
+  }
+
+  /**
+   * The ONE reason capture cannot start yet, in the owner's words — or null.
+   * A disabled button that gives no reason is indistinguishable from a broken
+   * one, so every precondition here has to say which box is still unticked.
+   */
   function whyNotBegin() {
     if (!PRE) return 'The preflight is not open.';
+    if (PRE.beginPending) return 'Checking that the selected meeting window is still present…';
     if (String(PRE.title || '').trim().length === 0) return 'Name the call first, in the box above.';
     if (!PRE.consentTold) return 'Tick the first box — everyone in the room needs to know they are being recorded.';
     if (!PRE.consentMicOnly) return 'Tick the second box — this only captures your microphone.';
-    if (PRE.mic.state === 'no') return 'This page has no usable microphone, so there would be nothing to record.';
+    if (PRE.checks.mic.state === 'no') return 'This page has no usable microphone, so there would be nothing to record.';
     if (S.archive !== 'ok') return 'The meeting archive could not be read, so there would be nowhere to save this call.';
     return null;
   }
 
   function renderPreflight() {
     if (!PRE) return;
+    // A row of async checks (mic, model, meeting window) rerenders this dialog
+    // while the owner may already be typing in it. Rebuilding fresh nodes on
+    // every render must not cost the field its focus or the caret position
+    // mid-keystroke, so both are captured here and restored below.
+    const active = document.activeElement;
+    const activeId = active && viewPreflight.contains(active) ? active.id : '';
+    const caretStart = activeId && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+    const caretEnd = activeId && typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
     clear(viewPreflight);
     const card = el('div', 'cncard');
 
@@ -1118,6 +1210,7 @@ export function initCounsel(section) {
     const titleCol = el('div');
     add(titleCol, el('div', 'lab', 'Title'));
     const titleInput = el('input', 'cninput');
+    titleInput.id = 'zc-pre-title';
     titleInput.value = PRE.title;
     titleInput.placeholder = 'Design review';
     titleInput.addEventListener('input', () => { PRE.title = titleInput.value; syncHint(); });
@@ -1130,18 +1223,55 @@ export function initCounsel(section) {
     add(row1, titleCol, transCol);
     add(card, row1);
 
+    prow(card, 'microphone', PRE.checks.mic);
+    prow(
+      card,
+      'meeting window',
+      PRE.checks.meeting,
+      'the desktop checks only the names of capturable windows, without screenshots or icons. A match proves that a supported meeting window exists, not that you joined it or that its audio is captured',
+    );
+
+    const sources = el('div', 'pre-source-list');
+    const manual = el('label', 'pre-source');
+    const manualBox = el('input');
+    manualBox.type = 'checkbox';
+    manualBox.id = 'zc-source-manual';
+    manualBox.checked = PRE.selectedMeetingKey === '';
+    manualBox.addEventListener('change', () => {
+      if (!manualBox.checked) return;
+      PRE.selectedMeetingKey = '';
+      renderPreflight();
+    });
+    add(manual, manualBox, el('span', null, 'Manual microphone capture — no external application is attached.'));
+    add(sources, manual);
+    for (const candidate of PRE.meetingCandidates || []) {
+      const option = el('label', 'pre-source');
+      const box = el('input');
+      box.type = 'checkbox';
+      box.id = `zc-source-${candidate.key}`;
+      box.checked = PRE.selectedMeetingKey === candidate.key;
+      box.addEventListener('change', () => {
+        if (!box.checked) return;
+        PRE.selectedMeetingKey = candidate.key;
+        renderPreflight();
+      });
+      add(option, box, el('span', null, `Attach to ${candidate.provider} — ${candidate.title}`));
+      add(sources, option);
+    }
+    add(card, sources);
+
     const row2 = el('div', 'cnrow2');
     const savedCol = el('div');
     add(savedCol, el('div', 'lab', 'What gets saved'), pill('wt', 'text only — the transcript. Notes are not sent anywhere.'));
     const modelCol = el('div');
     add(modelCol, el('div', 'lab', 'Summary model'));
-    const modelPillClass = PRE.model.state === 'ok' ? 'cy' : PRE.model.state === 'no' ? 'rd' : 'am';
-    add(modelCol, pill(PRE.model.state === 'checking' ? 'wt' : modelPillClass, PRE.model.text));
+    const modelPillClass = PRE.checks.model.state === 'ok' ? 'cy' : PRE.checks.model.state === 'no' ? 'rd' : 'am';
+    add(modelCol, pill(PRE.checks.model.state === 'checking' ? 'wt' : modelPillClass, PRE.checks.model.text));
     add(row2, savedCol, modelCol);
     add(card, row2);
 
     const acts = el('div', 'caps-acts');
-    const startBtn = btn('btn p', 'Start recording', () => beginCall());
+    const startBtn = btn('btn p', PRE.selectedMeetingKey ? 'Attach & start recording' : 'Start recording', () => beginCall());
     startBtn.disabled = !!whyNotBegin();
     const cancelBtn = btn('btn g', 'Cancel', () => { closePreflight(); goArchive(); });
     add(acts, startBtn, cancelBtn);
@@ -1160,10 +1290,29 @@ export function initCounsel(section) {
     }
 
     add(viewPreflight, card);
-    const restore = document.activeElement && document.activeElement.id === '' ? null : null;
-    void restore;
-    if (document.activeElement !== titleInput && document.activeElement !== in1 && document.activeElement !== in2) {
+
+    const restored = activeId ? document.getElementById(activeId) : null;
+    if (restored && viewPreflight.contains(restored)) {
+      restored.focus();
+      if (caretStart !== null && typeof restored.setSelectionRange === 'function') {
+        const end = caretEnd === null ? caretStart : caretEnd;
+        try { restored.setSelectionRange(caretStart, end); } catch { /* checkbox or unsupported input */ }
+      }
+    } else if (document.activeElement !== titleInput && document.activeElement !== in1 && document.activeElement !== in2) {
       titleInput.focus();
+    }
+  }
+
+  /** Treat the preload's native meeting-window lookup as bounded, untrusted data. */
+  async function readMeetingPresence() {
+    const detector = window.zenoMeeting;
+    if (!detector || typeof detector.detect !== 'function') {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
+    }
+    try {
+      return normalizeMeetingPresence(await detector.detect());
+    } catch {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
     }
   }
 
@@ -1172,8 +1321,32 @@ export function initCounsel(section) {
    * =================================================================== */
 
   async function beginCall() {
-    if (!PRE || whyNotBegin() || CALL) return;
+    if (!PRE || !canBegin() || CALL) return;
     const preflight = PRE;
+    // A window picked in the preflight can close, or the meeting can end,
+    // in the time between selecting it and pressing Start. Re-confirm it is
+    // still there right before capture opens rather than trusting a stale pick.
+    let attachedMeeting = null;
+    if (preflight.selectedMeetingKey) {
+      preflight.beginPending = true;
+      preflight.checks.meeting = { state: 'checking', text: 'confirming the selected meeting window…' };
+      renderPreflight();
+      const presence = await readMeetingPresence();
+      if (!PRE || PRE !== preflight || CALL) return;
+      preflight.beginPending = false;
+      attachedMeeting = presence.candidates.find((candidate) => candidate.key === preflight.selectedMeetingKey) || null;
+      if (!attachedMeeting) {
+        preflight.selectedMeetingKey = '';
+        preflight.meetingCandidates = presence.candidates;
+        preflight.checks.meeting = {
+          state: 'unverified',
+          text: 'the selected meeting window is no longer present · capture did not start',
+        };
+        renderPreflight();
+        return;
+      }
+    }
+    if (!canBegin()) return;
     const title = preflight.title.trim();
     closePreflight();
 
@@ -1183,6 +1356,7 @@ export function initCounsel(section) {
       utterances: [],
       notes: '',
       seq: 0,
+      speaker: 'unknown', // nothing is detected; unknown until the owner says
       interim: '',
       startedAt: Date.now(),
       recognition: null,
@@ -1232,6 +1406,10 @@ export function initCounsel(section) {
     rec.interimResults = true;
     rec.maxAlternatives = 1;
     rec.initialPrompt = counselSpeechPrompt(session.title, session.participants);
+    // Snapshot the speaker tag the instant a segment of audio starts, so a
+    // later change to who is talking cannot retroactively relabel audio that
+    // was already captured while transcription for it is still in flight.
+    rec.onsegmentstart = () => session.speaker;
 
     rec.onstart = () => {
       if (CALL !== session || session.recognition !== rec || !session.want) {
@@ -1250,7 +1428,7 @@ export function initCounsel(section) {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const res = event.results[i];
         if (!res || !res[0]) continue;
-        if (res.isFinal) commit(res[0].transcript);
+        if (res.isFinal) commit(res[0].transcript, event.segmentMeta);
         else interim += res[0].transcript;
       }
       CALL.interim = interim;
@@ -1307,10 +1485,16 @@ export function initCounsel(section) {
     }
   }
 
-  function commit(text) {
+  function commit(text, capturedSpeaker) {
     const t = String(text || '').trim();
     if (!CALL || !t) return;
-    CALL.utterances.push({ id: `u${CALL.seq++}`, at: new Date().toISOString(), speaker: 'unknown', text: t });
+    // A speaker tag changed after audio started must not rewrite queued audio:
+    // use the tag captured at segment start, and only if it is one of the
+    // three real values this surface ever assigns.
+    const speaker = capturedSpeaker === 'owner' || capturedSpeaker === 'other' || capturedSpeaker === 'unknown'
+      ? capturedSpeaker
+      : CALL.speaker;
+    CALL.utterances.push({ id: `u${CALL.seq++}`, at: new Date().toISOString(), speaker, text: t });
   }
 
   function togglePause() {
@@ -1354,6 +1538,7 @@ export function initCounsel(section) {
     add(liveStatePill, document.createTextNode(stateInfo[1]));
     livePauseBtn.textContent = CALL.paused ? 'Resume' : 'Pause';
     livePauseBtn.disabled = CALL.saving;
+    liveDiscardBtn.disabled = CALL.saving;
     liveEndBtn.disabled = CALL.saving;
     liveEndBtn.textContent = CALL.saving ? 'Saving…' : 'End meeting';
 
@@ -1424,6 +1609,21 @@ export function initCounsel(section) {
     if (CALL.tick) window.clearInterval(CALL.tick);
     CALL = null;
     delete document.body.dataset.zenoCapture;
+  }
+
+  /**
+   * Discarding throws away the whole recording, transcript and notes — there
+   * is no undo and nothing is written to Vault. Confirm before tearing it
+   * down so a mis-click during a live meeting cannot silently lose it.
+   */
+  function discardCall() {
+    if (!CALL || CALL.saving) return;
+    const heard = Array.isArray(CALL.utterances) ? CALL.utterances.length : 0;
+    const warn = 'Discard this recording?\n\nThe transcript' + (heard ? ' (' + heard + ' line' + (heard === 1 ? '' : 's') + ' so far)' : '')
+      + ' and any notes are dropped and nothing is saved to Vault. This cannot be undone.';
+    if (typeof window.confirm === 'function' && !window.confirm(warn)) return;
+    teardownCall();
+    announce('Recording discarded. Nothing was saved.');
   }
 
   /**

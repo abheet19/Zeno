@@ -51,6 +51,21 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
+/* The Standing Field's node card. Clicking a node in the orb picks it; this is
+   where what you picked is described, and where its one real action lives.
+   Pinned bottom-left over the canvas so it never covers the core. */
+[data-mount="node-card"]{position:absolute; left:0; bottom:0; z-index:3; pointer-events:none}
+[data-mount="node-card"] .nodecard{pointer-events:auto; width:min(330px,84vw); display:flex; flex-direction:column; gap:6px;
+  padding:13px 14px; border-radius:12px; border:1px solid var(--gl-edge);
+  background:color-mix(in srgb,var(--g2,#0F1214) 92%,transparent); backdrop-filter:blur(10px);
+  box-shadow:0 12px 34px -14px rgba(0,0,0,.7)}
+.nodecard .nck{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)}
+.nodecard .ncl{font-size:14px; color:var(--ink); font-weight:500}
+.nodecard .ncd{font-size:11.5px; color:var(--ink-2); font-family:var(--font-mono)}
+.nodecard .ncnote{font-size:11.5px; color:var(--ink-2); line-height:1.5}
+.nodecard .acts{display:flex; gap:7px; margin-top:3px}
+.nodecard--inline{position:static; width:auto; margin-top:10px}
+
 /* Compact density — Settings › Appearance › Density, resolved by theme-boot.js
    before CSS. It tightens list rows and cards exactly as the row promises, and
    changes nothing else: no font rescaling, no hidden content. */
@@ -869,7 +884,11 @@ button{font:inherit; color:inherit}
     </nav>
     <div class="topright">
       <button class="chip" id="model-chip" data-model-pill title="Choose a model"><span class="dot"></span>qwen3:8b · local</button>
-      <button class="iconbtn" title="Settings" data-open-settings><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 11 3.09 2 2 0 0 1 13 3a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1z"/></svg></button>
+      <!-- The Settings gear that used to sit here is gone. It opened the same
+           modal as the entry each product already has in its own navigation
+           (Command's rail, Forge's status bar, Counsel's rail), so it was a
+           second door to one room in shared chrome, competing with the model
+           chip for the only corner the eye checks for state. -->
     </div>
   </header>
 

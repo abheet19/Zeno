@@ -224,7 +224,10 @@ test('the desktop opens its primary window maximized without kiosk mode', () => 
 
 test('Forge opens Skills as a searchable catalog while Lens stays the exact-context inspector', () => {
   const source = readFileSync(join(__dirname, '..', '..', 'daemon', 'public', 'forge.js'), 'utf8');
-  const skillsCta = source.match(/const addContext = [^\n]+/);
+  // The composer's Skills CTA was renamed from `addContext` to `attach` (an
+  // icon button in the restyled composer row), but it must still be the
+  // Skills-catalog action, not a shortcut into the Lens/inspector tab.
+  const skillsCta = source.match(/const attach = btn\('cbtn attach'[^\n]+/);
   assert.ok(skillsCta, 'the run composer must expose its Skills action');
   assert.match(skillsCta[0], /openSkillsCatalog/);
   assert.doesNotMatch(skillsCta[0], /S\.insp|lens/);

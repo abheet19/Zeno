@@ -23,11 +23,16 @@
  * a file write. A memory capsule dropped into that map would be approved and then
  * executed as a write to a file path that does not exist. Rather than reach into a
  * structure that assumes one kind of effect, the memory queue lives here with the
- * executor that belongs to it. The cost is honest and worth naming: memory proposals
- * do NOT appear in the window's existing approvals list, because that list is drawn
- * from `held`. Until the two queues are unified (see the report accompanying this
- * change), the owner approves a memory write through `POST /memory/approvals`, which
- * enforces the same owner-only rule the file queue does.
+ * executor that belongs to it.
+ *
+ * That separation used to cost the owner something real: a memory proposal was
+ * invisible, because `/state` only reported `held`, so nothing rendered it and no
+ * route could refuse it. It could be approved or ignored forever. The queues are
+ * still separate — for the executor reason above — but they are no longer separate
+ * to the OWNER: `waiting()` below is merged into `/state`, so a held memory write
+ * appears on the Approvals screen and in the rail count like any other held action,
+ * and the window routes its decision back here to `/memory/approvals` or
+ * `/memory/approvals/decline`.
  */
 import type { Kernel } from '@abheet19/zeno-kernel';
 import type { ActionRequest, Preview, Receipt } from '@abheet19/zeno-kernel';
@@ -57,6 +62,13 @@ export interface MemoryRouteDeps {
   readonly projectRoot: string;
   /** Called with each receipt, so the daemon can stream it like any other. */
   readonly onReceipt?: (receipt: Receipt) => void;
+  /**
+   * Called whenever this queue grows or shrinks, so the daemon can tell open
+   * windows. Without it a memory write proposed while a window was already open
+   * stayed invisible until a reload — the window only ever read this queue once,
+   * at boot.
+   */
+  readonly onPendingChanged?: () => void;
 }
 
 interface PendingMemory {
@@ -77,6 +89,28 @@ function ownerOnly(what: string): RouteReply {
         code: 'owner-only',
         message: `Only the owner can ${what}.`,
         resolve: 'Do it from the Zeno window. An agent is structurally unable to.',
+      },
+    },
+  };
+}
+
+/**
+ * The refusal for an agent trying to approve what an agent proposed.
+ *
+ * `ownerOnly` is true but vague here — it says "you are not the owner" when the
+ * precise, load-bearing fact is that a proposer can never be the approver of its
+ * own effect, whoever it is. `/approvals` already answers with exactly this code
+ * for file writes; a memory write is the same rule and now gives the same answer,
+ * so a caller cannot conclude the boundary is weaker on one route than the other.
+ */
+function selfApprovalForbidden(): RouteReply {
+  return {
+    status: 403,
+    body: {
+      error: {
+        code: 'self-approval-forbidden',
+        message: 'The proposer token cannot approve. Only the owner token can.',
+        resolve: 'Approve from the Zeno window. An agent is structurally unable to grant this.',
       },
     },
   };
@@ -270,12 +304,13 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         return { status: 200, body: { preview, receipt, entry: wire(entry), note: 'This policy rates memory writes routine, so it was applied and receipted immediately.' } };
       }
       pending.set(preview.actionHash, { preview, payload: checked.payload, req: req as unknown as ActionRequest });
+      deps.onPendingChanged?.();
       return { status: 200, body: { preview, pending: true } };
     }
 
     /** The owner saying yes to one waiting memory write. The line this module exists for. */
     if (method === 'POST' && path === '/memory/approvals') {
-      if (role !== 'owner') return ownerOnly('approve a memory write');
+      if (role !== 'owner') return selfApprovalForbidden();
       const body = await readBody();
       const actionHash = str(body, 'actionHash');
       if (actionHash === null) return bad('An approval needs an actionHash.', 'POST {"actionHash":"..."}.');
@@ -305,6 +340,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         return { effect: `memory:${box.entry.id}` };
       });
       pending.delete(actionHash);
+      deps.onPendingChanged?.();
       deps.onReceipt?.(receipt);
       return { status: 200, body: { approval, receipt, entry: box.entry === null ? null : wire(box.entry) } };
     }
@@ -322,7 +358,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
      * stays a log of what happened to the world, not of what was considered.
      */
     if (method === 'POST' && path === '/memory/approvals/decline') {
-      if (role !== 'owner') return ownerOnly('refuse a memory write');
+      if (role !== 'owner') return selfApprovalForbidden();
       const body = await readBody();
       const actionHash = str(body, 'actionHash');
       if (actionHash === null) return bad('A refusal needs an actionHash.', 'POST {"actionHash":"..."}.');
@@ -339,6 +375,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         };
       }
       pending.delete(actionHash);
+      deps.onPendingChanged?.();
       return { status: 200, body: { declined: { actionHash, at: new Date().toISOString() }, receipt: null } };
     }
 

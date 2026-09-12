@@ -1021,6 +1021,23 @@ export function createServer(opts: DaemonOptions): Server {
     opts.heldStore?.writeAll(serializeHeld(held.values()));
   }
 
+  /**
+   * Tell every open window that the decision queue moved.
+   *
+   * The window subscribes to `/stream` and re-reads `/state` when this lands.
+   * Without it a proposal raised while the window was already open stayed
+   * invisible until a manual reload — which, for a product whose entire job is
+   * catching the things that need a human, is the worst possible silence. It
+   * carries only a count: the window re-reads the real queue rather than
+   * trusting a payload, so there is no second source of truth to drift.
+   */
+  function publishPending(): void {
+    // Declared below this point; only ever CALLED after initialisation, so the
+    // reference is safe and keeps the helper next to the queue it reports on.
+    const memoryWaiting = memoryRoutes ? memoryRoutes.waiting().length : 0;
+    opts.stream.publish('state', { pending: held.size + gateHeld.size + memoryWaiting });
+  }
+
   // An agent's memory write is a kernel action (see memory-gate.ts): preview,
   // owner approval, one commit, a receipt — the same governance every other
   // effect in this file gets. Built here, over the same Vault `/memory` already
@@ -1034,6 +1051,7 @@ export function createServer(opts: DaemonOptions): Server {
         kernel: opts.kernel,
         vaultRef: opts.workspace ?? opts.sandbox,
         projectRoot: opts.sandbox,
+        onPendingChanged: () => publishPending(),
         onReceipt: (receipt) => {
           opts.stream.publish('receipt', receipt);
           opts.stream.publish('chain', opts.kernel.verifyChain());
@@ -5372,6 +5390,7 @@ export function createServer(opts: DaemonOptions): Server {
     const preview = opts.kernel.preview(request);
     held.set(preview.actionHash, { preview, payload, req: request });
     persistHeld();
+    publishPending();
     if (preview.auto) {
       const receipt = await opts.kernel.commit(
         preview.actionHash,
@@ -5379,6 +5398,7 @@ export function createServer(opts: DaemonOptions): Server {
       );
       held.delete(preview.actionHash);
       persistHeld();
+    publishPending();
       opts.stream.publish('receipt', receipt);
       opts.stream.publish('chain', opts.kernel.verifyChain());
       return { preview, receipt, risk, secretWarning };
@@ -5445,6 +5465,7 @@ export function createServer(opts: DaemonOptions): Server {
 
     held.delete(actionHash);
     persistHeld();
+    publishPending();
     opts.stream.publish('receipt', receipt);
     opts.stream.publish('chain', opts.kernel.verifyChain());
     json(res, 200, { approval, receipt });
@@ -5494,7 +5515,7 @@ export function createServer(opts: DaemonOptions): Server {
     persistHeld();
     // State changed even though no effect ran: the queue is shorter, so anything
     // showing a pending count has to hear about it.
-    opts.stream.publish('state', { pending: held.size });
+    publishPending();
     json(res, 200, { declined: { actionHash, at: new Date().toISOString() }, receipt: null });
   }
 }

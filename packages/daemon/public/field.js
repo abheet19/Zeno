@@ -1197,10 +1197,28 @@ export function init(section) {
     const t = e.target;
     if (!t || !t.closest) return;
     if (t.closest('[data-clr]')) { S.sel = null; renderNodeCard(); syncList(); if (!F.raf) draw(); return; }
+
+    /* The node card's own controls. These looked up `[data-nav]` and
+       `sec-*` ids, which is the PREVIOUS renderer's vocabulary — the shipped
+       markup uses `[data-product]` for a surface and `.nav-i[data-screen]` for
+       a screen. So every button on the card pointed at nothing: clicking a node
+       in the Standing Field appeared to do nothing at all, which is exactly how
+       it was reported. Both vocabularies are accepted so this keeps working if
+       either markup is the one on screen. */
     const go = t.closest('[data-go]');
     if (go) {
-      const nb = document.querySelector(`[data-nav="${go.getAttribute('data-go')}"]`);
+      const name = go.getAttribute('data-go');
+      const nb = document.querySelector(`[data-product="${name}"]`) || document.querySelector(`[data-nav="${name}"]`);
       if (nb) nb.click();
+      return;
+    }
+    const jump = t.closest('[data-jump]');
+    if (jump) {
+      const raw = jump.getAttribute('data-jump');
+      // `sec-vault` and `cmd-hero` are old section ids; the rail speaks screens.
+      const screen = raw === 'cmd-hero' ? 'home' : raw.replace(/^sec-/, '');
+      const rail = document.querySelector(`.nav-i[data-screen="${screen}"]`) || document.getElementById(raw);
+      if (rail) rail.click();
     }
   });
 

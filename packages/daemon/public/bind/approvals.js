@@ -170,8 +170,24 @@ function capsuleFor(preview, onSettled) {
   if (preview.actionHash) caps.dataset.actionHash = preview.actionHash;
 
   const binding = preview.binding || {};
+
+  /* Trust the kernel's own flags. These used to read
+   *   denied = preview.denied === true || preview.tier === 'T4'
+   *   auto   = preview.auto   === true || preview.tier === 'T0'
+   * and the `|| tier === 'T0'` half was simply wrong: it guessed that every T0
+   * action is auto-approved. A T0 write OUTSIDE the sandbox is HELD — the
+   * kernel reports exactly that, `{tier:'T0', auto:false}` — and the guess
+   * overrode it. The Allow button was then disabled with "T0 · auto — no
+   * decision is owed on this action" on an action that was, visibly, waiting
+   * for a decision. The owner saw "1 approval" in the rail and could not
+   * approve it.
+   *
+   * The queue's own meaning settles it: an auto action commits immediately and
+   * is never held, so anything reaching this screen is by definition not auto.
+   * T4 stays as a floor for `denied` because policy prohibits that tier
+   * outright (payment, financial) — there a tier IS the whole story. */
   const denied = preview.denied === true || preview.tier === 'T4';
-  const auto = preview.auto === true || preview.tier === 'T0';
+  const auto = preview.auto === true;
   const review = preview.review && typeof preview.review === 'object' ? preview.review : null;
 
   /* ---- caps-h ---- */

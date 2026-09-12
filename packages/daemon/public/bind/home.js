@@ -220,10 +220,29 @@ async function mountField() {
   const wrap = q('.orb-wrap');
   if (!wrap) return;
   wrap.setAttribute('data-mount', 'field');
+
+  /* The node card's host. field.js renders a picked node into
+     [data-mount="node-card"] and returns early when no such element exists —
+     which the artifact's markup does not define. The result was that clicking a
+     node in the field selected it internally and then drew nothing: the orb
+     looked dead even though it was working. `.orb-wrap` is position:relative,
+     which is the containing block this overlay is written for. It is created
+     BEFORE field.js initialises so the first render already has somewhere to
+     go. */
+  let card = wrap.querySelector('[data-mount="node-card"]');
+  if (!card) {
+    card = document.createElement('div');
+    card.setAttribute('data-mount', 'node-card');
+    wrap.appendChild(card);
+  }
+
   const mod = await import('../field.js');
   if (mod && typeof mod.init === 'function') mod.init();
   const canvas = wrap.querySelector('canvas');
   if (canvas) { canvas.style.cursor = 'grab'; canvas.style.touchAction = 'none'; canvas.style.display = 'block'; }
+  // field.js replaces the mount's children with its own canvas, so the card
+  // host is re-attached afterwards rather than assumed to have survived.
+  if (!wrap.querySelector('[data-mount="node-card"]')) wrap.appendChild(card);
 }
 
 export async function bind() {

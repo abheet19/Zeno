@@ -13,8 +13,20 @@ function functions(file,names,indent='  '){
     const match=re.exec(source);assert.ok(match,`missing handler ${name}`);
     const tail=source.slice(match.index);
     const next=new RegExp('^'+indent+'(?:async )?function \\w+\\(','m').exec(tail.slice(match[0].length));
-    assert.ok(next,`missing next handler after ${name}`);
-    return tail.slice(0,match[0].length+next.index);
+    if(next) return tail.slice(0,match[0].length+next.index);
+    // `name` is the LAST function at this indent in the file, so there is no
+    // following declaration to use as a stop boundary. Close it by matching
+    // braces instead of assuming one always follows — the file's tail is
+    // real product code, not a fixture, and it changes shape over time.
+    const bodyStart=tail.indexOf('{');
+    assert.ok(bodyStart>=0,`missing body for ${name}`);
+    let depth=0,i=bodyStart;
+    for(;i<tail.length;i++){
+      if(tail[i]==='{') depth++;
+      else if(tail[i]==='}'){depth--;if(depth===0)break;}
+    }
+    assert.ok(depth===0,`unbalanced braces closing ${name}`);
+    return tail.slice(0,i+1);
   }).join('\n');
 }
 function fakeTimers(){
@@ -34,13 +46,13 @@ function counselHarness(){
   const context=vm.createContext({console,Promise,Date,Map,SpeechRecognition:Recognition,
     CustomEvent:class{constructor(type,opts){this.type=type;this.detail=opts.detail;}},
     document,window:{...timer,dispatchEvent(){}},waitForSpeechIdle:()=>idle,
-    renderOverlay(){},announce:s=>announcements.push(s),
+    renderLive(){},announce:s=>announcements.push(s),
     call:async(method,url,body)=>{
       requests.push({method,url,body:JSON.parse(JSON.stringify(body))});
       if(response)return response;
       return {ok:true,data:{meeting:{id:'saved-meeting',utterances:body.utterances},redacted:0}};
     },
-    loadArchive:async()=>{},select:async()=>{},badBlock(){},renderCall(){},renderAsk(){}});
+    loadArchive:async()=>{},select:async()=>{}});
   vm.runInContext('let CALL=null;const cache=new Map();const S={selected:null};\n'+
     functions('counsel.js',['counselSpeechPrompt'],'')+
     functions('counsel.js',['startEngine','commit','stopEngine','teardownCall','discardCall','endCall'])+
@@ -225,7 +237,7 @@ test('Counsel treats archive.readable false as an error instead of an empty heal
   const state={archive:'loading',archiveNote:'',meetings:[{id:'stale'}],failed:[]};
   const context=vm.createContext({
     call:async()=>({ok:true,data:{meetings:[],failed:[],archive:{readable:false,reason:'Folder is unreadable.',resolve:'Check its permissions.'}}}),
-    renderCalls(){},renderCall(){},renderAsk(){},
+    renderSidebar(){},
   });
   vm.runInContext('let S=state;'+functions('counsel.js',['loadArchive'])+'\nthis.run=loadArchive;',
     Object.assign(context,{state}));
@@ -239,7 +251,7 @@ test('Counsel treats archive.readable false as an error instead of an empty heal
 test('Counsel treats a malformed successful archive response as unknown, never empty',async()=>{
   const state={archive:'loading',archiveNote:'',meetings:[{id:'stale'}],failed:[]};
   const context=vm.createContext({
-    call:async()=>({ok:true,data:{}}),renderCalls(){},renderCall(){},renderAsk(){},
+    call:async()=>({ok:true,data:{}}),renderSidebar(){},
   });
   vm.runInContext('let S=state;'+functions('counsel.js',['loadArchive'])+'\nthis.run=loadArchive;',
     Object.assign(context,{state}));
@@ -255,7 +267,7 @@ test('Counsel cannot query the local model while a meeting is active',async()=>{
   const state={asking:false,archive:'ok',askDraft:'live question',thread:[]};
   const context=vm.createContext({
     call:async(method,url,body)=>{requests.push({method,url,body});return {ok:true,data:{answer:'should not be reachable'}};},
-    el:()=>({}),renderAsk(){},answerBlock:()=>({}),warmCache:async()=>{},
+    el:()=>({}),renderAskTab(){},answerNode:()=>({}),warmCache:async()=>{},
   });
   vm.runInContext(
     'let S=state,CALL={title:"Active meeting"};'+functions('counsel.js',['ask1'])+
@@ -296,8 +308,10 @@ test('Counsel preflight keeps the focused field and caret when an async check re
   }};
   const el=(tag,cls,text)=>{const node=new FakeElement(tag);node.className=cls||'';node.textContent=text||'';return node;};
   const context=vm.createContext({document,localSpeech:true,SpeechRecognition:function(){},
+    viewPreflight:pre.card,
     clear:node=>{node.replaceChildren();return node;},el,add:(parent,...nodes)=>parent.append(...nodes),
     btn:(cls,label,action)=>{const node=el('button',cls,label);node.addEventListener('click',action);return node;},
+    pill:(cls,text)=>el('span','pill '+(cls||''),text),
     prow(){},beginCall(){},closePreflight(){},canBegin:()=>true,whyNotBegin:()=>null,
   });
   vm.runInContext('let PRE=pre;const S={archive:"ok"};'+functions('counsel.js',['renderPreflight'])+'\nthis.run=renderPreflight;',
