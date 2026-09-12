@@ -192,9 +192,13 @@ async function bindRailBadges() {
     if (ag.ok) {
       const locals = Array.isArray(ag.data?.localModels) ? ag.data.localModels : [];
       const def = ag.data?.defaultModel || ag.data?.model;
+      // Name what will actually run. With more than one local model installed the
+      // daemon routes per policy rather than pinning one, so say THAT — a count
+      // ("3 local models") names nothing the owner can act on, and naming a single
+      // model would claim a choice the router has not made.
       if (def) text = `${def} · local`;
       else if (locals.length === 1) text = `${locals[0]} · local`;
-      else if (locals.length > 1) text = `${locals.length} local models`;
+      else if (locals.length > 1) text = 'Auto route · local first';
       else text = 'no local model';
     }
     if (label && text) {

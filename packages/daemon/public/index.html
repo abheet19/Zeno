@@ -12,9 +12,13 @@
 .avatar-mono{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--g5);color:var(--ink);font:600 12px/1 var(--font-mono,monospace);flex:none}
 /* The Zeno core above the Forge session composer — the same gold core the
    Standing Field draws, at rest. Breathes slowly; still under reduce-motion. */
+/* Orb colour carries meaning across the three surfaces:
+   GOLD = Command, the orchestrator core (the Standing Field's centre)
+   CYAN = Forge, the coding agent
+   GREEN = Counsel, the consented recorder (.cnorb, from the artifact) */
 .ag-orb{width:44px;height:44px;margin:0 auto 14px;border-radius:50%;
-  background:radial-gradient(circle at 42% 38%, color-mix(in srgb,var(--gold,#D8BE7E) 70%,transparent) 0%, color-mix(in srgb,var(--gold,#D8BE7E) 26%,transparent) 46%, transparent 72%);
-  box-shadow:0 0 34px 10px color-mix(in srgb,var(--gold,#D8BE7E) 16%,transparent);
+  background:radial-gradient(circle at 42% 38%, color-mix(in srgb,var(--cyan,#38C3D6) 72%,transparent) 0%, color-mix(in srgb,var(--cyan,#38C3D6) 26%,transparent) 46%, transparent 72%);
+  box-shadow:0 0 34px 10px color-mix(in srgb,var(--cyan,#38C3D6) 18%,transparent);
   animation:agorb 6.5s ease-in-out infinite}
 @keyframes agorb{0%,100%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.045);filter:brightness(1.1)}}
 @media (prefers-reduced-motion:reduce){.ag-orb{animation:none}}
@@ -38,11 +42,25 @@
 .composer textarea, .ag-composer textarea, #s-ta, #home-ta, #chats-ta, #ag-ta{
   resize:none; overflow-y:hidden; min-height:2.7em; max-height:40vh;
   line-height:1.5; padding-block:8px; box-sizing:border-box; field-sizing:content}
-/* The row must top-align once the text wraps, or the buttons ride over it. */
+/* The row must bottom-align once the text wraps, or the buttons ride over it. */
 .composer .row, .ag-composer .ag-row{align-items:flex-end}
 .composer .row{gap:8px}
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
+
+/* Composer proportions — Devin-like, but our own: a wider, taller input that the
+   owner can also drag to resize. Devin's is a single cramped line; a task
+   description is usually several. Start at ~3 lines and let it grow. */
+.composer{width:100%; max-width:none}
+.hcenter > .composer, .thread > .composer{width:min(1040px,100%); margin-inline:auto}
+.composer textarea, #home-ta, #chats-ta{min-height:76px; font-size:15.5px; padding-block:12px}
+.ag-composer textarea, #ag-ta{min-height:62px; font-size:14.5px}
+#s-ta{min-height:58px}
+/* Drag-to-resize: vertical only, so the column layout can never be broken
+   sideways. Honoured by the JS autosizer, which stops managing height once the
+   owner has set one by hand. */
+.composer textarea, .ag-composer textarea{resize:vertical}
+.composer textarea[data-user-sized], .ag-composer textarea[data-user-sized]{field-sizing:fixed}
 </style>
 </head>
 <body>

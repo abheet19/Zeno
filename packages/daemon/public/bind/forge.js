@@ -376,9 +376,29 @@ async function bindForge() {
     lang: $('.vsst[data-lang]', statBar || document) || null,
     gov: $('.vsst.gov', statBar || document) || null,
   };
-  if (statEls.gov) {
+  // Neutralise the artifact's fabricated "chain ok" claim the instant this
+  // binder runs — renderGov() below fills in the real state once /state
+  // answers, but nothing manufactured may stand even for one frame.
+  if (statEls.gov) setTrailingText(statEls.gov, ' governed — reading chain…');
+  // Real chain state for the "governed" status item — GET /state (the same
+  // ledger bind/receipts.js reads): { receipts[], chain:{ok,firstBreakAt} }.
+  // Never say "chain ok" without that datum in hand (hard rule); an unread or
+  // absent chain says only "governed".
+  async function renderGov() {
+    if (!statEls.gov) return;
     statEls.gov.title = 'Open Command → Receipts.';
-    setTrailingText(statEls.gov, ' receipts');
+    const r = await getJSON('/state');
+    if (!r.ok) { setTrailingText(statEls.gov, ' governed'); return; }
+    const chain = r.data && typeof r.data.chain === 'object' ? r.data.chain : null;
+    const n = Array.isArray(r.data && r.data.receipts) ? r.data.receipts.length : null;
+    if (!chain || typeof chain.ok !== 'boolean') { setTrailingText(statEls.gov, ' governed'); return; }
+    if (chain.ok) {
+      setTrailingText(statEls.gov, ` governed · chain ok${n != null ? ` · ${n} receipt${n === 1 ? '' : 's'}` : ''}`);
+    } else {
+      const at = Number.isInteger(chain.firstBreakAt) ? ` · #${chain.firstBreakAt}` : '';
+      setTrailingText(statEls.gov, ` governed · chain broken${at}`);
+      statEls.gov.title = `The receipt chain failed verification${at}. Open Command → Receipts.`;
+    }
   }
   if (statEls.ports) {
     const p = location.port || (location.protocol === 'https:' ? '443' : '80');
@@ -437,7 +457,63 @@ async function bindForge() {
     } else if (statusData && !statusData.repo) {
       renderEditorEmpty(statusData.note || 'The sandbox is not a git repository.');
     }
+    renderQuickIfOpen();
   }
+
+  /* ============================================================ *
+   * 2b · QUICK OPEN (Ctrl+P) — real file list (Priority 3)         *
+   * ============================================================ *
+   * ui.js keeps owning the palette's OPEN/CLOSE mechanics (Ctrl+P,
+   * Ctrl+Shift+P, the toolbar button, Escape, click-outside) — those
+   * are pure navigation, left exactly as wired. What ui.js's own
+   * renderQuick() draws inside it is fabricated (a hardcoded FILES
+   * list plus a mock command palette), so a second 'input' listener
+   * on the SAME #quick-in node runs after ui.js's (registered later,
+   * so it fires second) and overwrites #quick-list with the real
+   * tracked/changed file list. A MutationObserver on #quick's
+   * `hidden` attribute repaints it the instant the palette opens too
+   * (from any trigger), before the user has typed anything — so the
+   * mock FILES list is never the thing on screen, even briefly.
+   * The '>' commands / ':' line / '@' symbol modes have no real
+   * backend here (no command catalog, no symbol index) and say so
+   * rather than keep ui.js's fake rows, which called mock openFile/
+   * runTerm. */
+  const quickEl = $('#quick', ide);
+  const quickInEl = $('#quick-in', ide);
+  const quickListEl = $('#quick-list', ide);
+  function renderQuickReal() {
+    if (!quickInEl || !quickListEl) return;
+    const v = quickInEl.value;
+    if (v.startsWith('>') || v.startsWith(':') || v.startsWith('@') || v.startsWith('task ')) {
+      fill(quickListEl, el('div', 'mp-empty', 'This palette only searches real files in this build — commands, go-to-line and symbols are not wired to real data.'));
+      return;
+    }
+    if (statusErr) { fill(quickListEl, el('div', 'mp-empty', `The file list could not be read: ${statusErr}`)); return; }
+    if (!statusData) { fill(quickListEl, el('div', 'mp-empty', 'Reading the sandbox…')); return; }
+    if (!statusData.repo) { fill(quickListEl, el('div', 'mp-empty', statusData.note || 'The sandbox is not a git repository.')); return; }
+    const changed = new Map();
+    for (const c of statusData.changed || []) changed.set(c.path, c.status);
+    const tracked = Array.isArray(statusData.tracked) ? statusData.tracked : [];
+    const paths = [...new Set([...tracked, ...changed.keys()])].sort();
+    const q = v.trim().toLowerCase();
+    const matches = (q ? paths.filter((p) => p.toLowerCase().includes(q)) : paths).slice(0, 200);
+    if (!matches.length) { fill(quickListEl, el('div', 'mp-empty', q ? 'No matching files.' : 'The sandbox has no tracked files.')); return; }
+    const nodes = matches.map((p, i) => {
+      const [cls, txt] = fileMeta(p.split('/').pop());
+      const b = el('button', 'mp-row');
+      b.type = 'button';
+      if (i === 0) b.setAttribute('aria-checked', 'true');
+      const mn = el('span', 'mn');
+      add(mn, document.createTextNode(p.split('/').pop()), el('span', null, p));
+      add(b, el('span', cls, txt), mn);
+      b.addEventListener('click', () => { if (quickEl) quickEl.hidden = true; void openFile(p); });
+      return b;
+    });
+    fill(quickListEl, ...nodes);
+  }
+  function renderQuickIfOpen() { if (quickEl && !quickEl.hidden) renderQuickReal(); }
+  if (quickInEl) quickInEl.addEventListener('input', renderQuickReal);
+  if (quickEl) new MutationObserver(renderQuickIfOpen).observe(quickEl, { attributes: true, attributeFilter: ['hidden'] });
 
   /* ============================================================ *
    * 3 · EDITOR (Priority 1)                                        *
@@ -1330,7 +1406,7 @@ async function bindForge() {
   renderScm();
   showEmptyState();
   renderTerminal();
-  await Promise.all([loadStatus(), loadAgents()]);
+  await Promise.all([loadStatus(), loadAgents(), renderGov()]);
   paintModelPills();
 
   if (notWiredNotes.length) console.info('[zeno] forge binder — not wired this pass:', notWiredNotes);

@@ -1,9 +1,9 @@
 /**
- * bind/lists.js — Command → Work, Vault, Integrations and Chats screens,
- * wired to real daemon data (and, for Chats, to this browser's own archive
- * of the Home conversation).
+ * bind/lists.js — Command → Work, Vault, Integrations, Chats, Projects and
+ * Customize screens, wired to real daemon data (and, for Chats, to this
+ * browser's own archive of the Home conversation).
  *
- * The artifact (index.html) draws these four screens as:
+ * The artifact (index.html) draws these six screens as:
  *   Work           `.sbar` (search + 4 `.filterpill`s: All/Tickets/Sandbox/
  *                  Sources) above a `.card > .row-list#work-list` of `.lrow`s.
  *   Vault          `.sbar` (search only) above a `#import-card` (the mock
@@ -15,6 +15,20 @@
  *                  `.row-list#chats-list` of rows) and `#chats-open-view`
  *                  (`#chats-title`, `#chats-turns`, and its own composer:
  *                  `#chats-ta` / `#chats-send` / `#chats-back`).
+ *   Projects       a plain `.card > .row-list[data-mount="projects-list"]`.
+ *                  This daemon exposes no endpoint that lists more than one
+ *                  project — only `GET /forge/status`, which reports the one
+ *                  sandbox repo Forge actually operates in. That single repo
+ *                  is drawn as one row; the absence of a real multi-project
+ *                  endpoint is stated plainly rather than papered over with
+ *                  invented rows.
+ *   Customize      a plain `.card > .row-list[data-mount="customize-list"]`.
+ *                  Real: installed skills (`GET /skills`) and MCP servers
+ *                  (`GET`/`POST`/`DELETE /forge/mcp/servers`, owner-only to
+ *                  write — the same real logic customize.js already ships).
+ *                  Connectors and Plugins are an honest CATALOG — the same
+ *                  static list customize.js ships — and every row says
+ *                  "catalog only", never a live connection.
  *
  * ui.js already wires generic chrome that is safe to leave alone: filterpill
  * `aria-current` highlighting, `[data-product-go]` (the real Command<->Forge
@@ -45,6 +59,9 @@
  *   POST /memory/approvals -> { actionHash } -> { approval, receipt, entry }
  *   GET  /brief            -> { brief:{status,at,sources:[{name,items}],missing} }
  *   POST /assistant/ask    -> { question } -> { answer } | { flagged } | { note } | { error }
+ *   GET    /forge/mcp/servers    -> { servers:[{id,name,transport,command,args,url,envKeys}] }
+ *   POST   /forge/mcp/servers    -> { name,transport,command,args,url,env } -> { server } (owner-only)
+ *   DELETE /forge/mcp/servers/<id> -> { id, deleted } (owner-only)
  *
  * A WorkItem carries NO tier/status field (packages/intake/src/work-item.ts),
  * so ticket rows never claim a "T2 · owner: you" the mock invented — only
@@ -114,6 +131,21 @@ async function postJSON(path, body) {
       const msg = (errObj && errObj.message) || `${path} answered ${res.status}`;
       const resolve = errObj && errObj.resolve;
       return { ok: false, status: res.status, data, error: resolve ? `${msg} ${resolve}` : msg };
+    }
+    return { ok: true, status: res.status, data };
+  } catch (err) {
+    return { ok: false, status: 0, data: null, error: `${path} could not be reached: ${err && err.message}` };
+  }
+}
+
+async function deleteJSON(path) {
+  try {
+    const res = await fetch(path, { method: 'DELETE', headers: authHeaders(), cache: 'no-store' });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      const errObj = data && typeof data === 'object' ? data.error : null;
+      const msg = (errObj && errObj.message) || `${path} answered ${res.status}`;
+      return { ok: false, status: res.status, data, error: msg };
     }
     return { ok: true, status: res.status, data };
   } catch (err) {
@@ -771,8 +803,251 @@ async function bindChats() {
   if (homeTurns) {
     try { new MutationObserver(snapshot).observe(homeTurns, { childList: true, subtree: true }); } catch { /* no observer available */ }
   }
+
+  /* ui.js's OWN mock Home composer (sendHome, never bound to a real endpoint by
+     bind/home.js) calls its own renderChatsList() on every send, which repaints
+     `#chats-list` from its invented `CHATS` array — the exact mock-standing bug
+     this file exists to prevent. This binder cannot reach into ui.js's closure
+     to stop that call, so instead it re-asserts the REAL archive every time the
+     Chats screen is shown again, which is the only moment a stomped list would
+     ever be seen. */
+  if (screen) {
+    try {
+      new MutationObserver(() => { if (screen.classList.contains('on')) renderList(); })
+        .observe(screen, { attributes: true, attributeFilter: ['class'] });
+    } catch { /* no observer: the list stays as of its last real render */ }
+  }
+
   snapshot();
   renderList();
+}
+
+/* ======================================================================
+ * PROJECTS — the repositories Zeno can actually work in
+ * ======================================================================
+ * This daemon has exactly one working repository: the sandbox `/forge/status`
+ * reports on. There is no `/projects`, no `/repos`, no route anywhere in
+ * server.ts that lists more than that one — checked directly against the
+ * router (every registered path in packages/daemon/src/server.ts), not
+ * assumed. So this screen draws that one repo as one row, real, and says so
+ * plainly rather than inventing a picker full of projects that do not exist. */
+
+async function bindProjects() {
+  const screen = screenEl('projects');
+  if (!screen) return;
+  const listEl = screen.querySelector('[data-mount="projects-list"]');
+  if (!listEl) return;
+
+  const addBtn = screen.querySelector('[data-projects-add]');
+  if (addBtn) {
+    addBtn.addEventListener('click', () => {
+      toast('This daemon has no endpoint to register another project — Forge always works in the one sandbox repository below.');
+    });
+  }
+
+  fill(listEl, loadingEl('Reading the sandbox repository…'));
+  const st = await getJSON('/forge/status');
+  const nodes = [];
+
+  if (!st.ok) {
+    nodes.push(unreadableEl('The sandbox repository', st.error));
+  } else {
+    const d = st.data || {};
+    if (d.repo === false) {
+      nodes.push(emptyEl('The sandbox is not a git repository.', String(d.note || '')));
+    } else {
+      const changed = Array.isArray(d.changed) ? d.changed.length : null;
+      const meta = [
+        d.branch ? 'branch ' + d.branch : null,
+        d.head ? 'HEAD ' + String(d.head).slice(0, 12) : 'no commits yet',
+        changed == null ? null : changed + ' ' + plural(changed, 'uncommitted file', 'uncommitted files'),
+      ].filter(Boolean).join(' · ');
+      const openBtn = el('button', 'laction cy', 'Open in Forge');
+      openBtn.type = 'button';
+      openBtn.setAttribute('data-product-go', 'forge');
+      nodes.push(lrowEl('repo', clip(d.root || 'the sandbox', 90), meta, openBtn));
+    }
+  }
+
+  nodes.push(noteEl('This daemon reports only the one sandbox repository Forge operates in — there is no '
+    + '/projects or /repos endpoint that lists more than that, so nothing else is drawn here. Multiple, '
+    + 'switchable projects are not a feature this daemon exposes yet.'));
+
+  fill(listEl, ...nodes);
+}
+
+/* ======================================================================
+ * CUSTOMIZE — Skills / Connectors / Plugins, customize.js's real logic
+ * ======================================================================
+ * Real and functional: installed skills (GET /skills) and MCP server records
+ * (GET/POST/DELETE /forge/mcp/servers — add and remove are owner-only, same
+ * as customize.js and the daemon's own role check). Connectors and Plugins
+ * are the same static catalog customize.js ships: a browsable directory of
+ * what COULD be added, never a fake "connected" state. */
+
+const CATALOG_CONNECTORS = [
+  ['Google Drive', 'Search, read and reference your files.'],
+  ['Gmail', 'Draft, summarise and search your inbox.'],
+  ['Google Calendar', 'See and coordinate your schedule.'],
+  ['Notion', 'Search and update your workspace.'],
+  ['Slack', 'Read channels and send messages.'],
+  ['GitHub', 'Issues, PRs and repository context.'],
+  ['Linear', 'Issues and project workflows.'],
+  ['Figma', 'Read designs and generate from context.'],
+];
+const CATALOG_PLUGINS = [
+  ['Data', 'Query, chart and explain data — SQL, spreadsheets, dashboards.', 'Anthropic'],
+  ['doc-coauthoring', 'A structured workflow for co-authoring documents.', 'Anthropic'],
+  ['theme-factory', 'Toolkit for styling artifacts with a theme.', 'Anthropic'],
+  ['web-artifacts-builder', 'Tools for elaborate multi-component web artifacts.', 'Anthropic'],
+];
+
+async function bindCustomize() {
+  const screen = screenEl('customize');
+  if (!screen) return;
+  const listEl = screen.querySelector('[data-mount="customize-list"]');
+  if (!listEl) return;
+
+  const hasOwner = !!token();
+  let mcpRes = null;
+  let skillsRes = null;
+  let formOpen = false;
+  let formStatus = '';
+
+  function mcpRow(s) {
+    const detail = s.transport === 'stdio'
+      ? (s.command || '') + (Array.isArray(s.args) && s.args.length ? ' ' + s.args.join(' ') : '')
+      : (s.url || '');
+    const meta = [s.transport, detail, Array.isArray(s.envKeys) && s.envKeys.length ? 'env: ' + s.envKeys.join(', ') : null,
+      'configured · not connected']
+      .filter(Boolean).join(' · ');
+    let action = null;
+    if (hasOwner && s.id) {
+      action = el('button', 'laction', 'Remove');
+      action.type = 'button';
+      action.addEventListener('click', async () => {
+        action.disabled = true;
+        const r = await deleteJSON('/forge/mcp/servers/' + encodeURIComponent(s.id));
+        if (r.ok) { toast('MCP server removed.'); mcpRes = await getJSON('/forge/mcp/servers'); render(); }
+        else { action.disabled = false; toast('Could not remove: ' + r.error); }
+      });
+    }
+    return lrowEl('mcp', s.name || s.id || 'server', meta, action);
+  }
+
+  function mcpFormNode() {
+    const row = el('div', 'lrow');
+    row.style.cssText = 'display:flex; flex-direction:column; align-items:stretch; gap:8px; padding:12px 16px';
+    const inputStyle = 'font:inherit; font-size:12px; padding:7px 10px; border-radius:6px; '
+      + 'border:1px solid var(--rule-2,#2C363B); background:var(--g2,#0F1214); color:var(--ink,#ECEBE6)';
+    const name = document.createElement('input');
+    name.placeholder = 'Name — e.g. filesystem'; name.style.cssText = inputStyle;
+    const transport = document.createElement('select');
+    transport.style.cssText = inputStyle;
+    ['stdio', 'sse', 'http'].forEach((t) => { const o = document.createElement('option'); o.value = t; o.textContent = t; transport.appendChild(o); });
+    const command = document.createElement('input');
+    command.placeholder = 'stdio command — e.g. npx -y @modelcontextprotocol/server-filesystem /path'; command.style.cssText = inputStyle;
+    const url = document.createElement('input');
+    url.placeholder = 'sse/http URL — e.g. https://host/mcp'; url.style.cssText = inputStyle;
+    const env = document.createElement('input');
+    env.placeholder = 'env var NAMES, comma-separated (values never stored)'; env.style.cssText = inputStyle;
+    const addBtn = el('button', 'btn sm p', 'Add server');
+    addBtn.type = 'button';
+    const status = el('span', null, formStatus);
+    status.style.cssText = 'font-size:10.5px; color:var(--ink-3,#6C7480)';
+    addBtn.addEventListener('click', async () => {
+      const args = command.value.trim().split(/\s+/).filter(Boolean);
+      const payload = {
+        name: name.value.trim(),
+        transport: transport.value,
+        command: transport.value === 'stdio' ? (args[0] || '') : '',
+        args: transport.value === 'stdio' ? args.slice(1) : [],
+        url: url.value.trim(),
+        env: env.value.split(',').map((s) => s.trim()).filter(Boolean),
+      };
+      if (!payload.name) { formStatus = 'Give the server a name.'; render(); return; }
+      const r = await postJSON('/forge/mcp/servers', payload);
+      if (!r.ok) { formStatus = 'Not added: ' + r.error; render(); return; }
+      formStatus = ''; formOpen = false;
+      mcpRes = await getJSON('/forge/mcp/servers');
+      render();
+    });
+    [name, transport, command, url, env, addBtn, status].forEach((n) => row.appendChild(n));
+    return row;
+  }
+
+  function skillRow(sk) {
+    const meta = 'id ' + (sk.id || '?') + ' · ' + (sk.bytes || 0) + ' bytes';
+    const susp = sk.verdict === 'suspicious';
+    return lrowEl('SKL', sk.name || sk.id || 'skill', meta, pillEl(susp ? 'review findings' : 'screened', susp ? 'am' : 'gr'));
+  }
+
+  function catalogRow(tier, name, desc, from) {
+    const meta = [desc, from ? 'from ' + from : null].filter(Boolean).join(' · ');
+    return lrowEl(tier, name, meta, pillEl('catalog only', 'wt'));
+  }
+
+  function render() {
+    const nodes = [];
+
+    nodes.push(headingEl('MCP servers'));
+    nodes.push(noteEl('Recorded configurations only. Zeno does not ambiently load MCP — recording a server '
+      + 'here does not connect or run it. Only environment variable NAMES are stored, never their values.'));
+    if (hasOwner) {
+      const toggle = el('button', 'btn sm g', formOpen ? 'Close' : '+ Add server');
+      toggle.type = 'button';
+      toggle.addEventListener('click', () => { formOpen = !formOpen; formStatus = ''; render(); });
+      const toggleRow = el('div', 'lrow');
+      toggleRow.appendChild(el('span', 'tier', 'mcp'));
+      const mid = el('div', null);
+      mid.appendChild(toggle);
+      toggleRow.appendChild(mid);
+      nodes.push(toggleRow);
+      if (formOpen) nodes.push(mcpFormNode());
+    }
+    if (!mcpRes) nodes.push(loadingEl('Reading configured MCP servers…'));
+    else if (!mcpRes.ok) nodes.push(unreadableEl('MCP servers', mcpRes.error));
+    else {
+      const servers = Array.isArray(mcpRes.data && mcpRes.data.servers) ? mcpRes.data.servers : [];
+      if (!servers.length) nodes.push(emptyEl('No MCP servers configured yet.', hasOwner ? 'Add one above.' : ''));
+      else servers.forEach((s) => nodes.push(mcpRow(s)));
+    }
+
+    nodes.push(headingEl('installed skills'));
+    nodes.push(noteEl('Skills are catalogued read-only and never loaded ambiently; a skill acts only after it '
+      + 'is installed into a repository and selected in Forge, and it grants no tool permission on its own.'));
+    if (!skillsRes) {
+      nodes.push(loadingEl('Reading installed skills…'));
+    } else if (!skillsRes.ok) {
+      nodes.push(unreadableEl('Installed skills', skillsRes.error));
+    } else {
+      const installed = Array.isArray(skillsRes.data && skillsRes.data.skills) ? skillsRes.data.skills : [];
+      const failed = Array.isArray(skillsRes.data && skillsRes.data.failed) ? skillsRes.data.failed : [];
+      if (!installed.length) {
+        nodes.push(emptyEl('No repository skills are installed.', 'Add .agents/skills/<id>/SKILL.md to the selected repository, then reload Forge.'));
+      } else {
+        installed.forEach((sk) => nodes.push(skillRow(sk)));
+      }
+      if (failed.length) nodes.push(noteEl(failed.length + ' skill file(s) could not be loaded.'));
+    }
+
+    nodes.push(headingEl('connectors — catalog'));
+    nodes.push(noteEl('Zeno holds no third-party accounts and never simulates a connection. Each entry states '
+      + 'what adding it would require; nothing below is actually connected.'));
+    CATALOG_CONNECTORS.forEach(([name, desc]) => nodes.push(catalogRow('CON', name, desc)));
+
+    nodes.push(headingEl('plugins — catalog'));
+    nodes.push(noteEl('Plugins bundle skills and tools; a plugin’s tools still reach a run only through Zeno’s '
+      + 'gate. Listing an entry here grants no permission.'));
+    CATALOG_PLUGINS.forEach(([name, desc, from]) => nodes.push(catalogRow('PLG', name, desc, from)));
+
+    fill(listEl, ...nodes);
+  }
+
+  render();
+  const [mcp, skills] = await Promise.all([getJSON('/forge/mcp/servers'), getJSON('/skills')]);
+  mcpRes = mcp; skillsRes = skills;
+  render();
 }
 
 /* ---------------------------------------------------------------------- *
@@ -785,5 +1060,7 @@ export async function bind() {
     bindVault().catch((err) => console.warn('[zeno] lists: vault bind failed', err)),
     bindIntegrations().catch((err) => console.warn('[zeno] lists: integrations bind failed', err)),
     bindChats().catch((err) => console.warn('[zeno] lists: chats bind failed', err)),
+    bindProjects().catch((err) => console.warn('[zeno] lists: projects bind failed', err)),
+    bindCustomize().catch((err) => console.warn('[zeno] lists: customize bind failed', err)),
   ]);
 }

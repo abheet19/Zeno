@@ -304,7 +304,10 @@
   /* ---- composers grow with their text --------------------------------------
      field-sizing:content covers new Chrome; this is the fallback everywhere
      else, capped so a long paste scrolls instead of swallowing the pane. */
-  function autosize(t){ if(!t) return; const cap=Math.round(innerHeight*0.4);
+  function autosize(t){ if(!t) return;
+    // Once the owner drags the resize handle, their height wins — stop managing it.
+    if(t.dataset.userSized) return;
+    const cap=Math.round(innerHeight*0.4);
     // An EMPTY textarea has a one-line scrollHeight, so measuring it collapses the
     // box below a placeholder that wraps — which is what was clipping "…/ for
     // actions". With no value, drop the inline height and let CSS min-height show
@@ -318,6 +321,17 @@
     t.style.overflowY = want > cap ? 'auto' : 'hidden'; }
   document.addEventListener('input', (e)=>{ const t=e.target; if(t && t.tagName==='TEXTAREA') autosize(t); }, true);
   document.querySelectorAll('textarea').forEach(autosize);
+  // A drag on the native resize handle changes offsetHeight without an input
+  // event; observe it so the autosizer yields to the owner's chosen height.
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver((entries) => {
+      for (const en of entries) {
+        const t = en.target;
+        if (document.activeElement === t && !t.dataset.autoH) t.dataset.userSized = '1';
+      }
+    });
+    document.querySelectorAll('.composer textarea, .ag-composer textarea').forEach((t) => ro.observe(t));
+  }
 
   syncLayout('sess', true); // boot Forge with the editor + the agent panel's first-run state (#s-empty)
   // extensions install (governed: shows as a held effect)
