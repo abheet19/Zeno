@@ -290,27 +290,11 @@ const CSS = `
 .zs-kv dd .sub{ color:var(--ink-2,#9AA1AC); }
 .zs-kv dd.mono, .zs-mono{ font-family:var(--font-mono,ui-monospace,Consolas,monospace); font-size:11px; }
 
-/* a row: one file, one note, one integration, one commit */
-.zs-row{
-  display:flex; gap:11px; align-items:flex-start;
-  padding:9px 11px; border:1px solid var(--rule,#242C31); border-radius:var(--r-1,6px);
-  background:var(--g3,#151A1D);
-}
-.zs-rows{ display:flex; flex-direction:column; gap:5px; }
-.zs-mark{
-  flex:none; min-width:26px; text-align:center; padding:2px 5px; border-radius:4px;
-  border:1px solid var(--rule-2,#2C363B); background:var(--g4,#1B2124);
-  font-family:var(--font-mono,ui-monospace,Consolas,monospace);
-  font-size:9.5px; letter-spacing:.06em; color:var(--ink-2,#9AA1AC);
-}
-.zs-bd{ min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
-.zs-top{ display:flex; align-items:baseline; gap:9px; justify-content:space-between; }
-.zs-t{ font-size:12.5px; font-weight:600; color:var(--ink,#ECEBE6); min-width:0; overflow-wrap:anywhere; }
-.zs-m{
-  font-family:var(--font-mono,ui-monospace,Consolas,monospace);
-  font-size:10.5px; line-height:1.55; color:var(--ink-3,#6C7480); overflow-wrap:anywhere;
-}
-.zs-w{ font-size:11.5px; line-height:1.55; color:var(--ink-2,#9AA1AC); overflow-wrap:anywhere; }
+/* A row is now the artifact's .lrow (a .card > .row-list of .lrow grids): its
+   container, tier badge, title and meta live in index.html's shared list CSS
+   (.card/.row-list/.lrow/.tier/.tt/.mm), one writer for every Command list.
+   Only the secondary meta the row layers underneath stays module-local: */
+.zs-w{ font-size:11.5px; line-height:1.55; color:var(--ink-2,#9AA1AC); overflow-wrap:anywhere; margin-top:4px; }
 
 /* the three facts every integration row must state, as one line of chips */
 .zs-facts{ display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
@@ -332,13 +316,7 @@ const CSS = `
 .zs-note.rd::before{ background:var(--red,#D9634F); }
 
 .zs-acts{ display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
-.zs-find{ display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
-.zs-find input{
-  flex:1; min-width:180px; font:inherit; font-size:12px;
-  padding:7px 10px; border-radius:var(--r-1,6px);
-  border:1px solid var(--rule-2,#2C363B); background:var(--g2,#0F1214); color:var(--ink,#ECEBE6);
-}
-.zs-find input::placeholder{ color:var(--ink-3,#6C7480); }
+/* Vault search now wears the shared .sbar/.search chrome (see index.html). */
 .zs-add{ display:flex; gap:7px; flex-wrap:wrap; align-items:center; margin-top:8px; }
 .zs-add input{
   flex:1; min-width:180px; font:inherit; font-size:12px;
@@ -544,12 +522,18 @@ function ensureStyles() {
 
 /* ---- shared fragments ------------------------------------------------------ */
 
-function plane(id, title, sub, body) {
-  return '<section class="plane" aria-labelledby="' + esc(id) + '-h">'
-    + '<div class="plane-head">'
-    + '<h2 class="plane-h" id="' + esc(id) + '-h">' + esc(title) + '</h2>'
-    + '<p class="plane-sub">' + esc(sub) + '</p>'
-    + '</div><div class="plane-body"><div class="zs">' + body + '</div></div></section>';
+function plane(id, title, sub, body, action) {
+  // The screen header the artifact calls .phead: a 24px Newsreader h2 + sub on
+  // the left, and an optional right-aligned action control (raw, already-escaped
+  // HTML — e.g. a .btn). The body lives in .pbody; .zs keeps its own vertical
+  // rhythm inside it. The screen sits flat on the Command background so the
+  // .card list blocks inside read as raised surfaces, exactly like the artifact.
+  return '<section class="cmd-screen" aria-labelledby="' + esc(id) + '-h">'
+    + '<div class="phead"><div class="phead-copy">'
+    + '<h2 id="' + esc(id) + '-h">' + esc(title) + '</h2>'
+    + '<p>' + esc(sub) + '</p>'
+    + '</div>' + (action || '') + '</div>'
+    + '<div class="pbody"><div class="zs">' + body + '</div></div></section>';
 }
 
 function empty(glyph, title, sub) {
@@ -571,15 +555,29 @@ function kvs(pairs) {
 function heading(t) { return '<p class="zs-k">' + esc(t) + '</p>'; }
 
 function row(mark, title, meta, why, facts, action) {
-  // `action` is an optional right-aligned control in the row header. .zs-top is
-  // already flex/space-between, so a second child sits at the end without any
-  // per-row layout change. Callers pass raw, already-escaped HTML (a button).
-  return '<div class="zs-row"><span class="zs-mark">' + esc(mark) + '</span><div class="zs-bd">'
-    + '<div class="zs-top"><div class="zs-t">' + title + '</div>' + (action || '') + '</div>'
-    + (meta ? '<p class="zs-m">' + meta + '</p>' : '')
+  // The artifact's .lrow: a grid of `auto 1fr auto`. The left cell is a mono
+  // .tier badge (the row's real category / id / kind — `mark`). The centre cell
+  // carries the .tt title and .mm meta, with the "why" line and the fact chips
+  // kept as secondary meta beneath. The right cell is an optional status .pill
+  // or control — omitted entirely when the row has none, so the centre fills.
+  // Callers pass raw, already-escaped HTML for `title`, `facts` and `action`.
+  return '<div class="lrow">'
+    + '<span class="tier">' + esc(mark) + '</span>'
+    + '<div class="lrow-c">'
+    + '<div class="tt">' + title + '</div>'
+    + (meta ? '<div class="mm">' + meta + '</div>' : '')
     + (why ? '<p class="zs-w">' + esc(why) + '</p>' : '')
     + (facts ? '<div class="zs-facts">' + facts + '</div>' : '')
-    + '</div></div>';
+    + '</div>'
+    + (action ? '<div class="lrow-a">' + action + '</div>' : '')
+    + '</div>';
+}
+
+/** A rows region, the shape the artifact uses everywhere: a .card wrapping a
+ * .row-list of .lrow rows. One writer for the list container, so every screen's
+ * lists sit on the same raised surface. */
+function rowsCard(rowsHtml) {
+  return '<div class="card rows"><div class="row-list">' + rowsHtml + '</div></div>';
 }
 
 function fact(text, channel) { return '<span class="zs-f' + (channel ? ' ' + esc(channel) : '') + '">' + esc(text) + '</span>'; }
@@ -609,18 +607,20 @@ function gitWord(code) {
 }
 
 function renderWorkstation(st) {
+  // Forge is openable whether or not the read succeeded, so it is the screen's
+  // header action; nav.js handles the cross-surface data-go.
+  const openAction = '<button type="button" class="btn sm p" data-go="forge">Open in Forge</button>';
   if (!st) return plane('sec-workstation', 'Work', WORDS.workstationSub, unread('The sandbox'));
   if (!st.ok) return plane('sec-workstation', 'Work', WORDS.workstationSub, unreadable('The sandbox', st.error));
 
   const d = st.data || {};
-  const openBtn = '<div class="zs-acts"><button type="button" class="btn sm p" data-go="forge">Open in Forge</button>'
-    + '<span class="zs-more">Forge proposes. A commit is still a separate approval.</span></div>';
+  const forgeNote = '<p class="zs-more">Forge proposes. A commit is still a separate approval.</p>';
 
   if (!d.repo) {
     return plane('sec-workstation', 'Work', WORDS.workstationSub,
       empty('○', 'The sandbox is not a git repository.',
         String(d.note || 'The daemon reported no repository at the sandbox path.'))
-      + openBtn);
+      + forgeNote, openAction);
   }
 
   const changed = Array.isArray(d.changed) ? d.changed : [];
@@ -641,45 +641,72 @@ function renderWorkstation(st) {
         : '')],
   ]);
 
-  if (changed.length) {
+  // The screen's natural filter: which of the two real row groups to show, and a
+  // plain substring match over the paths, git codes and commit summaries already
+  // on the page. It filters what git reported here — it never fetches anything.
+  const q = String(S.workQuery || '').trim().toLowerCase();
+  const filter = S.workFilter === 'uncommitted' || S.workFilter === 'commits' ? S.workFilter : 'all';
+  const showChanged = filter === 'all' || filter === 'uncommitted';
+  const showCommits = filter === 'all' || filter === 'commits';
+  const matchChanged = (c) => !q || String(c.path || '').toLowerCase().includes(q)
+    || String(c.status || '').toLowerCase().includes(q)
+    || String(gitWord(c.status) || '').toLowerCase().includes(q);
+  const matchCommit = (c) => !q || String(c.summary || '').toLowerCase().includes(q)
+    || String(c.sha || '').toLowerCase().includes(q);
+
+  const pill = (id, label) => '<button type="button" class="filterpill" data-work-filter="' + id + '"'
+    + (filter === id ? ' aria-current="page"' : '') + '>' + label + '</button>';
+  body += '<div class="sbar">'
+    + '<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+    + '<input type="search" id="zs-wq" placeholder="Search files and commits" aria-label="Search the sandbox" value="' + esc(S.workQuery || '') + '"></div>'
+    + pill('all', 'All') + pill('uncommitted', 'Uncommitted') + pill('commits', 'Commits')
+    + '</div>';
+
+  if (showChanged && changed.length) {
     const cap = 14;
-    body += heading('uncommitted changes')
-      + '<div class="zs-rows">'
-      + changed.slice(0, cap).map((c) => {
-        const word = gitWord(c.status);
-        return row(
-          String(c.status || '·'),
-          mk(c.path || '(no path reported)', 90),
-          word ? esc(word) : 'git status code ' + esc(String(c.status || '?')) + ' — not one this window has words for',
-          null, null,
-        );
-      }).join('')
-      + '</div>'
-      + (changed.length > cap ? '<p class="zs-more">+ ' + (changed.length - cap) + ' more, not listed here</p>' : '');
+    const matched = changed.filter(matchChanged);
+    body += heading('uncommitted changes · ' + matched.length);
+    body += matched.length
+      ? rowsCard(matched.slice(0, cap).map((c) => {
+          const word = gitWord(c.status);
+          return row(
+            String(c.status || '·'),
+            mk(c.path || '(no path reported)', 90),
+            word ? esc(word) : 'git status code ' + esc(String(c.status || '?')) + ' — not one this window has words for',
+            null, null,
+          );
+        }).join(''))
+        + (matched.length > cap ? '<p class="zs-more">+ ' + (matched.length - cap) + ' more, not listed here</p>' : '')
+      : empty('○', 'No changed file matches that.',
+        'The search ran over the files git reported and none matched. That is an answer about the sandbox, not a failure to read it.');
   }
 
-  if (log.length) {
-    body += heading('recent commits')
-      + '<div class="zs-rows">'
-      + log.map((c) => row(
-        String(c.sha || '·'),
-        mk(c.summary || '(no message)', 96),
-        null, null, null,
-      )).join('')
-      + '</div>';
-  } else {
-    body += note('No commit has been made in the sandbox yet, so there is no history to show. '
-      + 'This is the repository as git reports it, not a cache.', 'cy');
+  if (showCommits) {
+    if (log.length) {
+      const matched = log.filter(matchCommit);
+      body += heading('recent commits · ' + matched.length);
+      body += matched.length
+        ? rowsCard(matched.map((c) => row(
+            mk(String(c.sha || '·'), 12),
+            mk(c.summary || '(no message)', 96),
+            null, null, null,
+          )).join(''))
+        : empty('○', 'No commit matches that.',
+          'The search ran over the commits git reported and none matched it.');
+    } else {
+      body += note('No commit has been made in the sandbox yet, so there is no history to show. '
+        + 'This is the repository as git reports it, not a cache.', 'cy');
+    }
   }
 
-  body += openBtn;
+  body += forgeNote;
   body += note(changed.length
     ? 'These files are on disk in the sandbox and nowhere else. Committing them is a T1 action that '
       + 'goes through the same gate as everything else, and it lands its own receipt.'
     : 'Nothing is staged and nothing is uncommitted. Every write into this repository arrives as an '
       + 'approval capsule first — the sandbox is never edited behind your back.');
 
-  return plane('sec-workstation', 'Work', WORDS.workstationSub, body);
+  return plane('sec-workstation', 'Work', WORDS.workstationSub, body, openAction);
 }
 
 /* ================================================================== *
@@ -704,7 +731,7 @@ function noteRow(n, score, matched, owner) {
     ? '<button type="button" class="btn sm g zs-forget" data-vault-forget="' + esc(String(n.id)) + '" '
       + 'title="Forget this note permanently. A deleted memory leaves no receipt and cannot be recovered.">Forget</button>'
     : null;
-  return row('▪', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null, del);
+  return row('note', mk(n.title || n.id || '(untitled note)', 90), meta, clip(String(n.body || ''), 190), null, del);
 }
 
 function renderVault(mem, brief, query, pending) {
@@ -728,9 +755,10 @@ function renderVault(mem, brief, query, pending) {
   const hits = Array.isArray(d.hits) ? d.hits : null;
   const notes = Array.isArray(d.notes) ? d.notes : null;
 
-  let body = '<div class="zs-find">'
+  let body = '<div class="sbar">'
+    + '<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
     + '<input type="search" id="zs-vq" placeholder="Search your memory — the daemon\'s own recall" '
-    + 'aria-label="Search governed memory" value="' + esc(query || '') + '">'
+    + 'aria-label="Search governed memory" value="' + esc(query || '') + '"></div>'
     + '<button type="button" class="btn sm p" data-vault-find="1">Search</button>'
     + (searching ? '<button type="button" class="btn sm g" data-vault-clear="1">Clear</button>' : '')
     + '</div>'
@@ -764,8 +792,7 @@ function renderVault(mem, brief, query, pending) {
       + note('An agent asked to remember these. Nothing is written until you approve it — and an agent can '
         + 'propose but never approve its own memory. There is no Deny: a proposal you do not approve simply '
         + 'never becomes a memory, and is dropped if the daemon restarts.', 'am')
-      + '<div class="zs-rows">'
-      + props.map((p) => {
+      + rowsCard(props.map((p) => {
         const pv = (p && p.preview) || {};
         const pl = (p && p.payload) || {};
         const src = pl.source ? 'from ' + esc(String(pl.source)) : 'from an agent';
@@ -774,21 +801,20 @@ function renderVault(mem, brief, query, pending) {
         const approve = pv.actionHash
           ? '<button type="button" class="btn sm p zs-approve" data-vault-approve="' + esc(String(pv.actionHash)) + '">Approve</button>'
           : '<span class="zs-add-status">no action hash — cannot approve</span>';
-        return row('◆', mk(pl.description || pl.body || '(proposed memory)', 90), meta, clip(String(pl.body || ''), 190), null, approve);
-      }).join('')
-      + '</div>';
+        return row('proposed', mk(pl.description || pl.body || '(proposed memory)', 90), meta, clip(String(pl.body || ''), 190), null, approve);
+      }).join(''));
   }
 
   if (searching) {
     body += heading('results for “' + clip(d.query, 40) + '” · ' + (hits ? hits.length : 0));
     body += hits && hits.length
-      ? '<div class="zs-rows">' + hits.map((h) => noteRow(h.note || {}, h.score, h.matched, owner)).join('') + '</div>'
+      ? rowsCard(hits.map((h) => noteRow(h.note || {}, h.score, h.matched, owner)).join(''))
       : empty('○', 'No note matched that.',
         'The search ran and came back with nothing. That is an answer about your memory, not a failure to read it.');
   } else if (notes) {
     body += heading('recent notes · ' + notes.length);
     body += notes.length
-      ? '<div class="zs-rows">' + notes.map((n) => noteRow(n, null, null, owner)).join('') + '</div>'
+      ? rowsCard(notes.map((n) => noteRow(n, null, null, owner)).join(''))
         + '<p class="zs-more">The daemon returns the 50 most recent; search reaches the rest.</p>'
       : empty('○', 'Your memory is empty.',
         'The vault was read and holds no notes. Anything Zeno is told to remember is written here as a '
@@ -813,12 +839,12 @@ function renderVault(mem, brief, query, pending) {
       ['built', b.at ? esc(ageOf(b.at) || String(b.at)) : '<span class="sub">not reported</span>'],
     ]);
     if (any) {
-      body += '<div class="zs-rows">' + sources.map((s) => {
+      body += rowsCard(sources.map((s) => {
         const items = Array.isArray(s.items) ? s.items : [];
         if (!items.length) return '';
-        return items.map((i) => row('·', mk(i.text || '', 110),
+        return items.map((i) => row('brief', mk(i.text || '', 110),
           [esc(String(i.source || s.name || '')), esc(String(i.age || ''))].filter(Boolean).join(' · '), null, null)).join('');
-      }).join('') + '</div>';
+      }).join(''));
     } else {
       body += empty('○', 'The brief has nothing in it.',
         'Every source it asked answered, and none of them had anything to report. That is a quiet '
@@ -886,7 +912,7 @@ function renderIntegrations(work, agents, skills) {
   else {
     const sources = (work.data && Array.isArray(work.data.sources)) ? work.data.sources : [];
     body += sources.length
-      ? '<div class="zs-rows">' + sources.map(sourceRow).join('') + '</div>'
+      ? rowsCard(sources.map(sourceRow).join(''))
       : empty('○', 'No work source is configured.',
         'The daemon reported no sources at all — not even the local backlog. Nothing is being polled.');
   }
@@ -904,7 +930,7 @@ function renderIntegrations(work, agents, skills) {
       fact('configured', 'gr')
       + fact(models.length ? 'answered · ' + models.length + ' ' + plural(models.length, 'model', 'models') + ' installed' : 'answered with no models — or did not answer', models.length ? 'gr' : 'am')
       + fact('stays on this machine', 'gr');
-    body += '<div class="zs-rows">' + row(
+    body += rowsCard(row(
       'OLL', 'Ollama',
       '127.0.0.1:11434 · the daemon asks over HTTP, never the ollama binary',
       models.length
@@ -913,9 +939,9 @@ function renderIntegrations(work, agents, skills) {
           + 'nothing pulled — this route cannot tell the two apart, so neither can this row. Pull a model '
           + '(ollama pull qwen3:8b) and re-check.',
       facts,
-    ) + '</div>';
+    ));
     if (models.length) {
-      body += '<div class="zs-rows">' + models.map((m) => row('▸', mk(m, 44), 'installed locally', null, null)).join('') + '</div>';
+      body += rowsCard(models.map((m) => row('model', mk(m, 44), 'installed locally', null, null)).join(''));
     }
     body += '<div class="zs-acts"><button type="button" class="btn sm g" data-recheck="1">Re-check the runtime</button>'
       + '<span class="zs-more">Asks the daemon again. Nothing leaves 127.0.0.1.</span></div>';
@@ -924,7 +950,7 @@ function renderIntegrations(work, agents, skills) {
     const list = (agents.data && Array.isArray(agents.data.agents)) ? agents.data.agents : [];
     if (list.length) {
       body += '<hr class="zs-hr">' + heading('coding agents Forge can run');
-      body += '<div class="zs-rows">' + list.map((a) => {
+      body += rowsCard(list.map((a) => {
         const local = a.id === 'local';
         return row(
           local ? 'LOC' : 'EXT',
@@ -939,7 +965,7 @@ function renderIntegrations(work, agents, skills) {
           + fact(local ? 'local runtime' : 'hosted provider', local ? 'gr' : 'am')
           + fact(local ? 'stays on this machine' : '⚡ sends code to its provider', local ? 'gr' : 'am'),
         );
-      }).join('') + '</div>';
+      }).join(''));
     }
   }
 
@@ -951,27 +977,26 @@ function renderIntegrations(work, agents, skills) {
     const installed = (skills.data && Array.isArray(skills.data.skills)) ? skills.data.skills : [];
     const failed = (skills.data && Array.isArray(skills.data.failed)) ? skills.data.failed : [];
     body += installed.length
-      ? '<div class="zs-rows">' + installed.map((skill) => row(
+      ? rowsCard(installed.map((skill) => row(
           'SKL', mk(skill.name || skill.id || 'skill', 44),
           'id ' + esc(String(skill.id || '?')) + ' · ' + esc(String(skill.bytes || 0)) + ' bytes',
           String(skill.description || 'No description was supplied.'),
           fact(skill.verdict === 'suspicious' ? 'screen findings — review before use' : 'screened', skill.verdict === 'suspicious' ? 'am' : 'gr')
           + fact('selected per run') + fact('cannot approve', 'cy'),
-        )).join('') + '</div>'
+        )).join(''))
       : empty('SKL', 'No repository skills are installed.', 'Add .agents/skills/<id>/SKILL.md to this selected repository, then reload Forge.');
     if (failed.length) body += note(failed.length + ' skill file(s) could not be loaded. Forge will refuse a run that selects one of them.', 'am');
   }
 
   /* ---- 5 · the separate edge this HTTP window cannot observe ---- */
   body += '<hr class="zs-hr">' + heading('separate process');
-  body += '<div class="zs-rows">'
-    + row('MCP', 'The MCP edge',
+  body += rowsCard(
+    row('MCP', 'The MCP edge',
       'a separate stdio process · zeno-mcp',
       'The MCP server is its own binary that an MCP client starts over stdio. It is not this daemon and '
       + 'has no HTTP route here, so this window cannot say whether a client is connected. What is fixed '
       + 'either way: it exposes tools that propose and read, and there is deliberately no approve tool.',
-      fact('separate process') + fact('not visible from here', 'am') + fact('stdio — no socket'))
-    + '</div>';
+      fact('separate process') + fact('not visible from here', 'am') + fact('stdio — no socket')));
 
   body += note('A source is read-only: it can be cited, never obeyed. Nothing on this list can approve '
     + 'anything, and the ⚡ rows are the only ones whose use leaves this machine at all.');
@@ -1256,6 +1281,8 @@ const S = {
   skills: null,     // GET /skills
   state: null,      // GET /state
   query: '',        // the Vault search box's current query
+  workQuery: '',    // the Work search box — a local filter over what git already reported
+  workFilter: 'all',// the Work group filter: all | uncommitted | commits
   settingsCategory: 'general', // the modal's selected real settings group
   settingsQuery: '',           // local filtering only; it is never sent anywhere
   agentsAt: 0,      // when the runtime was last asked — it pokes Ollama, so it is not polled hard
@@ -1360,14 +1387,31 @@ function typing() {
   const a = document.activeElement;
   return !!(a && a.id === 'zs-vq');
 }
+/* The Work search filters client-side, so a background poll must likewise leave
+   its box alone while it has focus, or a keystroke landing mid-poll is lost. */
+function workTyping() {
+  const a = document.activeElement;
+  return !!(a && a.id === 'zs-wq');
+}
 
 function repaint() {
   const settingsFocus = settingsFocusSnapshot();
-  paint('sec-workstation', renderWorkstation(S.forge));
+  if (!workTyping()) paint('sec-workstation', renderWorkstation(S.forge));
   if (!typing()) paint('sec-vault', renderVault(S.mem, S.brief, S.query, S.pending));
   paint('sec-integrations', renderIntegrations(S.work, S.agents, S.skills));
   paint('sec-settings', renderSettings(S.state));
   paintSettingsDialog({ snapshot: settingsFocus });
+}
+
+/* Work's search/filter is entirely local: repaint just its panel and put the
+   caret back, the same courtesy the Vault search gets. */
+function repaintWorkAndFocus() {
+  paint('sec-workstation', renderWorkstation(S.forge));
+  const input = document.getElementById('zs-wq');
+  if (input && input.focus) {
+    input.focus({ preventScroll: true });
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch { /* not a text input */ }
+  }
 }
 
 /* After a search, the box is redrawn — put the cursor back in it, or the second
@@ -1554,6 +1598,15 @@ function wire() {
       refresh({ agents: true });
       return;
     }
+    // Work's group filter (All / Uncommitted / Commits). It only narrows what
+    // git already reported into this page — it fetches nothing — so it repaints
+    // that one panel from state in hand.
+    const workPill = t.closest('[data-work-filter]');
+    if (workPill) {
+      S.workFilter = workPill.getAttribute('data-work-filter') || 'all';
+      paint('sec-workstation', renderWorkstation(S.forge));
+      return;
+    }
     // Diagnostics (Settings → Runtime): opt-in recording, and Copy/Export/Clear
     // of the redacted failure log. Re-render the dialog on the Runtime tab so the
     // toggle and list reflect the new state immediately.
@@ -1618,7 +1671,14 @@ function wire() {
   // updates the real groups while preserving the caret in the replaced input.
   document.addEventListener('input', (e) => {
     const input = e.target;
-    if (!input || input.id !== 'zs-settings-search') return;
+    if (!input) return;
+    // The Work search filters the rows git already reported, live and local.
+    if (input.id === 'zs-wq') {
+      S.workQuery = String(input.value || '');
+      repaintWorkAndFocus();
+      return;
+    }
+    if (input.id !== 'zs-settings-search') return;
     S.settingsQuery = String(input.value || '');
     const snapshot = { key: 'search', start: input.selectionStart, end: input.selectionEnd };
     paintSettingsDialog({ force: true, snapshot });

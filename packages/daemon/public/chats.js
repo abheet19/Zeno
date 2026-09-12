@@ -96,13 +96,20 @@ function renderList() {
       '</div>';
     return;
   }
-  listEl.innerHTML = rows.map((s) => {
+  // The shared list language: a .card wrapping a .row-list of .lrow rows, each a
+  // mono .tier badge, the title/count in the centre, and the age as a right-side
+  // pill — the same shape sections.js renders. Real chat data only; click-to-open
+  // still rides the [data-chat] delegation below.
+  listEl.innerHTML = '<div class="card rows"><div class="row-list">' + rows.map((s) => {
     const n = s.turns.length;
-    return '<button type="button" class="chats-row" data-chat="' + esc(s.id) + '">'
-      + '<span class="chats-row-t">' + esc(s.title) + '</span>'
-      + '<span class="chats-row-m">' + n + ' ' + (n === 1 ? 'message' : 'messages') + ' · ' + esc(ageStr(s.updatedAt || s.startedAt)) + '</span>'
+    const age = esc(ageStr(s.updatedAt || s.startedAt));
+    return '<button type="button" class="lrow" data-chat="' + esc(s.id) + '">'
+      + '<span class="tier">chat</span>'
+      + '<div class="lrow-c"><div class="tt">' + esc(s.title) + '</div>'
+      + '<div class="mm">' + n + ' ' + (n === 1 ? 'message' : 'messages') + '</div></div>'
+      + (age ? '<span class="pill wt">' + age + '</span>' : '')
       + '</button>';
-  }).join('');
+  }).join('') + '</div></div>';
 }
 
 /* ---- render: one transcript ---------------------------------------------- */

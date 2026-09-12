@@ -79,3 +79,4 @@ packages/daemon/public/vendor/
 # packages/daemon/assets/glass/ is the reviewed source snapshot. This directory is
 # scripts/sync-glass.mjs's verified same-origin copy for the static UI server.
 packages/daemon/public/glass/vendor/
+ARTIFACT-INVENTORY.md
