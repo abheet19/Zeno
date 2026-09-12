@@ -985,6 +985,9 @@ function renderIntegrations(work, agents, skills) {
 
 const SETTINGS_CATEGORIES = Object.freeze([
   { id: 'general', glyph: '◐', label: 'General', description: 'Appearance and privacy choices for this device.' },
+  { id: 'models', glyph: '◫', label: 'Models', description: 'Which model runs, and how to add more.' },
+  { id: 'voice', glyph: '◍', label: 'Voice', description: 'Spoken input and the limits on what voice may do.' },
+  { id: 'connectors', glyph: '⧉', label: 'Connectors', description: 'Skills, MCP servers and plugins — each added by you.' },
   { id: 'policy', glyph: '✓', label: 'Policy & receipts', description: 'The policy evidence and receipt chain reported by this daemon.' },
   { id: 'capabilities', glyph: '◇', label: 'Capabilities', description: 'Which capability tokens this window and its agents can hold.' },
   { id: 'runtime', glyph: '⌁', label: 'Runtime', description: 'The loopback daemon this window is actually connected to.' },
@@ -1103,6 +1106,33 @@ function buildSettingsGroups(state) {
       diagnosticsHtml()),
   ];
 
+  const models = [
+    settingItem('models', 'Default model', 'Chosen per run in Forge; local models never leave this machine.', 'model default local ollama qwen cloud provider route',
+      readOnlySetting('Default model', 'Chosen in Forge', 'Each Forge run picks its model or routes local-first. Local models run on this machine; a cloud model is a T3 egress that asks you first.', '')),
+    settingItem('models', 'Local models', 'Add or remove local models without leaving Zeno.', 'ollama pull download remove gpu manager add install',
+      readOnlySetting('Local models', 'Managed in Forge', 'Forge → ＋ Models pulls or removes local models, and warns before a download that will not fit your GPU.', '')),
+    settingItem('models', 'Cloud API keys', 'Optional keys for cloud providers.', 'anthropic openai key egress keychain secret',
+      readOnlySetting('Cloud API keys', 'In the OS keychain', 'Stored by the OS, never in a file or this page. A cloud call is a T3 egress effect and asks you every time.', '')),
+  ];
+
+  const voice = [
+    settingItem('voice', 'What voice may do', 'The hard limit on spoken commands.', 'voice approve propose ask limit guardrail speak',
+      readOnlySetting('What voice may do', 'Ask & propose only', 'Voice can ask and propose. It can never approve, send, delete or pay — those always need a click from the owner.', 'good')),
+    settingItem('voice', 'Speaker identity', 'Never an authorization factor.', 'speaker biometric identity voice auth who',
+      readOnlySetting('Speaker identity', 'Off', 'Zeno does not identify who is speaking, and identity is never an approval factor.', 'good')),
+    settingItem('voice', 'Recognition', 'Local Whisper is preferred; the browser engine is the fallback.', 'whisper speech recognition local privacy fallback',
+      readOnlySetting('Recognition', 'Local-first', 'Local Whisper runs on this machine. The browser fallback uploads audio to the browser maker and says so before it is used.', '')),
+  ];
+
+  const connectors = [
+    settingItem('connectors', 'Customize', 'Skills, connectors and plugins — each added by you.', 'customize skills connectors plugins mcp add discover',
+      readOnlySetting('Customize', 'Command → Customize', 'Connectors, skills and plugins live in Customize. Each is added by you and stays behind the approval gate — nothing is loaded ambiently.', '')),
+    settingItem('connectors', 'MCP servers', 'Recorded config only.', 'mcp server model context protocol env command names',
+      readOnlySetting('MCP servers', 'Names only, never values', 'Config records the command and environment variable NAMES only. Recording a server does not connect it or run it.', 'good')),
+    settingItem('connectors', 'OAuth connectors', 'Need provider apps you register.', 'oauth google slack notion connect credentials third party',
+      readOnlySetting('OAuth connectors', 'Not connected', 'Google, Slack, Notion and the rest need a provider app you register. Zeno never ships shared credentials.', '')),
+  ];
+
   const account = [
     settingItem('account', 'Owner', 'The identity this window belongs to.', 'account profile email name owner identity signed in',
       readOnlySetting('Owner', 'Abheet Singh', 'abheet19@gmail.com · owner of this machine.', hasOwner ? 'good' : '')),
@@ -1119,7 +1149,7 @@ function buildSettingsGroups(state) {
 
   return SETTINGS_CATEGORIES.map((category) => ({
     ...category,
-    items: { general, policy, capabilities, runtime, account }[category.id],
+    items: { general, models, voice, connectors, policy, capabilities, runtime, account }[category.id],
   }));
 }
 
