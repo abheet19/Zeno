@@ -440,11 +440,11 @@ function projPt(px, py, pz) {
 }
 function proj(n) { return projPt(n.x, n.y, n.z); }
 function lay(t) {
-  const wide = F.W > 820;
   // The masthead now sits BELOW the field, so the orb is centred on both axes
-  // instead of being pushed right to clear a left-hand headline.
-  const pad = Math.min(F.W * (wide ? 0.34 : 0.36), F.H * (wide ? 0.80 : 0.72));
-  const cx = F.W * 0.50, cy = F.H * 0.49;
+  // instead of being pushed right to clear a left-hand headline. Projection
+  // scale + vertical centre match the design orb (artifact b551a806).
+  const pad = Math.min(F.W * 0.32, F.H * 0.62);
+  const cx = F.W * 0.50, cy = F.H * 0.46;
   F._pad = pad; F._cx = cx; F._cy = cy;
   const breathe = S.motion ? (t || 0) : 0;
   N.forEach((n) => {
@@ -488,12 +488,12 @@ function draw() {
   const glowK = lightTheme ? 0.62 : 1;
 
   /* ground shadow — anchors the graph in space instead of floating it on a flat field */
-  const gy = F.H * 0.47 + Math.min(F.W * 0.30, F.H * 0.62) * 0.92;
-  const gg = c.createRadialGradient(F.W * 0.5, gy, 2, F.W * 0.5, gy, Math.min(F.W * 0.34, 190));
-  gg.addColorStop(0, lightTheme ? 'rgba(23,26,30,.13)' : 'rgba(0,0,0,.55)');
+  const gy = F.H * 0.46 + F._pad * 0.92;
+  const gg = c.createRadialGradient(F.W * 0.5, gy, 2, F.W * 0.5, gy, F._pad * 0.95);
+  gg.addColorStop(0, lightTheme ? 'rgba(23,26,30,.13)' : 'rgba(0,0,0,.5)');
   gg.addColorStop(1, 'rgba(0,0,0,0)');
   c.save(); c.translate(F.W * 0.5, gy); c.scale(1, 0.17); c.translate(-F.W * 0.5, -gy);
-  c.beginPath(); c.arc(F.W * 0.5, gy, Math.min(F.W * 0.34, 190), 0, 7); c.fillStyle = gg; c.fill(); c.restore();
+  c.beginPath(); c.arc(F.W * 0.5, gy, F._pad * 0.95, 0, 7); c.fillStyle = gg; c.fill(); c.restore();
 
   /* edges, far-to-near, colour-graded along their length */
   E.slice().filter((e2) => g(e2[0]) && g(e2[1]))
@@ -527,7 +527,7 @@ function draw() {
   c.setLineDash([]); c.globalAlpha = 1;
 
   N.slice().sort((a, b) => a._.d - b._.d).forEach((n) => {
-    const d = dep(n), base = (n.k === 'core' ? 9.8 : 6.0);
+    const d = dep(n), base = (n.k === 'core' ? 11 : 6.4);
     let r = base * (0.46 + 1.08 * d);
     const on = act.indexOf(n.id) >= 0 && S.motion;
     const _a = attOf(n);
@@ -704,7 +704,7 @@ function loop(now) {
   if (elapsed >= FIELD_FRAME_MS) {
     const bounded = Math.min(elapsed, 100);
     F.lastFrame = now;
-    if (!F.drag) { F.rot += 0.0016 * bounded / (1000 / 60); F.tilt = F.tilt0 + Math.sin(now / 6400) * 0.055; }
+    if (!F.drag) { F.rot += 0.28 * bounded / 1000; F.tilt = F.tilt0 + Math.sin(now / 6400) * 0.06; }
     draw();
   }
   F.raf = requestAnimationFrame(loop);
@@ -1136,7 +1136,7 @@ export function init(section) {
   /* A tab that comes back from the background has a cancelled rAF chain and a
      canvas painted from old state. Restart it rather than leaving a frozen picture. */
   document.addEventListener('visibilitychange', () => {
-    if (fieldShouldAnimate()) { size(); startF(); if (!F.raf) draw(); }
+    if (fieldSurfaceVisible()) { size(); if (fieldShouldAnimate()) startF(); else { stopF(); draw(); } }
     else stopF();
   });
 
@@ -1152,7 +1152,7 @@ export function init(section) {
       if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
     }
     lastSurface = surface;
-    if (fieldShouldAnimate()) { size(); startF(); if (!F.raf) draw(); }
+    if (fieldSurfaceVisible()) { size(); if (fieldShouldAnimate()) startF(); else { stopF(); draw(); } }
     else stopF();
   });
   visibilityObserver.observe(R, { attributes: true, attributeFilter: ['data-zeno-surface'] });

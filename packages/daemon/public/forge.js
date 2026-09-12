@@ -415,8 +415,6 @@ export function initForge(section) {
     streamDown: false,
     runProgressStreamDown: false,
 
-    view: 'ide',         // 'ide' (five regions) or 'agent' (rgC takes the window)
-
     commitMsg: '',
     committing: false,
     receipt: null,
@@ -784,10 +782,10 @@ export function initForge(section) {
   function syncPaneVisibility() {
     if (S.explorerOpen) R.removeAttribute('data-forge-explorer');
     else R.setAttribute('data-forge-explorer', 'closed');
-    if (S.sessionOpen || S.view === 'agent') R.removeAttribute('data-forge-session');
+    if (S.sessionOpen) R.removeAttribute('data-forge-session');
     else R.setAttribute('data-forge-session', 'closed');
-    explorerDrag.hidden = !S.explorerOpen || S.view === 'agent';
-    sessionDrag.hidden = !S.sessionOpen || S.view === 'agent';
+    explorerDrag.hidden = !S.explorerOpen;
+    sessionDrag.hidden = !S.sessionOpen;
   }
 
   function setPaneOpen(which, open) {
@@ -984,27 +982,16 @@ export function initForge(section) {
    * ================================================================ */
 
   function paintTop() {
-    const mode = el('div', 'fgmode');
-    mode.setAttribute('role', 'tablist');
-    mode.setAttribute('aria-label', 'Forge mode');
-    for (const [id, label] of [['agent', 'Agent'], ['ide', 'Editor']]) {
-      const b = btn(null, label, () => setView(id));
-      b.setAttribute('role', 'tab');
-      b.setAttribute('aria-selected', S.view === id ? 'true' : 'false');
-      add(mode, b);
-    }
-
     const menu = el('div', 'fgmenu');
     const item = (label, title, action) => {
       const b = btn(null, label, action);
       b.title = title;
       add(menu, b);
     };
-    item('File', 'Open the Explorer', () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); });
-    // setView repaints the top bar through paintC. Focus after that repaint so
-    // the browser cannot return focus to the menu button that was just removed.
+    item('File', 'Open the Explorer', () => { setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); });
+    // Defer focus one frame so it cannot be pulled back to the menu button that
+    // was just activated.
     const withActiveEditor = (action) => {
-      setView('ide');
       requestAnimationFrame(() => {
         const activeEditor = paneViews[S.focusedGroup]?.editor;
         if (activeEditor) action(activeEditor);
@@ -1023,9 +1010,7 @@ export function initForge(section) {
       focusActiveEditor(editor);
       editor.trigger('zeno.menu', 'editor.action.smartSelect.expand', null);
     }));
-    item('View', 'Switch between the full IDE and focused agent', () => setView(S.view === 'ide' ? 'agent' : 'ide'));
     const openRepositorySearch = () => {
-      if (S.view !== 'ide') setView('ide');
       if (!S.explorerOpen) setPaneOpen('explorer', true);
       S.pan = 'search';
       paintA();
@@ -1038,7 +1023,7 @@ export function initForge(section) {
       const input = rgC.querySelector('#zf-task');
       if (input) input.focus();
     });
-    item('Terminal', 'Open the owner terminal', () => { setView('ide'); S.draw = 'terminal'; setDrawerMin(false); paintD(); });
+    item('Terminal', 'Open the owner terminal', () => { S.draw = 'terminal'; setDrawerMin(false); paintD(); });
     item('Help', 'Open repository rules and installed skills', openSkillsCatalog);
 
     const centre = btn('fgworkspace', null, openRepositorySearch);
@@ -1062,16 +1047,14 @@ export function initForge(section) {
       toggle.title = label;
       add(right, toggle);
     };
-    if (S.view === 'ide') {
-      paneToggle(S.explorerOpen ? 'Hide Explorer' : 'Show Explorer', '◧', S.explorerOpen, () => setPaneOpen('explorer', !S.explorerOpen));
-      paneToggle(drawerMin() ? 'Show bottom panel' : 'Hide bottom panel', '▤', !drawerMin(), () => setDrawerMin(!drawerMin()));
-      paneToggle(S.sessionOpen ? 'Hide agent session' : 'Show agent session', '◨', S.sessionOpen, () => setPaneOpen('session', !S.sessionOpen));
-    }
+    paneToggle(S.explorerOpen ? 'Hide Explorer' : 'Show Explorer', '◧', S.explorerOpen, () => setPaneOpen('explorer', !S.explorerOpen));
+    paneToggle(drawerMin() ? 'Show bottom panel' : 'Hide bottom panel', '▤', !drawerMin(), () => setDrawerMin(!drawerMin()));
+    paneToggle(S.sessionOpen ? 'Hide agent session' : 'Show agent session', '◨', S.sessionOpen, () => setPaneOpen('session', !S.sessionOpen));
     const fresh = btn('btn sm fgnew', '+ New agent', addSession);
     fresh.disabled = S.sessions.length >= 8;
     fresh.title = fresh.disabled ? 'Forge keeps at most eight sessions in one window.' : 'Start another independent agent session';
     add(right, fresh);
-    rgTop.replaceChildren(mode, menu, centre, right);
+    rgTop.replaceChildren(menu, centre, right);
   }
 
   /* ================================================================ *
@@ -1092,7 +1075,7 @@ export function initForge(section) {
 
   /** Open the capability catalog in the session inspector; Lens stays exact context. */
   function openSkillsCatalog() {
-    if (S.view === 'ide' && !S.sessionOpen) setPaneOpen('session', true);
+    if (!S.sessionOpen) setPaneOpen('session', true);
     S.insp = 'skills';
     paintC();
     if (!S.context && !S.contextBusy) void loadContext();
@@ -2450,14 +2433,6 @@ export function initForge(section) {
       },
     });
     target.addAction({
-      id: 'zeno.agentView',
-      label: 'Agent-only view',
-      keybindings: [M.KeyMod.CtrlCmd | M.KeyMod.Shift | M.KeyCode.KeyA],
-      contextMenuGroupId: 'zeno',
-      contextMenuOrder: 3,
-      run: () => setView(S.view === 'agent' ? 'ide' : 'agent'),
-    });
-    target.addAction({
       id: 'zeno.copyPath',
       label: 'Copy the sandbox path of this file',
       contextMenuGroupId: 'zeno',
@@ -2763,12 +2738,10 @@ export function initForge(section) {
     lens.setAttribute('aria-label', 'Open exact run context');
     lens.title = 'Open exact sanitized run context';
     add(ses, lens);
-    if (S.view === 'ide') {
-      const hide = btn('fgicon', '×', () => setPaneOpen('session', false));
-      hide.setAttribute('aria-label', 'Hide Session panel');
-      hide.title = 'Hide Session panel';
-      add(ses, hide);
-    }
+    const hide = btn('fgicon', '×', () => setPaneOpen('session', false));
+    hide.setAttribute('aria-label', 'Hide Session panel');
+    hide.title = 'Hide Session panel';
+    add(ses, hide);
     if (S.streamDown) {
       const chip = el('span', 'chip');
       chip.dataset.state = 'warn';
@@ -2856,14 +2829,7 @@ export function initForge(section) {
     const exactContext = btn('fgicon', '@', () => selectInspector('lens'));
     exactContext.setAttribute('aria-label', 'Inspect exact context');
     exactContext.title = 'Inspect the exact bounded prompt, repository rules, and Vault recall';
-    const codeMode = btn('fgicon fgcode-mode', '</>', () => {
-      setView('ide');
-      requestAnimationFrame(() => paneViews[S.focusedGroup]?.editor?.focus());
-    });
-    codeMode.setAttribute('aria-label', 'Code mode');
-    codeMode.setAttribute('aria-pressed', S.view === 'ide' ? 'true' : 'false');
-    codeMode.title = 'Code mode opens the editor workspace; it does not change provider permissions.';
-    add(controls, addContext, exactContext, codeMode, el('span', 'sp'));
+    add(controls, addContext, exactContext, el('span', 'sp'));
 
     const locationChip = el('span', 'fgroute-state', composerLocation(session));
     locationChip.title = session.autoRoute && !(session.route && session.route.agentId)
@@ -3329,10 +3295,7 @@ export function initForge(section) {
         ));
         return wrap;
       }
-      // The agent view's landing vs. active-conversation layout is CSS-owned:
-      // one root attribute, mirroring data-forge-view (see index.html agent block).
       const isEmpty = S.chat.length === 0 && S.gates.length === 0;
-      R.setAttribute('data-forge-agent-empty', isEmpty ? '1' : '0');
       if (isEmpty) {
         const empty = el('div', 'fgempty');
         add(empty, glyph('✦', 'fgempty-mark'), el('h2', null, 'What should Zeno work on?'),
@@ -4025,11 +3988,11 @@ export function initForge(section) {
 
     bits.push(statusButton('fgstatus-item fgst-repo', `⌂ ${workspaceName(st)}`,
       st && st.root ? String(st.root) : 'Selected workspace path is unavailable.',
-      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); }));
+      () => { setPaneOpen('explorer', true); S.pan = 'explorer'; paintA(); }));
     if (st && st.repo) {
       bits.push(statusButton('fgstatus-item fgst-branch', `⑂ ${st.branch || '(no branch)'}`,
         `${st.head ? `HEAD ${st.head}` : 'No commits yet'} · Remote sync is unavailable in this build.`,
-        () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'scm'; paintA(); }));
+        () => { setPaneOpen('explorer', true); S.pan = 'scm'; paintA(); }));
       const n = (st.changed || []).length;
       bits.push(el('span', 'fgstatus-item fgst-tree', n === 0 ? '✓ clean' : `${n} changed`));
       const sync = el('span', 'fgstatus-item fgst-sync', '↻ —');
@@ -4068,11 +4031,11 @@ export function initForge(section) {
     const theme = R.getAttribute('data-theme') || 'system';
     const themeButton = statusButton('fgstatus-item fgst-theme', `◐ ${theme}`,
       `Glass theme: ${theme}. Open Extensions & themes to change it.`,
-      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); if (!S.extensions && !S.extensionsBusy) void loadExtensions(); });
+      () => { setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); if (!S.extensions && !S.extensionsBusy) void loadExtensions(); });
     bits.push(themeButton);
     const rainbow = statusButton('fgstatus-item fgst-rainbow', S.rainbowBrackets ? '{} rainbow' : '{} plain',
       `Rainbow brackets are ${S.rainbowBrackets ? 'enabled' : 'disabled'}.`,
-      () => { setView('ide'); setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); });
+      () => { setPaneOpen('explorer', true); S.pan = 'extensions'; paintA(); });
     bits.push(rainbow);
     bits.push(el('span', 'fgstatus-item fgst-notify', `♢ ${gatesWaiting()}`));
     const location = composerLocation(session);
@@ -5281,8 +5244,6 @@ export function initForge(section) {
    * the component, not a promise made here.
    */
 
-  const VIEW_KEY = 'zeno.forge.view';
-
   /** The current capsule node and preview for each held action hash. */
   const gateNodes = new Map();
   const gatePreviews = new Map();
@@ -5522,49 +5483,6 @@ export function initForge(section) {
     });
   }
 
-  /* ---- the two views ----------------------------------------------------- *
-   * IDE — the five regions, unchanged.
-   * AGENT — rgA, rgB and rgD collapse and rgC becomes a focused conversation
-   *         workspace with a compact history rail and readable transcript.
-   *         The CSS owns the layout (one attribute on :root,
-   *         exactly as the drawer's collapsed state works); this owns the
-   *         attribute, the preference and the two things that must be told the
-   *         window changed shape — the editor, which measures itself, and the
-   *         composer, which should have the caret when the chat is the window. */
-
-  function setView(next) {
-    S.view = next === 'agent' ? 'agent' : 'ide';
-    // Agent mode is the focused conversation surface. Do not carry a dense
-    // diagnostic/catalog tab into it when the owner switches from the IDE.
-    if (S.view === 'agent') S.insp = 'chat';
-    R.setAttribute('data-forge-view', S.view);
-    try {
-      localStorage.setItem(VIEW_KEY, S.view);
-    } catch {
-      /* a browser that refuses storage simply does not remember the choice */
-    }
-    syncPaneVisibility();
-    paintC();
-    paintE();
-    requestAnimationFrame(layoutEditors);
-    if (S.view === 'agent') {
-      const inp = rgC.querySelector('#zf-task');
-      if (inp && !inp.disabled) inp.focus();
-    }
-  }
-
-  function restoreView() {
-    let v = null;
-    try {
-      v = localStorage.getItem(VIEW_KEY);
-    } catch {
-      v = null;
-    }
-    S.view = v === 'agent' ? 'agent' : 'ide';
-    R.setAttribute('data-forge-view', S.view);
-    syncPaneVisibility();
-  }
-
   /* ---- the run clock ----------------------------------------------------- *
    * Elapsed time complements the daemon's live five-step orchestration facts.
    * Neither value estimates how far a provider is through generation. */
@@ -5665,7 +5583,7 @@ export function initForge(section) {
    * 4 · first paint, then the live reads                              *
    * ================================================================ */
 
-  restoreView();
+  syncPaneVisibility();
 
   paintA();
   paintB();
@@ -5681,11 +5599,10 @@ export function initForge(section) {
   openStream();
   openRunProgressStream();
 
-  /* THE SHORTCUT. Registered on the document as well as inside the editor,
-     because the editor is exactly the thing the agent-only view hides — a key
-     that only works while the code pane has focus could never be used to get
-     back. Guarded on `section.hidden`, which is how nav.js shows a surface, so
-     it is inert while Command or Counsel is on screen. */
+  /* THE EDITOR SHORTCUTS. Registered on the document as well as inside the
+     editor so they still work when focus is in the docked agent panel rather
+     than the code pane. Guarded on `section.hidden`, which is how nav.js shows
+     a surface, so they are inert while Command or Counsel is on screen. */
   document.addEventListener('keydown', (ev) => {
     if (section.hidden) return;
     if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
@@ -5706,10 +5623,16 @@ export function initForge(section) {
       closeTab(S.focusedGroup, S.file);
       return;
     }
-    if (!ev.shiftKey) return;
-    if (String(ev.key).toLowerCase() !== 'a') return;
+  });
+
+  /* Ctrl+Alt+B toggles the docked agent panel. Kept as a separate listener
+     because the shortcut handler above bails on Alt for every other key. */
+  document.addEventListener('keydown', (ev) => {
+    if (section.hidden) return;
+    if (!(ev.ctrlKey && ev.altKey)) return;
+    if (String(ev.key).toLowerCase() !== 'b') return;
     ev.preventDefault();
-    setView(S.view === 'agent' ? 'ide' : 'agent');
+    setPaneOpen('session', !S.sessionOpen);
   });
 
   /* A capsule that reaches a receipt changes two things this surface shows: the
