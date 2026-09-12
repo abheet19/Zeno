@@ -682,7 +682,11 @@ function wrapText(c, text, x, y, maxW, lh) {
 /* ---- animation + sizing ---------------------------------------------------- */
 function fieldSurfaceVisible() {
   const hero = document.getElementById('cmd-hero');
-  return (!hero || !hero.hidden) && shouldAnimateField({
+  // offsetParent is null when an ANCESTOR is display:none — which is now how a
+  // Command panel switch hides Home (command-panels toggles the .home wrapper,
+  // not #cmd-hero's own hidden attribute). Checking it here stops the canvas
+  // from looping on a hidden surface exactly as the old hero.hidden check did.
+  return (!hero || (!hero.hidden && hero.offsetParent !== null)) && shouldAnimateField({
     surface: R.getAttribute('data-zeno-surface'),
     visibilityState: document.visibilityState,
     fieldList: false,
@@ -691,7 +695,11 @@ function fieldSurfaceVisible() {
 }
 function fieldShouldAnimate() {
   const hero = document.getElementById('cmd-hero');
-  return (!hero || !hero.hidden) && shouldAnimateField({
+  // offsetParent is null when an ANCESTOR is display:none — which is now how a
+  // Command panel switch hides Home (command-panels toggles the .home wrapper,
+  // not #cmd-hero's own hidden attribute). Checking it here stops the canvas
+  // from looping on a hidden surface exactly as the old hero.hidden check did.
+  return (!hero || (!hero.hidden && hero.offsetParent !== null)) && shouldAnimateField({
     surface: R.getAttribute('data-zeno-surface'),
     visibilityState: document.visibilityState,
     fieldList: S.fieldList,
@@ -948,51 +956,6 @@ function renderReadouts(state, work, forge, mem, agents) {
   const workUnread = !!(work && work.unread);
   const forgeUnread = !!(forge && forge.unread);
 
-  /* the masthead — the headline IS the count, so it may only be said when the
-     count is known. "Nothing is waiting on you." is the most reassuring sentence
-     in the product; saying it because /state could not be reached is the single
-     worst thing this page can do, and it is the one it used to do. */
-  const h = document.querySelector('[data-mount="hero-headline"]');
-  if (h) {
-    h.textContent = stateUnread
-      ? 'The daemon did not answer.'
-      : needs === 0
-        ? 'Nothing is waiting on you.'
-        : `${needs} ${needs === 1 ? 'decision is' : 'decisions are'} waiting on you.`;
-  }
-  const sub = document.querySelector('[data-mount="hero-sub"]');
-  if (sub) {
-    sub.textContent = stateUnread
-      ? 'This window could not read the approval queue, so it does not know whether anything is waiting. Treat this as unknown, not as clear — work may well be held. The same queue is readable from the CLI.'
-      : needs === 0
-        ? 'Every consequential effect stops here first. Nothing has moved without your yes, and nothing is holding.'
-        : 'Sealed, cited and hash-bound. Opening one is not approving it, and approving it starts nothing else.';
-  }
-  const eb = document.querySelector('[data-mount="hero-eyebrow"]');
-  if (eb) {
-    try { eb.textContent = 'Zeno Command · ' + new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }); }
-    catch { eb.textContent = 'Zeno Command · reason before action'; }
-  }
-
-  /* the three hero chips: what wants you, what is moving, what leaves the machine */
-  const chips = document.querySelector('[data-mount="hero-chips"]');
-  if (chips) {
-    /* An unread count is drawn as "—", never as 0, and never green: a green zero
-       is a claim, and this read has nothing to claim with. The chip keeps its
-       place so the shape of the masthead does not move — what changes is only
-       whether it is asserting a number or admitting it has none.
-       The egress chip needs BOTH /work and /forge/agents; agents is a separate
-       read, so it is unknown when either could not be counted. */
-    const agentsUnread = !(agents && Array.isArray(agents.agents));
-    const chip = (unread, n, cls, label) =>
-      `<span class="hchip${unread ? ' un' : cls}"><i></i><b>${unread ? '—' : n}</b> ${label}</span>`;
-    chips.innerHTML =
-      chip(stateUnread, needs, needs ? ' am' : '', stateUnread ? 'unread' : (needs === 1 ? 'needs you' : 'need you'))
-      + chip(forgeUnread, changed, changed ? ' cy' : '', forgeUnread ? 'sandbox unread' : `uncommitted ${changed === 1 ? 'change' : 'changes'}`)
-      + chip(workUnread || agentsUnread, egress, egress ? ' am' : ' gr',
-        (workUnread || agentsUnread) ? 'egress unknown' : `egress ${egress === 1 ? 'path' : 'paths'}`);
-  }
-
   /* the tally under the hero */
   const tally = document.querySelector('[data-mount="tally"]');
   if (tally) {
@@ -1033,6 +996,125 @@ function renderReadouts(state, work, forge, mem, agents) {
   railN('rail-workstation', changed);
   railN('rail-vault', (mem && Array.isArray(mem.notes)) ? mem.notes.length : 0);
   railN('rail-integrations', liveSources + ((agents && Array.isArray(agents.localModels)) ? agents.localModels.length : 0));
+
+  /* ---- the two-column Home: greeting, banner, kernel line and the rail -------
+     Every value below is one of the counts computed above from the SAME fetch,
+     so the banner, the rail and the kernel line can never disagree with the orb
+     or the tally. A read that did not answer is drawn as an honest empty state
+     or an em dash — never a fabricated number. */
+  const agentsUnread = !(agents && Array.isArray(agents.agents));
+
+  // Time-based greeting. The daemon has exactly one local owner.
+  const greetEl = document.querySelector('[data-mount="greet"]');
+  if (greetEl) {
+    let hr = 12; try { hr = new Date().getHours(); } catch { /* no clock */ }
+    const part = hr < 12 ? 'morning' : hr < 18 ? 'afternoon' : 'evening';
+    greetEl.textContent = `Good ${part}, Abheet.`;
+  }
+
+  // The orb's one-line state summary — the count that used to be the headline.
+  setText('orb-state', stateUnread
+    ? 'state unread · the daemon did not answer'
+    : needs === 0
+      ? 'all clear · nothing is waiting on you'
+      : `${needs} ${needs === 1 ? 'decision needs you' : 'decisions need you'}`);
+
+  // The amber banner: shown ONLY when the queue genuinely holds something.
+  const attn = document.querySelector('[data-mount="attn"]');
+  if (attn) {
+    const on = !stateUnread && needs > 0;
+    attn.hidden = !on;
+    if (on) {
+      const c = attn.querySelector('[data-mount="attn-count"]');
+      const l = attn.querySelector('[data-mount="attn-label"]');
+      if (c) c.textContent = String(needs);
+      if (l) l.textContent = needs === 1 ? 'decision' : 'decisions';
+    }
+  }
+
+  // The persistent kernel line under the composer. The receipt count and the
+  // chain state come from THIS /state snapshot; the owner-token state is whether
+  // the daemon handed this window a token. Ed25519 signing and the built-in
+  // policy describe how the kernel is built, so they are stated, not counted.
+  const kernel = document.querySelector('[data-mount="kernel"]');
+  if (kernel) {
+    const rc = receipts.length;
+    const chainOk = (state && state.chain && typeof state.chain.ok === 'boolean') ? state.chain.ok : null;
+    const dot = chainOk === true ? '<span class="ok"></span>'
+      : chainOk === false ? '<span class="ok rd"></span>'
+        : '<span class="ok un"></span>';
+    const chainWord = stateUnread ? 'chain unread'
+      : chainOk === true ? 'chain verified'
+        : chainOk === false ? 'chain broken'
+          : 'chain not reported';
+    const rcPart = stateUnread ? 'receipts unread' : `<b>${rc}</b> ${rc === 1 ? 'receipt' : 'receipts'}`;
+    const owner = token() ? '<b>owner token</b> held' : '<b>read-only</b> · no owner token';
+    kernel.innerHTML =
+      `<span>${dot}<b>${chainWord}</b></span><span class="sep"></span>`
+      + `<span>${rcPart}</span><span class="sep"></span>`
+      + '<span><b>Ed25519</b> signed</span><span class="sep"></span>'
+      + `<span>${owner}</span><span class="sep"></span>`
+      + '<span>policy <b>built-in</b></span>';
+  }
+
+  const SVG_APPROVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>';
+  const SVG_FORGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>';
+
+  // "Needs you" — the approvals actually waiting, straight from /state pending.
+  setText('needs-sum', stateUnread ? '' : (needs ? String(needs) : ''));
+  const needsBody = document.querySelector('[data-mount="needs-body"]');
+  if (needsBody) {
+    if (stateUnread) {
+      needsBody.innerHTML = '<div class="hs-empty">The approval queue could not be read. Treat this as unknown, not clear.</div>';
+    } else if (needs === 0) {
+      needsBody.innerHTML = '<div class="hs-empty">Nothing is waiting on you.</div>';
+    } else {
+      const waiting = pending.filter((p) => !p.denied).slice(0, 3);
+      needsBody.innerHTML = waiting.map((p) => {
+        const summary = esc(clip(p.summary || (p.request && p.request.summary) || p.actionHash || 'a pending action', 44));
+        const meta = esc(p.tier ? `tier ${p.tier} · held for your approval` : 'held for your approval');
+        return '<div class="lcard needs">'
+          + `<div class="lk">${SVG_APPROVE}<span>${summary}</span></div>`
+          + `<div class="lm">${meta}</div>`
+          + '<div class="lr"><span class="pill am"><span class="d"></span>1 approval</span>'
+          + '<button type="button" class="laction" data-goto="#pending">Review</button></div>'
+          + '</div>';
+      }).join('');
+      if (needs > waiting.length) {
+        needsBody.insertAdjacentHTML('beforeend', `<div class="hs-empty">+ ${needs - waiting.length} more in the queue.</div>`);
+      }
+    }
+  }
+
+  // "Running" — the sandbox worktree from /forge/status. There is no daemon
+  // route this window can read for live agent sessions, so this reports the one
+  // genuine in-flight signal it has: the sandbox's uncommitted changes.
+  setText('running-sum', forgeUnread ? '' : (changed ? '1' : ''));
+  const runningBody = document.querySelector('[data-mount="running-body"]');
+  if (runningBody) {
+    if (forgeUnread) {
+      runningBody.innerHTML = '<div class="hs-empty">The sandbox could not be read.</div>';
+    } else if (changed > 0) {
+      const branch = esc(clip((forge && forge.branch) || 'sandbox', 20));
+      const head = (forge && forge.head) ? ' @ ' + esc(String(forge.head).slice(0, 7)) : '';
+      runningBody.innerHTML = '<div class="lcard">'
+        + `<div class="lk">${SVG_FORGE}<span>Forge sandbox · ${branch}</span></div>`
+        + `<div class="lm">${changed} uncommitted change${changed === 1 ? '' : 's'}${head}</div>`
+        + '<div class="lr"><span class="pill cy"><span class="d"></span>in the sandbox</span>'
+        + '<button type="button" class="laction" data-go="forge">Open Forge</button></div>'
+        + '</div>';
+    } else {
+      runningBody.innerHTML = '<div class="hs-empty">No active runs. The sandbox is clean; a Forge run shows here while it works.</div>';
+    }
+  }
+
+  // "Today" — the same tally counts, one per row; an unread read shows an em dash.
+  const stat = (mount, val, unread) => { const e = document.querySelector(`[data-mount="${mount}"]`); if (e) e.textContent = unread ? '—' : String(val); };
+  stat('today-verified', verified, stateUnread);
+  stat('today-sandbox', changed, forgeUnread);
+  stat('today-backlog', items.length, workUnread);
+  stat('today-memories', (mem && Array.isArray(mem.notes)) ? mem.notes.length : 0, !(mem && Array.isArray(mem.notes)));
+  stat('today-egress', egress, (workUnread || agentsUnread));
 }
 
 /* ---- public entry ---------------------------------------------------------- */
@@ -1130,6 +1212,15 @@ export function init(section) {
     agentsRead = false;
     agentsAt = 0;
     if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
+  });
+  /* Command panel switches (Home ⇄ Approvals ⇄ …) no longer toggle #cmd-hero's
+     own hidden attribute — command-panels toggles the .home wrapper — so the
+     MutationObserver on #cmd-hero.hidden below never fires for them. Re-check
+     size + animation on the panel event so the orb stops when Home is left and
+     resumes (correctly sized to the left column) when it returns. */
+  window.addEventListener('zeno:command-panel', () => {
+    if (fieldSurfaceVisible()) { size(); if (fieldShouldAnimate()) startF(); else { stopF(); draw(); } }
+    else stopF();
   });
   setInterval(() => { if (fieldSurfaceVisible()) refresh(listEl).catch(() => {}); }, 15000);
 

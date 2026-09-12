@@ -12,7 +12,13 @@ function one(selector) {
 }
 
 const groups = new Map([
-  ['cmd-hero', [one('.hero'), one('.home-starters'), one('.cmdduo'), one('#cmd-status'), one('#cmd-desk')]],
+  // The Home group is now a single wrapper: .home holds the centre column
+  // (.hero orb, greeting, starters, composer, kernel, and the #cmd-status /
+  // #cmd-desk disclosures) plus the right context rail. Toggling the wrapper
+  // shows/hides the whole two-column Home at once; #cmd-status and #cmd-desk
+  // ride along inside it, so command.js's deskVisible() and app.js's #summary
+  // mounts keep working unchanged.
+  ['cmd-hero', [one('.home')]],
   ['chats', [one('#chats')]],
   ['pending', [one('#pending')]],
   ['timeline', [one('#timeline')]],
