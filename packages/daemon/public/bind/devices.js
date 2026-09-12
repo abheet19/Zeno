@@ -301,19 +301,21 @@ export async function bind() {
       }
       showSheetLoading();
       const r = await postJSON('/mesh/pairing');
-      if (!r.ok && r.status !== 409) {
-        showSheetNone(`could not start a pairing — ${r.error}`);
-        await syncAll();
-        return;
-      }
       await syncAll(); // canonical state — also covers the 409 "already open" case
+      if (!r.ok && r.status !== 409 && !state.pairing) {
+        showSheetNone(`could not start a pairing — ${r.error}`);
+      }
     }
 
     async function onCancelPairing() {
       if (!ownerHeld) return;
-      await postJSON('/mesh/pairing/cancel');
-      await syncAll();
-      if (pairSheet) pairSheet.hidden = true;
+      const r = await postJSON('/mesh/pairing/cancel');
+      await syncAll(); // reflects whatever the daemon actually did, success or not
+      if (r.ok) {
+        if (pairSheet) pairSheet.hidden = true;
+      } else if (pairSheet && !pairSheet.hidden) {
+        showSheetNone(`could not cancel — ${r.error}`);
+      }
     }
 
     async function onNewCode() {
@@ -321,10 +323,10 @@ export async function bind() {
       showSheetLoading('reading a new pairing code…');
       await postJSON('/mesh/pairing/cancel');
       const r = await postJSON('/mesh/pairing');
-      if (!r.ok && r.status !== 409) {
+      await syncAll();
+      if (!r.ok && r.status !== 409 && !state.pairing) {
         showSheetNone(`could not start a new pairing — ${r.error}`);
       }
-      await syncAll();
     }
 
     // Replace every [data-pair] trigger with a fresh node before wiring it, so

@@ -12,29 +12,25 @@
 .avatar-mono{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--g5);color:var(--ink);font:600 12px/1 var(--font-mono,monospace);flex:none}
 /* The Zeno core above the Forge session composer — the same gold core the
    Standing Field draws, at rest. Breathes slowly; still under reduce-motion. */
-.ag-orb{width:64px;height:64px;margin:0 auto 18px;border-radius:50%;
-  background:radial-gradient(circle at 38% 34%, #F4E3B2 0%, var(--gold,#D8BE7E) 34%, #8A7134 68%, #3A3320 100%);
-  box-shadow:0 0 26px 6px color-mix(in srgb,var(--gold,#D8BE7E) 30%,transparent),
-             inset -5px -6px 14px rgba(0,0,0,.55), inset 3px 3px 10px rgba(255,255,255,.18);
+.ag-orb{width:44px;height:44px;margin:0 auto 14px;border-radius:50%;
+  background:radial-gradient(circle at 42% 38%, color-mix(in srgb,var(--gold,#D8BE7E) 70%,transparent) 0%, color-mix(in srgb,var(--gold,#D8BE7E) 26%,transparent) 46%, transparent 72%);
+  box-shadow:0 0 34px 10px color-mix(in srgb,var(--gold,#D8BE7E) 16%,transparent);
   animation:agorb 6.5s ease-in-out infinite}
 @keyframes agorb{0%,100%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.045);filter:brightness(1.1)}}
 @media (prefers-reduced-motion:reduce){.ag-orb{animation:none}}
 :root[data-reduce="1"] .ag-orb{animation:none}
-/* Devin-style first run: the ask, then the four things you can do from here. */
-.sessempty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:28px 20px}
-.dv-title{text-align:center; display:flex; flex-direction:column; gap:7px; margin-bottom:4px}
-.dv-title b{font-family:var(--font-display,Newsreader,serif); font-size:26px; font-weight:500; color:var(--ink)}
-.dv-title span{font-size:13px; color:var(--ink-3); max-width:44ch; margin:0 auto; line-height:1.5}
-.dv-quick{order:2; width:min(560px,94%)}
-.dv-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px}
-.dv-act{display:flex; flex-direction:column; align-items:flex-start; gap:3px; position:relative;
-  padding:11px 13px; border-radius:11px; border:1px solid var(--gl-edge,#2C363B); background:var(--g2,#0F1214);
-  color:var(--ink-2); cursor:pointer; text-align:left; transition:.16s}
-.dv-act:hover{border-color:color-mix(in srgb,var(--cyan,#38C3D6) 40%,var(--gl-edge,#2C363B)); background:var(--g3,#151A1D)}
-.dv-act b{color:var(--ink); font-size:13px; font-weight:600}
-.dv-act span:last-child{font-size:11.5px; color:var(--ink-3); line-height:1.4}
-.dv-act .dv-k{position:absolute; top:10px; right:11px; font-family:var(--font-mono,monospace); font-size:9.5px; color:var(--ink-3)}
-@media (max-width:620px){ .dv-actions{grid-template-columns:1fr} }
+/* First run, Devin-shaped: the mark centred in the panel on a faint hex mesh,
+   the ask beneath it, and the composer pinned at the bottom. Nothing else. */
+.sessempty{display:flex; flex-direction:column; align-items:stretch; justify-content:flex-end; gap:16px; padding:24px 16px 14px; position:relative}
+.sessempty::before{content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='48' viewBox='0 0 56 48'><path d='M14 1l12 7v14l-12 7L2 22V8z' fill='none' stroke='%232C363B' stroke-width='1'/><path d='M42 1l12 7v14l-12 7-12-7V8z' fill='none' stroke='%232C363B' stroke-width='1'/></svg>");
+  -webkit-mask-image:radial-gradient(70% 55% at 50% 38%, #000 0%, transparent 72%);
+  mask-image:radial-gradient(70% 55% at 50% 38%, #000 0%, transparent 72%)}
+.dv-hero{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; text-align:center; position:relative}
+.dv-hero b{font-family:var(--font-display,Newsreader,serif); font-size:22px; font-weight:500; color:var(--ink); letter-spacing:.01em}
+.dv-hero span{font-size:12.5px; color:var(--ink-3); line-height:1.5; max-width:30ch}
+.dv-tip{font-size:11.5px; color:var(--ink-3); border:1px solid var(--rule,#242C31); border-radius:9px; padding:8px 11px; margin-bottom:10px; background:color-mix(in srgb,var(--g2,#0F1214) 70%,transparent)}
+.dv-tip kbd{font-family:var(--font-mono,monospace); font-size:10.5px; color:var(--ink-2)}
 /* Composers grow with their text instead of clipping it.
    overflow is HIDDEN while growing — an auto-scrollbar in a short box is what
    produced those native up/down arrows and hid the second line. The JS
@@ -1187,25 +1183,19 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
         <div class="sesstabs" id="s-tabs" hidden role="tablist"><button aria-selected="true" data-stab="chat">Session</button><button data-stab="plan">Plan</button><button data-stab="runs">Runs</button><button data-stab="actions">Actions <span class="fct am">1</span></button><button data-stab="lens">Lens</button></div>
         <div class="sessbody" id="s-body">
           <div class="sessempty" id="s-empty">
-            <!-- Devin-style first run: the Zeno core, the ask, and the four
-                 things you can actually do from here — with the composer below. -->
-            <div class="dv-quick" role="group" aria-label="Start here">
-              <div class="dv-actions">
-                <button class="dv-act" data-dvq="new"><span class="dv-k">Ctrl T</span><b>New session</b><span>Start a governed run in a throwaway worktree</span></button>
-                <button class="dv-act" data-dvq="open"><span class="dv-k">Ctrl P</span><b>Open a file</b><span>Read the sandbox as it actually is</span></button>
-                <button class="dv-act" data-dvq="cust"><span class="dv-k"></span><b>Open customizations</b><span>Rules, skills, MCP servers and plugins</span></button>
-                <button class="dv-act" data-dvq="diffs"><span class="dv-k"></span><b>View diffs</b><span>Everything this session would change</span></button>
-              </div>
+            <!-- First run, Devin-shaped: the mark centred on a faint hex mesh with
+                 the ask, and the composer pinned below. Nothing else — Devin does
+                 not put action cards here. -->
+            <div class="dv-hero">
+              <div class="ag-orb" aria-hidden="true"></div>
+              <b>Zeno Forge</b>
+              <span>Describe your task to Zeno</span>
             </div>
             <div class="ag-wrap">
-              <!-- The Zeno core. It was here before the Antigravity composer
-                   replaced the earlier empty state; the mark is the surface's
-                   identity, so it sits above the composer rather than being lost. -->
-              <div class="ag-orb" aria-hidden="true"></div>
-              <div class="dv-title"><b>Zeno Forge</b><span>Describe your task. Nothing touches your repository until you approve it.</span></div>
+              <div class="dv-tip" id="s-tip2">Tip: Toggle the agent panel with <kbd>Ctrl+Alt+B</kbd></div>
               <button class="ag-proj" title="Working folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>sandbox · main ▾</button>
               <div class="ag-composer">
-                <textarea id="ag-ta" rows="1" placeholder="Ask anything — describe a task, @ to mention, / for actions"></textarea>
+                <textarea id="ag-ta" rows="1" placeholder="Describe your task to Zeno"></textarea>
                 <div class="ag-row">
                   <button class="ag-ic" id="ag-plus" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
                   <button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button>

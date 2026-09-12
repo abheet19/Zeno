@@ -305,6 +305,11 @@
      field-sizing:content covers new Chrome; this is the fallback everywhere
      else, capped so a long paste scrolls instead of swallowing the pane. */
   function autosize(t){ if(!t) return; const cap=Math.round(innerHeight*0.4);
+    // An EMPTY textarea has a one-line scrollHeight, so measuring it collapses the
+    // box below a placeholder that wraps — which is what was clipping "…/ for
+    // actions". With no value, drop the inline height and let CSS min-height show
+    // the placeholder in full.
+    if(!t.value){ t.style.height=''; t.style.overflowY='hidden'; return; }
     t.style.height='auto';
     const want=t.scrollHeight;
     t.style.height=Math.min(want, cap)+'px';
