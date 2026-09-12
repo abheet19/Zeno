@@ -965,19 +965,32 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
   border-right:1px solid var(--gl-edge); overflow:hidden; padding:0;
   display:flex; flex-direction:row; min-height:0;
 }
+/* Activity bar — the workbench rail of inline-SVG view icons (VS Code's .vsact,
+   ported to the Forge design). The old glyph rail is gone; buttons now hold an
+   SVG and an optional count badge, so they are grid-centred. */
 .forge .fgactivity{
-  width:42px; flex:0 0 42px; display:flex; flex-direction:column; align-items:center;
-  padding:5px 0; gap:2px; border-right:1px solid var(--rule); background:var(--g1);
+  width:44px; flex:0 0 44px; display:flex; flex-direction:column; align-items:center;
+  padding:6px 0; gap:2px; border-right:1px solid var(--gl-edge);
+  background:linear-gradient(180deg,rgba(127,140,160,.05),rgba(127,140,160,.012));
 }
 .forge .fgactivity button{
-  width:34px; height:34px; border:0; border-radius:7px; background:none; color:var(--ink-3);
-  font:600 17px/1 var(--font-mono); cursor:pointer; position:relative;
+  position:relative; width:40px; height:40px; border:0; border-radius:8px; background:none;
+  color:var(--ink-3); cursor:pointer; display:grid; place-items:center;
 }
-.forge .fgactivity button:hover{ color:var(--ink); background:var(--g4); }
-.forge .fgactivity button[aria-current="true"]{ color:var(--cyan); background:var(--g4); }
-.forge .fgactivity button[aria-current="true"]::before{ content:""; position:absolute; left:-4px; top:6px; bottom:6px; width:2px; border-radius:2px; background:var(--cyan); }
+.forge .fgactivity button svg{ width:22px; height:22px; }
+.forge .fgactivity button:hover{ color:var(--ink); }
+.forge .fgactivity button[aria-current="true"]{ color:var(--ink); }
+.forge .fgactivity button[aria-current="true"]::before{ content:""; position:absolute; left:0; top:8px; bottom:8px; width:2px; background:var(--cyan); border-radius:0 2px 2px 0; }
+.forge .fgactivity .vsbadge{
+  position:absolute; right:5px; bottom:5px; min-width:15px; height:15px; padding:0 4px;
+  border-radius:99px; background:var(--cyan); color:var(--g1); font-family:var(--font-mono);
+  font-size:9px; font-weight:600; display:grid; place-items:center;
+}
+.forge .fgactivity .vsbadge.am{ background:var(--amber); }
+.forge .fgrow{ flex:1 1 auto; }
 .forge .fgside{ min-width:0; flex:1; display:flex; flex-direction:column; padding:8px 8px 9px; }
-.forge .fgside-title{ padding:2px 5px 8px; font:600 10px/1.2 var(--font-mono); color:var(--ink-2); text-transform:uppercase; letter-spacing:.08em; }
+/* .vsvh — the workbench side-bar view header (replaces the old .fgside-title). */
+.forge .vsvh{ display:flex; align-items:center; gap:6px; padding:9px 5px 8px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); font-weight:500; flex:none; }
 .forge .panbody{ flex:1; overflow:auto; min-height:0; margin:0 -2px; padding:0 2px; }
 .forge .rgB{ background:var(--g2); overflow:hidden; display:flex; flex-direction:column; min-width:0; }
 .forge .rgC{
@@ -1167,8 +1180,30 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 .forge .fgtree button{ padding-left:calc(5px + var(--depth,0) * 13px); border-radius:4px; }
 .forge .fgtree .fgchev{ width:10px; flex:0 0 10px; color:var(--ink-2); text-align:center; font:12px/1 var(--font-mono); }
 .forge .fgtree .fgfolder{ color:var(--cyan); opacity:.76; font-size:10px; }
-.forge .fgtree .fgfile-mark{ font-size:8px; }
 .forge .fgtree-folder{ font-weight:520; color:var(--ink) !important; }
+/* ---- Explorer sections + coloured file-type badges + change markers ------ *
+   Ported from the workbench design: collapsible SANDBOX / OUTLINE / TIMELINE
+   sections, a coloured .vsi badge keyed off the file extension, and the M / U
+   change marker git reports. These replaced the old ● / ○ dot. */
+.forge .vssect{
+  display:flex; align-items:center; gap:4px; width:100%; text-align:left; border:0; cursor:pointer;
+  padding:6px 4px; margin-top:4px; background:none; border-top:1px solid var(--rule);
+  font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; font-weight:600; color:var(--ink-2);
+}
+.forge .vssect:hover{ color:var(--ink); }
+.forge .vssect .chev{ width:12px; flex:none; text-align:center; color:var(--ink-3); font-size:10px; }
+.forge .vsi{
+  display:inline-grid; place-items:center; width:16px; height:16px; flex:none;
+  font-family:var(--font-mono); font-size:8.5px; font-weight:700; border-radius:3px; color:var(--g1);
+}
+.forge .vsi.ts{ background:#3178c6; color:#fff; } .forge .vsi.tsx{ background:#2d8fd6; color:#fff; }
+.forge .vsi.js{ background:#cbcb41; color:#111; } .forge .vsi.md{ background:#4a86c8; color:#fff; font-size:7px; }
+.forge .vsi.json{ background:#cbcb41; color:#111; } .forge .vsi.css{ background:#2d8fd6; color:#fff; }
+.forge .vsi.html{ background:#e37933; color:#fff; font-size:7.5px; } .forge .vsi.git{ background:#f05133; color:#fff; }
+.forge .vsi.txt{ background:var(--g6); color:var(--ink-2); }
+.forge .vsi:not([class*=" "]){ background:none; color:var(--ink-3); }
+.forge .fgtree-file .vsmod{ margin-left:auto; font-family:var(--font-mono); font-size:10px; color:var(--amber); padding-right:4px; }
+.forge .fgtree-file .vsmod.new{ color:var(--green); }
 /* ---- rgA: the search box, and one matching line ------------------------- *
    The result row reuses `.tree button`, so a hit looks and behaves exactly like
    a file in the Explorer — same hover, same focus ring, same click target. Only
@@ -1299,30 +1334,46 @@ button.tile:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
 }
 .forge .insp-tabs button[aria-selected="true"]{ color:var(--ink); box-shadow:inset 0 -2px 0 var(--cyan); }
 .forge .insp-bd{ padding:11px; overflow:auto; flex:1; min-height:0; font-size:12px; background:var(--g2); }
-.forge .msg{ margin-bottom:10px; }
-.forge .msg .who{
-  font-family:var(--font-mono); font-size:9px; color:var(--ink-2); letter-spacing:.06em;
-  text-transform:uppercase; margin-bottom:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;
-}
-.forge .msg .who .mchip{
-  font-family:var(--font-mono); font-size:8.5px; color:var(--ink-2); background:var(--g4);
-  border:1px solid var(--rule); border-radius:4px; padding:1px 5px; text-transform:none; letter-spacing:0;
-}
-.forge .msg .bub{ background:var(--g4); border-radius:8px; padding:8px 10px; font-size:12px; line-height:1.5; color:var(--ink); overflow-wrap:anywhere; }
-.forge .msg.me .bub{ background:var(--g5); }
-.forge .msg .bub pre{
-  margin:6px 0 0; font-family:var(--font-mono); font-size:11px; line-height:1.6;
-  white-space:pre-wrap; overflow-wrap:anywhere; color:var(--ink-2); max-height:40vh; overflow:auto;
-}
-.forge .tool{
-  font-family:var(--font-mono); font-size:10.5px; color:var(--ink-2); background:var(--g3);
-  border:1px solid var(--rule); border-radius:7px; padding:5px 9px; margin-bottom:7px;
-  display:flex; align-items:center; gap:7px;
-}
-.forge .tool .th{ color:var(--cyan); flex:none; }
-.forge .tool .pth{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.forge .tool .ok{ color:var(--green); margin-left:auto; flex:none; }
-.forge .think{ font-size:11px; color:var(--ink-2); font-style:italic; margin:0 0 6px; padding-left:9px; border-left:2px solid var(--rule-2); }
+/* ---- Cascade-style session turns, inline tool cards + amber approval capsule
+   Ported from the Forge design; these replaced the old .msg / .bub / .mchip /
+   .tool / .think chat-bubble machinery. The .pill primitive is reused as-is. */
+.forge .turn{ display:flex; gap:12px; margin-bottom:12px; }
+.forge .turn .who{ width:30px; height:30px; border-radius:9px; flex:none; display:grid; place-items:center; font-family:var(--font-mono); font-size:11px; }
+.forge .turn.you .who{ background:var(--g5); color:var(--ink-2); }
+.forge .turn.z .who{ background:linear-gradient(150deg,#173e44,#0e1214); color:var(--cyan); border:1px solid var(--gl-edge); }
+.forge .turn .bt{ flex:1; min-width:0; font-size:13.5px; line-height:1.55; color:var(--ink); }
+.forge .turn .bt p{ margin:0 0 8px; }
+.forge .turn .bt p:last-child{ margin-bottom:0; }
+
+/* Session-header "Session" title, SVG icon buttons, and the amber tab count. */
+.forge .sesst{ color:var(--ink); padding-right:6px; font-weight:500; }
+.forge .fico{ width:26px; height:26px; flex:none; border-radius:6px; border:1px solid transparent; background:none; color:var(--ink-3); cursor:pointer; display:grid; place-items:center; }
+.forge .fico:hover{ color:var(--ink); background:var(--wash); border-color:var(--gl-edge); }
+.forge .fico:disabled{ opacity:.4; cursor:default; }
+.forge .fico svg{ width:15px; height:15px; }
+.forge .fct{ font-size:9.5px; padding:0 5px; border-radius:99px; background:var(--g5); color:var(--ink-2); }
+.forge .fct.am{ background:color-mix(in srgb,var(--amber) 22%,var(--g5)); color:var(--amber); }
+
+/* Inline tool cards (replace the old .tool rows in the run disclosure). */
+.forge .dvtool{ display:flex; align-items:center; gap:9px; width:100%; text-align:left; padding:6px 9px; margin:5px 0 0; border:1px solid var(--rule); border-radius:8px; background:var(--g2); font-size:12.5px; color:var(--ink-2); }
+.forge button.dvtool{ cursor:pointer; }
+.forge button.dvtool:hover{ border-color:var(--rule-2); color:var(--ink); }
+.forge .dvtool-i{ width:22px; height:22px; border-radius:6px; background:var(--g4); display:grid; place-items:center; color:var(--ink-3); flex:none; }
+.forge .dvtool-i svg{ width:13px; height:13px; }
+.forge .dvtool-t{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.forge .dvtool-t code{ font-family:var(--font-mono); font-size:11px; color:var(--ink-2); }
+.forge .dvtool-r{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); flex:none; }
+.forge .dvtool-r.ok{ color:var(--green); }
+
+/* Amber approval capsule — wraps the real capsule node from /capsule.js. */
+.forge .dvapproval{ border:1px solid color-mix(in srgb,var(--amber) 34%,var(--rule)); background:color-mix(in srgb,var(--amber) 6%,var(--g2)); border-radius:12px; padding:10px 12px; margin:12px 0 16px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+.forge .dvapproval[data-settled="1"]{ border-color:var(--rule); background:var(--g2); }
+.forge .dvapproval .zn-caps{ max-width:100%; }
+.forge .dva-h{ display:flex; align-items:center; gap:8px; font-size:13px; }
+.forge .dva-h b{ font-weight:500; color:var(--ink); }
+.forge .dva-m{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); }
+.forge .dva-m code{ font-family:var(--font-mono); font-size:11px; color:var(--ink-2); }
+.forge .tier{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; padding:3px 7px; border-radius:4px; background:var(--g5); color:var(--ink-2); white-space:nowrap; }
 .forge .cite{ font-family:var(--font-mono); font-size:10px; color:var(--cyan); margin-top:5px; display:inline-block; background:none; border:0; padding:0; cursor:pointer; }
 .forge .cite:hover{ text-decoration:underline; }
 .forge .compose{ border-top:1px solid var(--rule); padding:9px; display:flex; gap:6px; flex:none; }
@@ -1635,25 +1686,10 @@ dialog.fgmm::backdrop{ background:color-mix(in srgb,var(--g1,#0A0C0E) 76%,transp
 .forge .rgA .kv{ grid-template-columns:minmax(0,1fr); gap:0; }
 .forge .rgA .kv dt{ font-size:9.5px; letter-spacing:.05em; text-transform:uppercase; margin-top:6px; }
 
-/* ---- the gate, in line ---------------------------------------------------
-   The capsule brings its own opaque styling (L-GLASS: a capsule is never
-   glass), so almost nothing is said about it here. What IS said: it gets the
-   full measure of the column, and it is announced by a line naming who is
-   asking and when — a capsule that appears with no attribution reads like a
-   dialog box, and this is not a dialog box, it is a turn in the conversation. */
-.forge .fgate{ margin:12px 0 16px; min-width:0; }
-.forge .fgate .zn-caps{ max-width:100%; }
-.forge .fghead{
-  display:flex; align-items:center; gap:8px; margin-bottom:7px;
-  font-family:var(--font-mono); font-size:9.5px; letter-spacing:.06em;
-  text-transform:uppercase; color:var(--amber);
-}
-.forge .fgate[data-settled="1"] .fghead{ color:var(--ink-2); }
-.forge .fghead .sp{ flex:1; }
-.forge .fghead .fgglyph{ font-size:11px; }
-.forge .fghead .fgkind, .forge .fghead .fgat{
-  color:var(--ink-2); letter-spacing:0; text-transform:none;
-}
+/* The in-line gate is now the amber .dvapproval capsule (see the session-turn
+   block above); its old .fgate / .fghead attribution chrome was removed with
+   the .msg chat bubbles it lived among. The capsule still gets the full column
+   and is announced by a tier chip + meta line, drawn from the real held gate. */
 
 /* ---- a run in flight -----------------------------------------------------
    The bar is backed by five daemon orchestration milestones. Its label keeps
@@ -1773,12 +1809,11 @@ dialog.fgmm::backdrop{ background:color-mix(in srgb,var(--g1,#0A0C0E) 76%,transp
 :root[data-forge-session="closed"] .forge{ grid-template-columns:var(--fexplorer,318px) minmax(0,1fr) 0 !important; }
 :root[data-forge-explorer="closed"][data-forge-session="closed"] .forge{ grid-template-columns:0 minmax(0,1fr) 0 !important; }
 
-:root[data-zeno-surface="forge"] .forge .fgactivity{ width:41px; flex-basis:41px; padding-top:4px; gap:1px; background:var(--g1); }
-:root[data-zeno-surface="forge"] .forge .fgactivity button{ width:37px; height:35px; border-radius:3px; font-size:17px; }
-:root[data-zeno-surface="forge"] .forge .fgactivity button[aria-current="true"]{ background:none; color:var(--ink); }
-:root[data-zeno-surface="forge"] .forge .fgactivity button[aria-current="true"]::before{ left:-2px; top:4px; bottom:4px; width:2px; }
+/* The activity rail now carries the full workbench .vsact styling in the base
+   .forge block (SVG icons, 44px column, left-edge current bar); the old glyph
+   overrides that used to sit here are gone. */
 :root[data-zeno-surface="forge"] .forge .fgside{ padding:8px 7px 9px; }
-:root[data-zeno-surface="forge"] .forge .fgside-title{ padding:4px 7px 9px; font:600 11px/1.2 var(--font-ui); letter-spacing:.035em; }
+:root[data-zeno-surface="forge"] .forge .vsvh{ padding:4px 7px 9px; }
 :root[data-zeno-surface="forge"] .forge .rgA .mdl{
   margin:0 2px 5px; padding:3px 4px 7px; border:0; border-bottom:1px solid var(--rule);
   border-radius:0; background:none;
@@ -1849,8 +1884,6 @@ dialog.fgmm::backdrop{ background:color-mix(in srgb,var(--g1,#0A0C0E) 76%,transp
 :root[data-zeno-surface="forge"] .forge .insp-tabs{ padding:4px 8px 0; }
 :root[data-zeno-surface="forge"] .forge .insp-tabs button{ padding:7px 8px; font-size:11.5px; }
 :root[data-zeno-surface="forge"] .forge .insp-bd{ padding:12px; font-size:12.5px; }
-:root[data-zeno-surface="forge"] .forge .msg .bub{ font-size:12.5px; line-height:1.55; }
-:root[data-zeno-surface="forge"] .forge .msg .who{ font-size:9.5px; }
 :root[data-zeno-surface="forge"] .forge .insp-bd:has(> .unwired:only-child){ display:flex; align-items:center; justify-content:center; }
 :root[data-zeno-surface="forge"] .forge .insp-bd:has(> .unwired:only-child) .unwired{
   width:min(100%,520px); margin:0; border:0; background:none; text-align:center;

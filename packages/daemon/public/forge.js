@@ -153,6 +153,21 @@ const ICONS = {
   gpu: { sw: 1.7, s: [['rect', { x: 4, y: 4, width: 16, height: 12, rx: 2 }], 'M8 20h8M9 16v4M15 16v4M8 8h4M8 11h6'] },
   parallel: { sw: 1.8, s: ['M4 8h13M4 16h13M14 4l4 4-4 4M14 12l4 4-4 4'] },
   sequential: { sw: 1.8, s: ['M4 7h11l-3-3M4 7l3 3M20 17H9l3-3M20 17l-3 3'] },
+  // Activity-rail views (VS Code workbench icons, from the Forge design artifact).
+  explorer: { sw: 1.6, s: ['M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z', 'M13 3v6h6'] },
+  scm: { sw: 1.6, s: [['circle', { cx: 6, cy: 6, r: 2.5 }], ['circle', { cx: 6, cy: 18, r: 2.5 }], ['circle', { cx: 18, cy: 8, r: 2.5 }], 'M6 8.5v7M18 10.5c0 3-3 4-6 4H8'] },
+  debug: { sw: 1.6, s: ['M5 4l14 8-14 8z', 'M4 12h2'] },
+  extensions: { sw: 1.6, s: [['rect', { x: 3, y: 3, width: 8, height: 8, rx: 1.5 }], ['rect', { x: 13, y: 3, width: 8, height: 8, rx: 1.5 }], ['rect', { x: 3, y: 13, width: 8, height: 8, rx: 1.5 }], 'M17 13v8M13 17h8'] },
+  testing: { sw: 1.6, s: ['M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3'] },
+  zeno: { sw: 1.6, s: ['M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z', ['circle', { cx: 12, cy: 12, r: 3 }]] },
+  remote: { sw: 1.6, s: [['rect', { x: 3, y: 4, width: 18, height: 12, rx: 2 }], 'M8 20h8M12 16v4'] },
+  tasks: { sw: 1.6, s: ['M8 6h12M8 12h12M8 18h12', 'M3.5 6l1.2 1.2L7 4.8', 'M3.5 12l1.2 1.2L7 10.8', 'M3.5 18l1.2 1.2L7 16.8'] },
+  account: { sw: 1.6, s: [['circle', { cx: 12, cy: 8, r: 4 }], 'M4 21a8 8 0 0 1 16 0'] },
+  gear: { sw: 1.6, s: [['circle', { cx: 12, cy: 12, r: 3 }], 'M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 11 3.09 2 2 0 0 1 13 3a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1z'] },
+  // Session-header + tool-card icons.
+  clock: { sw: 1.7, s: [['circle', { cx: 12, cy: 12, r: 9 }], 'M12 7v5l3 2'] },
+  edit: { sw: 1.8, s: ['M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'] },
+  close: { sw: 1.8, s: ['M6 6l12 12M18 6L6 18'] },
 };
 function svgIcon(shapes, strokeWidth) {
   const svg = document.createElementNS(SVG_NS, 'svg');
@@ -253,6 +268,37 @@ function statusWord(code) {
     AD: 'added, then deleted', RM: 'renamed, then modified',
   };
   return map[String(code || '').trim()] || `git: ${String(code || '?').trim()}`;
+}
+
+/** A coloured VS-Code-style file-type badge, keyed off the real file name's
+    extension. Unknown types get the neutral badge rather than a guessed colour. */
+function fileBadge(name) {
+  const lower = String(name || '').toLowerCase();
+  const ext = lower.includes('.') ? lower.slice(lower.lastIndexOf('.') + 1) : '';
+  const spec =
+    ext === 'tsx' ? ['vsi tsx', 'TS'] :
+    ext === 'ts' ? ['vsi ts', 'TS'] :
+    ext === 'jsx' ? ['vsi tsx', 'JS'] :
+    (ext === 'js' || ext === 'mjs' || ext === 'cjs') ? ['vsi js', 'JS'] :
+    (ext === 'md' || ext === 'markdown') ? ['vsi md', 'M↓'] :
+    ext === 'json' ? ['vsi json', '{}'] :
+    (ext === 'css' || ext === 'scss') ? ['vsi css', '#'] :
+    (ext === 'html' || ext === 'htm') ? ['vsi html', '<>'] :
+    (ext === 'yml' || ext === 'yaml') ? ['vsi txt', 'Y'] :
+    (lower === '.gitignore' || lower.startsWith('.git') || ext === 'gitignore') ? ['vsi git', '◆'] :
+    (ext === 'txt' || ext === 'token' || ext === 'log' || ext === 'lock') ? ['vsi txt', '≡'] :
+    ['vsi', '·'];
+  return glyph(spec[1], spec[0]);
+}
+
+/** The M / U change marker for a working-tree file, from its git porcelain code.
+    Untracked and added files read as new (green U/A); everything else is M. */
+function changeMark(code) {
+  const c = String(code || '').trim();
+  if (!c) return null;
+  const isNew = c === '??' || /^A/.test(c);
+  const label = c === '??' ? 'U' : (c.replace(/[^A-Z]/gi, '')[0] || 'M');
+  return el('span', isNew ? 'vsmod new' : 'vsmod', label);
 }
 
 /* ================================================================== *
@@ -427,6 +473,7 @@ export function initForge(section) {
     connectorsErr: null,
     connectorsBusy: false,
     collapsedDirs: new Set(),
+    collapsedSections: new Set(['outline', 'timeline']),
     rainbowBrackets: true,
     minimap: true,
     explorerOpen: true,
@@ -1155,12 +1202,23 @@ export function initForge(section) {
 
     const activity = el('nav', 'fgactivity');
     activity.setAttribute('aria-label', 'Forge views');
-    const icons = {
-      explorer: '▱', search: '⌕', scm: '⑂', extensions: '⬡', rules: '✦',
-      mcp: '⇄', tests: '✓', debug: '▷', tasks: '☷',
-    };
-    for (const [id, label] of PANELS) {
-      const b = btn(null, label, () => {
+    // The workbench activity bar: inline-SVG icons in VS Code's own order. Each
+    // maps to a real Forge panel; the app's Zeno-specific views (rules, MCP, the
+    // task board) sit under the governance ("zeno"), servers ("remote") and
+    // board ("tasks") icons. The glyph rail this replaced is gone.
+    const RAIL = [
+      ['explorer', 'explorer', 'Explorer'],
+      ['search', 'search', 'Search'],
+      ['scm', 'scm', 'Source control'],
+      ['debug', 'debug', 'Debug'],
+      ['extensions', 'extensions', 'Extensions & themes'],
+      ['tests', 'testing', 'Tests'],
+      ['rules', 'zeno', 'Rules & skills'],
+      ['mcp', 'remote', 'MCP servers'],
+      ['tasks', 'tasks', 'Task board'],
+    ];
+    for (const [id, icon, label] of RAIL) {
+      const b = btn(null, null, () => {
         S.pan = id;
         paintA();
         if (id === 'rules') {
@@ -1174,13 +1232,34 @@ export function initForge(section) {
       b.setAttribute('aria-current', id === S.pan ? 'true' : 'false');
       b.setAttribute('aria-label', label);
       b.title = label;
-      b.textContent = icons[id] || '·';
+      add(b, fgIcon(icon));
+      // Real count badges: the working-tree change count on Source Control, and
+      // the held-capsule count (amber) on the Zeno governance icon.
+      if (id === 'scm') {
+        const changed = S.status && Array.isArray(S.status.changed) ? S.status.changed.length : 0;
+        if (changed > 0) add(b, el('span', 'vsbadge', String(changed)));
+      }
+      if (id === 'rules') {
+        const owed = gatesWaiting();
+        if (owed > 0) add(b, el('span', 'vsbadge am', String(owed)));
+      }
       add(activity, b);
     }
+    // Accounts and Settings pinned to the foot of the rail, as in the workbench.
+    add(activity, el('span', 'fgrow'));
+    const acct = btn(null, null, () => document.querySelector('[data-nav="command"]')?.click());
+    acct.setAttribute('aria-label', 'Local owner');
+    acct.title = 'Local owner — open Command';
+    add(acct, fgIcon('account'));
+    const gear = btn(null, null, () => document.getElementById('ctl-theme')?.click());
+    gear.setAttribute('aria-label', 'Theme');
+    gear.title = 'Theme: system / light / dark';
+    add(gear, fgIcon('gear'));
+    add(activity, acct, gear);
 
     const side = el('div', 'fgside');
     const current = PANELS.find(([id]) => id === S.pan);
-    add(side, el('div', 'fgside-title', current ? current[1] : 'Explorer'), head, body);
+    add(side, el('div', 'vsvh', current ? current[1] : 'Explorer'), head, body);
     rgA.replaceChildren(activity, side);
   }
 
@@ -1277,24 +1356,67 @@ export function initForge(section) {
         for (const file of [...node.files].sort((a, b) => a.name.localeCompare(b.name))) {
           const b = btn('fgtree-file', null, () => openFile(file.path));
           b.style.setProperty('--depth', String(depth));
-          const dirty = changed.has(file.path);
-          const mark = glyph(dirty ? '●' : '○', 'fgfile-mark');
-          mark.style.color = dirty ? 'var(--green)' : 'var(--ink-3)';
-          add(b, glyph('', 'fgchev'), mark, el('span', 'nm', file.name));
-          b.title = dirty ? `${file.path} — ${statusWord(changed.get(file.path))}` : file.path;
+          const code = changed.get(file.path);
+          add(b, glyph('', 'fgchev'), fileBadge(file.name), el('span', 'nm', file.name), changeMark(code));
+          b.title = code ? `${file.path} — ${statusWord(code)}` : file.path;
           b.setAttribute('aria-current', file.path === S.file ? 'true' : 'false');
           add(target, b);
         }
       };
       renderNode(rootNode, '', 0, tree);
-      add(wrap, tree);
 
-      if (S.status.trackedCapped) {
+      // The tree lives in a collapsible SANDBOX section, with OUTLINE and
+      // TIMELINE beside it — the workbench's Explorer sections. Collapse state
+      // survives a repaint through S.collapsedSections, so a section the owner
+      // shut stays shut when the tree next redraws.
+      const section = (id, label) => {
+        const collapsed = S.collapsedSections.has(id);
+        const h = btn('vssect', null, () => {
+          if (collapsed) S.collapsedSections.delete(id); else S.collapsedSections.add(id);
+          paintA();
+        });
+        h.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        add(h, glyph(collapsed ? '▸' : '▾', 'chev'), el('span', null, label));
+        return { h, collapsed };
+      };
+
+      const sandbox = section('sandbox', 'SANDBOX');
+      add(wrap, sandbox.h);
+      if (!sandbox.collapsed) {
+        add(wrap, tree);
+        if (S.status.trackedCapped) {
+          add(wrap, el('div', 'hint',
+            `Showing the first ${tracked.length} of ${S.status.trackedTotal} tracked files. The rest are in the repository; they are simply not drawn here.`));
+        }
         add(wrap, el('div', 'hint',
-          `Showing the first ${tracked.length} of ${S.status.trackedTotal} tracked files. The rest are in the repository; they are simply not drawn here.`));
+          'Coloured badge names the file type · M (amber) is a working-tree change · U (green) is untracked. All read from git, fresh on each reload.'));
       }
-      add(wrap, el('div', 'hint',
-        '● changed in the working tree · ○ unchanged. Both come from git, read fresh each time you reload.'));
+
+      const outline = section('outline', 'OUTLINE');
+      add(wrap, outline.h);
+      if (!outline.collapsed) {
+        add(wrap, renderUnwired(
+          'No symbol outline',
+          'Forge does not index symbols, so there is no outline for the open file. The tree above is the real structure git reports.',
+        ));
+      }
+
+      const timeline = section('timeline', 'TIMELINE');
+      add(wrap, timeline.h);
+      if (!timeline.collapsed) {
+        const log = Array.isArray(S.status.log) ? S.status.log : [];
+        if (log.length) {
+          for (const c of log) {
+            const row = el('div', 'frow');
+            const nm = el('span', 'nm', c.summary || '(no message)');
+            nm.title = c.summary || '';
+            add(row, nm, el('span', 'tag', c.sha || ''));
+            add(wrap, row);
+          }
+        } else {
+          add(wrap, el('div', 'hint', 'git reports no commits in the sandbox yet, so the timeline is empty rather than hidden.'));
+        }
+      }
       return wrap;
     },
 
@@ -2696,7 +2818,11 @@ export function initForge(section) {
    * rgC — the agent session: tabs, the conversation, the composer     *
    * ================================================================ */
 
-  const INSP = [['chat', 'Session'], ['plan', 'Plan'], ['runs', 'Runs'], ['actions', 'Actions'], ['lens', 'Lens'], ['skills', 'Skills']];
+  // The five session tabs, matching the design. 'skills' is still a valid
+  // inspector view — the composer's attach button and skills pill drill into it —
+  // but it has no tab of its own; the Skills tab that used to sit here is gone.
+  const INSP = [['chat', 'Session'], ['plan', 'Plan'], ['runs', 'Runs'], ['actions', 'Actions'], ['lens', 'Lens']];
+  const INSP_VIEWS = new Set(['chat', 'plan', 'runs', 'actions', 'lens', 'skills']);
 
   function sessionTabState(item) {
     if (item.running && item.runProgress && item.runProgress.terminal === true) {
@@ -2742,7 +2868,7 @@ export function initForge(section) {
   }
 
   function selectInspector(id) {
-    S.insp = INSP.some(([candidate]) => candidate === id) ? id : 'chat';
+    S.insp = INSP_VIEWS.has(id) ? id : 'chat';
     paintC();
     if (S.insp === 'lens') {
       if (!S.context && !S.contextBusy) void loadContext();
@@ -2767,11 +2893,12 @@ export function initForge(section) {
     const session = activeSession();
     const ses = el('div', 'sesrow');
     const last = session.runs[session.runs.length - 1];
-    const breadcrumb = el('div', 'fgsession-breadcrumb');
-    add(breadcrumb, el('b', null, workspaceName(S.status)), glyph('›', 'sep'), el('span', null, session.name));
+    // Cascade-style header: a "Session" title, the current task, then SVG icon
+    // buttons. The task and the held-capsule count are real; the buttons act.
+    add(ses, el('span', 'sesst', 'Session'));
     const label = el('span', 'sesname', last ? short(last.task, 42) : 'Ready for a task');
     if (last) label.title = last.task;
-    add(ses, breadcrumb, el('span', 'sp'), label);
+    add(ses, label, el('span', 'fgrow'));
 
     // What is owed, where it is owed, said in the header of the surface that
     // owes it. Drawn from the capsules actually held, never from a click.
@@ -2783,14 +2910,6 @@ export function initForge(section) {
       chip.title = 'Approval capsules currently held by the daemon.';
       add(ses, chip);
     }
-    const lens = btn('fgicon', '@', () => selectInspector('lens'));
-    lens.setAttribute('aria-label', 'Open exact run context');
-    lens.title = 'Open exact sanitized run context';
-    add(ses, lens);
-    const hide = btn('fgicon', '×', () => setPaneOpen('session', false));
-    hide.setAttribute('aria-label', 'Hide Session panel');
-    hide.title = 'Hide Session panel';
-    add(ses, hide);
     if (S.streamDown) {
       const chip = el('span', 'chip');
       chip.dataset.state = 'warn';
@@ -2798,6 +2917,16 @@ export function initForge(section) {
       chip.title = 'The approval stream dropped and is retrying.';
       add(ses, chip);
     }
+    const fresh = btn('fico', null, addSession);
+    add(fresh, fgIcon('attach'));
+    fresh.setAttribute('aria-label', 'New agent session');
+    fresh.disabled = S.sessions.length >= 8;
+    fresh.title = fresh.disabled ? 'Forge keeps at most eight sessions in one window.' : 'New independent agent session';
+    const hide = btn('fico', null, () => setPaneOpen('session', false));
+    add(hide, fgIcon('close'));
+    hide.setAttribute('aria-label', 'Hide Session panel');
+    hide.title = 'Hide Session panel (Ctrl+Alt+B)';
+    add(ses, fresh, hide);
 
     const sessionRail = el('aside', 'fgsession-rail');
     sessionRail.setAttribute('aria-label', 'Project conversations');
@@ -2837,10 +2966,14 @@ export function initForge(section) {
     const tabs = el('div', 'insp-tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', 'Session views');
+    // The one badge that carries a real number: proposals from the newest run
+    // that still wait for the owner's approval. No proposals, no badge.
+    const actionsWaiting = S.proposals.filter((p) => !p.auto).length;
     for (const [id, name] of INSP) {
       const b = btn(null, name, () => selectInspector(id));
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', id === S.insp ? 'true' : 'false');
+      if (id === 'actions' && actionsWaiting > 0) add(b, el('span', 'fct am', String(actionsWaiting)));
       add(tabs, b);
     }
 
@@ -3964,14 +4097,24 @@ export function initForge(section) {
     skills() { return rulesSkillsPanel(); },
   };
 
-  function youTurn(t) {
-    const m = el('div', 'msg');
+  /* A conversation turn: a round avatar and a body. `kind` is 'you' (the owner,
+     'A') or 'z' (Zeno, 'Z' on a cyan gradient). This is the Cascade-style turn
+     that replaced the old .msg/.who/.bub chat bubble. */
+  function turnAvatar(kind) {
     const who = el('div', 'who');
-    add(who, el('span', null, 'you'));
-    if (t.route) add(who, el('span', 'mchip', t.route.automatic ? 'auto-routed' : 'manual route'));
-    add(m, who);
-    add(m, el('div', 'bub', t.text));
-    if (t.route && t.route.rationale) add(m, renderNote(t.route.rationale, 'cy'));
+    who.textContent = kind === 'z' ? 'Z' : 'A';
+    who.setAttribute('aria-hidden', 'true');
+    return who;
+  }
+
+  function youTurn(t) {
+    const m = el('div', 'turn you');
+    add(m, turnAvatar('you'));
+    const bt = el('div', 'bt');
+    if (t.route) add(bt, el('div', 'dva-m', t.route.automatic ? 'auto-routed' : 'manual route'));
+    add(bt, el('p', null, t.text));
+    if (t.route && t.route.rationale) add(bt, renderNote(t.route.rationale, 'cy'));
+    add(m, bt);
     return m;
   }
 
@@ -3989,28 +4132,25 @@ export function initForge(section) {
    * from this click to a green anything.
    */
   function saveTurn(t) {
-    const m = el('div', 'msg me');
-    const who = el('div', 'who');
-    add(who, el('span', null, 'you · code pane'));
-    add(who, el('span', 'mchip', `${t.tier} · ${t.path}`));
-    add(m, who);
-
-    const bub = el('div', 'bub');
+    const m = el('div', 'turn you');
+    add(m, turnAvatar('you'));
+    const bt = el('div', 'bt');
+    add(bt, el('div', 'dva-m', `code pane · ${t.tier} · ${t.path}`));
     if (t.receipt) {
-      add(bub, el('div', null,
+      add(bt, el('p', null,
         `The kernel judged this edit routine (${t.tier}) and committed it — so it did not stop to ask, and it is not waiting on you. Here is the receipt it wrote.`));
-      add(bub, renderReceipt(t.receipt));
+      add(bt, renderReceipt(t.receipt));
     } else {
-      add(bub, el('div', null,
+      add(bt, el('p', null,
         `This edit is held at ${t.tier}. It has NOT been written to the sandbox: the capsule below carries the exact bytes, and nothing lands until you approve it there or in Command.`));
     }
     if (t.secretWarning && t.secretWarning.count > 0) {
-      add(bub, renderNote(
+      add(bt, renderNote(
         `The sanitizer found ${t.secretWarning.count} ${t.secretWarning.count === 1 ? 'thing that looks like a secret' : 'things that look like secrets'} in these bytes (${(t.secretWarning.kinds || []).join(', ')}). That is why this needs a decision.`,
         'rd',
       ));
     }
-    add(m, bub);
+    add(m, bt);
     return m;
   }
 
@@ -4101,48 +4241,50 @@ export function initForge(section) {
   }
 
   function agentTurn(t) {
-    const m = el('div', 'msg me');
-    const who = el('div', 'who');
-    add(who, el('span', null, 'Zeno Forge'));
-    add(who, el('span', 'mchip', `${t.agentId}${t.model ? ' · ' + t.model : ''}${t.effort ? ' · ' + t.effort : ''}`));
-    add(m, who);
+    const m = el('div', 'turn z');
+    add(m, turnAvatar('z'));
+    const bt = el('div', 'bt');
+    add(bt, el('div', 'dva-m', `${t.agentId}${t.model ? ' · ' + t.model : ''}${t.effort ? ' · ' + t.effort : ''}`));
+    if (t.note) add(bt, el('p', null, t.note));
+    if (t.log) add(bt, logBlocks(t.log));
+    if (!t.note && !t.log) add(bt, el('p', null, 'The agent returned without any output to show.'));
 
-    const bub = el('div', 'bub');
-    if (t.note) add(bub, el('div', null, t.note));
-    if (t.log) add(bub, logBlocks(t.log));
-    if (!t.note && !t.log) add(bub, el('div', null, 'The agent returned without any output to show.'));
-    add(m, bub);
-
-    const activity = el('details', 'fgactivity-detail');
-    add(activity, el('summary', null,
-      `Run activity · ${t.files.length} file${t.files.length === 1 ? '' : 's'} · ${clock(t.at)}`));
-    add(activity, el('div', 'think',
-      `${t.cancelled ? 'Stopped by you' : 'Provider finished'} · isolated worktree inspected · governed proposals prepared`));
-    if (t.tokenUsage) add(activity, el('div', 'think', tokenUsageLabel(t.tokenUsage)));
-    const tools = el('div', 'fgactivity-tools');
+    // The file operations the run genuinely produced, inline as tool cards —
+    // promoted out of the old collapsed "Run activity" disclosure. Forge sees
+    // the agent's writes, not its private tool calls, and the footnote says so.
     for (const f of t.files) {
-      const row = f.skipped ? el('div', 'tool') : btn('tool', null, () => openFile(f.path));
-      add(row, el('span', 'th', f.skipped ? 'skip' : 'write'));
-      const p = el('span', 'pth', f.lines ? `${f.path}:1–${f.lines}` : f.path);
-      p.title = f.skipped ? `${f.path} — ${f.skipped.note}` : f.path;
-      add(row, p, el('span', 'ok', f.skipped ? 'not proposed' : (f.tier || '·')));
-      add(tools, row);
+      const skipped = !!f.skipped;
+      const card = skipped ? el('div', 'dvtool') : btn('dvtool', null, () => openFile(f.path));
+      const tile = el('span', 'dvtool-i');
+      add(tile, fgIcon('edit'));
+      const label = el('span', 'dvtool-t');
+      add(label, document.createTextNode(skipped ? 'Skipped ' : 'Edited '),
+        el('code', null, f.lines ? `${f.path}:1–${f.lines}` : f.path));
+      label.title = skipped ? `${f.path} — ${f.skipped.note}` : f.path;
+      const result = el('span', skipped ? 'dvtool-r' : 'dvtool-r ok', skipped ? 'not proposed' : (f.tier || '·'));
+      add(card, tile, label, result);
+      add(bt, card);
     }
-    if (t.files.length === 0) add(tools, el('div', 'tool', 'No file operations'));
-    add(activity, tools, el('div', 'hint',
+    if (t.files.length === 0) {
+      const card = el('div', 'dvtool');
+      add(card, el('span', 'dvtool-i'), el('span', 'dvtool-t', 'No file operations'));
+      add(bt, card);
+    }
+    if (t.tokenUsage) add(bt, el('div', 'dva-m', tokenUsageLabel(t.tokenUsage)));
+    add(bt, el('div', 'hint',
       `Approvals: ${t.waiting || 0} waiting · ${t.applied || 0} routine applied. Provider plan steps and private reasoning are not exposed by the current backend.`));
-    add(m, activity);
 
     if (t.waiting > 0) {
       const c = btn('cite', `↗ ${t.waiting} ${t.waiting === 1 ? 'capsule' : 'capsules'} awaiting your decision`);
       c.setAttribute('data-go', 'command');
-      add(m, c);
+      add(bt, c);
     }
     if (t.applied > 0) {
       const c = btn('cite', `✓ ${t.applied} routine ${t.applied === 1 ? 'change was' : 'changes were'} applied and receipted`);
       c.setAttribute('data-go', 'command');
-      add(m, c);
+      add(bt, c);
     }
+    add(m, bt);
     return m;
   }
 
@@ -5849,21 +5991,25 @@ export function initForge(section) {
    * review. A settled node is never rebuilt, so a spent control stays spent.
    */
   function gateBlock(g) {
-    const box = el('div', 'fgate');
+    // The amber approval capsule from the design. The header chip and meta line
+    // are drawn from the real held capsule (g.kind / g.tier / g.hash / g.at);
+    // the capsule component itself — with its own approve/deny actions — is
+    // still mounted inside, so nothing about the approval is faked here.
+    const box = el('div', 'dvapproval');
     box.dataset.settled = g.settled ? '1' : '0';
-    const head = el('div', 'fghead');
-    add(head, glyph('◈', 'fgglyph'));
-    add(head, el('span', 'fgwho', g.settled ? 'decided' : 'the kernel is asking'));
-    add(head, el('span', 'fgkind', `${g.kind} · ${g.tier}`));
-    add(head, el('span', 'sp'));
+    const head = el('div', 'dva-h');
+    add(head, el('span', 'tier', `${g.tier} · ${g.kind}`));
+    add(head, el('b', null, g.settled ? 'Decision recorded' : '1 change needs your approval'));
+    add(box, head);
     // WHEN THIS WINDOW FIRST SAW IT, and it is labelled as that rather than as
     // "when it was proposed". /state's held previews carry no timestamp, so for
     // a capsule that was already waiting when this page loaded the only honest
     // reading is the moment it arrived here.
-    const at = el('span', 'fgat', clock(g.at));
-    at.title = 'When this window first saw this capsule. A held preview carries no timestamp of its own, so this is not necessarily when it was proposed.';
-    add(head, at);
-    add(box, head);
+    const hash = String(g.hash || '');
+    const shortHash = hash.length > 10 ? `${hash.slice(0, 4)}…${hash.slice(-4)}` : hash;
+    const meta = el('div', 'dva-m', `${g.kind} · action ${shortHash || '—'} · seen ${clock(g.at)} · single-use`);
+    meta.title = 'The action hash and when this window first saw the capsule. A held preview carries no timestamp of its own, so this is not necessarily when it was proposed.';
+    add(box, meta);
     /* A TOOL CALL IS NOT A FILE WRITE, and the difference is worth one line.
        `shell.exec` and `net.fetch` are the two kinds the kernel gates as an
        effect on this machine rather than a change to a file, and the daemon
@@ -6025,12 +6171,11 @@ export function initForge(section) {
     const progress = session.runProgress || initialRunProgress(
       session.runId || 'pending', session.agentId, session.model || '',
     );
-    const m = el('div', 'msg me fgrunning');
+    const m = el('div', 'turn z fgrunning');
     m.setAttribute('aria-live', 'polite');
-    const who = el('div', 'who');
-    add(who, el('span', null, 'Zeno Forge'), el('span', 'mchip', `${progress.agentId}${progress.model ? ' · ' + progress.model : ''}`));
-    add(m, who);
-    const shell = el('div', 'bub');
+    add(m, turnAvatar('z'));
+    const shell = el('div', 'bt');
+    add(shell, el('div', 'dva-m', `${progress.agentId}${progress.model ? ' · ' + progress.model : ''}`));
     const row = el('div', 'fgrun');
     const transport = runTransportState(session);
     const disclosure = el('details', 'fgthinking');
