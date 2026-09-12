@@ -112,6 +112,62 @@ function fmtWhen(iso) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** A small stroked outline icon for a .lk row, drawn with real SVG nodes
+ *  (never innerHTML) so this file stays textContent-only end to end. */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgIcon(kind) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.7');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const rect = document.createElementNS(SVG_NS, 'rect');
+  const path = document.createElementNS(SVG_NS, 'path');
+  if (kind === 'phone') {
+    rect.setAttribute('x', '7'); rect.setAttribute('y', '2');
+    rect.setAttribute('width', '10'); rect.setAttribute('height', '20'); rect.setAttribute('rx', '2');
+    path.setAttribute('d', 'M11 18h2');
+  } else {
+    // 'monitor' — this PC.
+    rect.setAttribute('x', '3'); rect.setAttribute('y', '4');
+    rect.setAttribute('width', '18'); rect.setAttribute('height', '14'); rect.setAttribute('rx', '2');
+    path.setAttribute('d', 'M8 21h8');
+  }
+  svg.appendChild(rect);
+  svg.appendChild(path);
+  return svg;
+}
+
+/** The shell's .pill primitive: a dot (except the neutral "wt" tone, which the
+ *  rest of the app also renders bare) then the label, exactly as index.html's
+ *  Work/Vault/Integrations rows already build it. */
+function pill(text, kind) {
+  const s = el('span', kind ? `pill ${kind}` : 'pill');
+  if (kind !== 'wt') s.appendChild(el('span', 'd'));
+  s.appendChild(document.createTextNode(text));
+  return s;
+}
+
+/** The shell's .laction primitive — a plain bordered text button, optionally
+ *  ".cy" for the one emphasised action in a row (mirrors index.html's own
+ *  Connect/Manage buttons). Disabled state carries its reason as a title,
+ *  same contract as this file's .zm-btn `button()` helper below. */
+function laction(label, onClick, disabledWhy, kind) {
+  const b = el('button', kind ? `laction ${kind}` : 'laction', label);
+  b.type = 'button';
+  if (disabledWhy) {
+    b.disabled = true;
+    b.title = disabledWhy;
+  } else {
+    b.addEventListener('click', onClick);
+  }
+  if (busy) b.disabled = true;
+  return b;
+}
+
 /* ================================================================== *
  * 1 · this panel's styles — tokens only, approved palette as fallback *
  * ================================================================== */
@@ -123,22 +179,13 @@ const CSS = `
 /* Every block here is spaced by its container's gap, so the UA's paragraph
    margins are removed rather than fought with. Scoped to this panel's own
    classes so the shell's .empty-title/.empty-sub keep their own spacing. */
-.zm-nm, .zm-meta, .zm-sub, .zm-k, .zm-note, .zm-digits, .zm-why{ margin:0; }
+.zm-meta, .zm-sub, .zm-k, .zm-note, .zm-digits, .zm-why{ margin:0; }
 
-/* ---- a device row: mark, name, the facts, and what it may do -------------- */
-.zm-dev{
-  display:flex; gap:12px; align-items:flex-start;
-  padding:12px 13px; border:1px solid var(--rule,#242C31); border-radius:var(--r-1,6px);
-  background:var(--g3,#151A1D);
-}
-.zm-mark{
-  flex:none; padding:3px 6px; border-radius:4px;
-  border:1px solid var(--rule-2,#2C363B); background:var(--g4,#1B2124);
-  font-family:var(--font-mono,ui-monospace,Consolas,monospace);
-  font-size:10px; letter-spacing:.08em; color:var(--ink-2,#9AA1AC);
-}
-.zm-devbody{ min-width:0; display:flex; flex-direction:column; gap:3px; }
-.zm-nm{ font-size:13px; font-weight:600; color:var(--ink,#ECEBE6); }
+/* The device rows themselves (This PC / Phone / any paired device) are the
+   shell's own .lcard/.lk/.lm/.lr/.pill/.laction primitives (index.html),
+   restyled to match the design artifact's Devices screen — reused as-is,
+   not redefined here. The capability-grid explainer's .card/.capgrid/.cap
+   live in screens/devices.css, not yet linked from index.html. */
 .zm-meta{
   font-family:var(--font-mono,ui-monospace,Consolas,monospace);
   font-size:10.5px; line-height:1.55; color:var(--ink-2,#9AA1AC); overflow-wrap:anywhere;
@@ -151,7 +198,9 @@ const CSS = `
   font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-2,#9AA1AC);
 }
 
-/* ---- buttons: the shell's graphite, cyan for the one primary act ---------- */
+/* ---- buttons: the shell's graphite. Devices' own primary act — Pair — now
+   lives on the Phone .lcard as a .laction.cy, so .zm-btn no longer needs a
+   "primary" tone; what remains here (self-check, copy-URL) is all one tone. */
 .zm-acts{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; }
 .zm-btn{
   font:inherit; font-size:12.5px; font-weight:600; cursor:pointer;
@@ -161,8 +210,6 @@ const CSS = `
   border:1px solid var(--rule-2,#2C363B); background:var(--g4,#1B2124); color:var(--ink,#ECEBE6);
 }
 .zm-btn:hover:not(:disabled){ background:var(--g5,#222A2E); }
-.zm-btn[data-kind="primary"]{ background:var(--cyan,#38C3D6); color:var(--g1,#0A0C0E); border-color:transparent; }
-.zm-btn[data-kind="primary"]:hover:not(:disabled){ background:color-mix(in srgb, var(--cyan,#38C3D6) 88%, var(--ink,#ECEBE6)); }
 .zm-btn:disabled{ cursor:not-allowed; color:var(--ink-2,#9AA1AC); background:var(--g3,#151A1D); border-style:dashed; }
 .zm-gly{ font-family:var(--font-glyph,"Segoe UI Symbol"),sans-serif; line-height:1; }
 /* A disabled control's reason is the most consequential sentence on the row. */
@@ -229,12 +276,6 @@ const WORDS = {
     'NOT exist yet: the Zeno phone client that would be the other end, and any transport to carry ' +
     'bytes to it. So this PC is the only device there is — nothing here stands in for a phone that ' +
     'is connected, and nothing is syncing.',
-
-  /* The paired list, which is empty and will stay empty. */
-  emptyTitle: 'No paired devices — and none are possible yet.',
-  emptySub:
-    'Pairing takes a second device running the Zeno phone client, and that client is not built. ' +
-    'This list is empty because there is nothing to pair with, not because a device dropped off.',
 
   /* The one that matters most: a real pairing, with no possible other end. */
   noPhoneYet:
@@ -316,7 +357,6 @@ function button(label, glyph, kind, onClick, disabledWhy) {
   return b;
 }
 
-/** This PC, drawn from what the daemon actually reports about its identity. */
 /* Safe-mode LAN phone access. Not a paired device — the same daemon, reachable
    from a phone on the network when the owner opted in with ZENO_LAN=1. Off by
    default; when off, this says how to turn it on and what the trade-off is. */
@@ -395,23 +435,145 @@ function localControlBlock() {
   return wrap;
 }
 
-function thisDeviceRow(d) {
-  const row = el('div', 'zm-dev');
-  const body = el('div', 'zm-devbody');
-  add(
-    body,
-    el('p', 'zm-nm', d.host ? `${d.label} · ${d.host}` : d.label),
-    el('p', 'zm-meta', `device ${d.deviceId}`),
-    el('p', 'zm-meta', `X25519 key ${groupHex(d.publicKey)}`),
+/** This PC, drawn in the shell's own .lcard shape — icon, name, the real
+ *  facts, and a pill saying what it is. Nothing here is invented: every line
+ *  comes straight off what the daemon reported about its own identity. */
+function thisDeviceCard(d) {
+  const card = el('div', 'lcard');
+  const lk = el('div', 'lk');
+  add(lk, svgIcon('monitor'), document.createTextNode(d.host ? `${d.label} · ${d.host}` : d.label));
+  const lr = el('div', 'lr');
+  add(lr, pill('current', 'gr'));
+  return add(
+    card,
+    lk,
+    el('div', 'lm', `device ${d.deviceId}`),
+    el('div', 'lm', `X25519 key ${groupHex(d.publicKey)}`),
     el(
-      'p',
-      'zm-sub',
+      'div',
+      'lm',
       d.identityPersisted
-        ? 'The only device on this mesh. Its id is derived from its public key, so it is a commitment to that key rather than a name anything can claim.'
-        : 'The only device on this mesh. Its id is derived from its public key — a commitment to that key, not a name anything can claim. The private key is held in memory and never written to disk, so this id is minted fresh every time Zeno starts.',
+        ? 'id persisted — a commitment to this public key, not a name anything can claim'
+        : 'id held in memory only — re-minted every time Zeno starts, never written to disk',
+    ),
+    lr,
+  );
+}
+
+/** The Phone slot: one .lcard reflecting whichever real state the daemon
+ *  reported — idle (nothing to pair with yet), a pairing genuinely open on
+ *  this side, or busy. It never shows a phone that isn't there. */
+function phoneCard() {
+  const card = el('div', 'lcard');
+  const lk = el('div', 'lk');
+  add(lk, svgIcon('phone'), document.createTextNode('Phone'));
+  const lr = el('div', 'lr');
+  add(lr, pill('no peer yet', 'wt'));
+
+  const lines = [];
+  if (devices.pairing) {
+    lines.push(
+      el('div', 'lm', `pairing code active · started ${fmtWhen(devices.pairing.startedAt)}`),
+      el('div', 'lm', 'no phone client exists yet to answer it — see the open pairing below'),
+    );
+    add(
+      lr,
+      laction('Cancel pairing', cancelPairing, OWNER_TOKEN ? null : 'This page holds no owner token.'),
+    );
+  } else {
+    lines.push(el('div', 'lm', 'not paired yet · the Zeno phone client is not built, so nothing can answer an invite'));
+    add(
+      lr,
+      laction(
+        'Pair',
+        startPairing,
+        OWNER_TOKEN ? null : 'This page holds no owner token, so it cannot start a pairing.',
+        'cy',
+      ),
+    );
+  }
+  if (!OWNER_TOKEN) lines.push(el('div', 'lm', 'opened without the launch link — this window is read-only'));
+  return add(card, lk, ...lines, lr);
+}
+
+/** One real paired device. Unreachable today — nothing can pair until the
+ *  phone client exists — but if the store ever holds one, it is drawn from
+ *  that store, never invented. */
+function pairedDeviceCard(id) {
+  const card = el('div', 'lcard');
+  const lk = el('div', 'lk');
+  add(lk, svgIcon('phone'), document.createTextNode('Paired device'));
+  const lr = el('div', 'lr');
+  add(lr, pill('paired', 'gr'));
+  return add(card, lk, el('div', 'lm', `device ${id}`), lr);
+}
+
+/** The policy explainer: what a paired phone may do, per the kernel's tiers.
+ *  Static and honest — not a reading of any live state — labelled exactly as
+ *  the design artifact's Devices screen labels it. */
+function capCell(state, label, build) {
+  const c = el('div', `cap ${state}`);
+  const b = el('b', null, label);
+  const span = el('span');
+  build(span);
+  return add(c, b, span);
+}
+
+function capabilityGrid() {
+  const card = el('div', 'card');
+  card.style.maxWidth = '820px';
+  const h = el('div', 'hs-h');
+  h.style.marginBottom = '10px';
+  add(
+    h,
+    document.createTextNode('What a paired phone can do '),
+    el('span', 'sum', 'the workstation stays the brain — the phone is a paired owner device'),
+  );
+  const grid = el('div', 'capgrid');
+  add(
+    grid,
+    capCell('ok', 'Chat with Zeno', (s) => {
+      s.appendChild(document.createTextNode('Questions are answered by the model on your workstation over the paired link, grounded in the same '));
+      s.appendChild(el('code', null, '/state'));
+      s.appendChild(document.createTextNode(' and Vault. Nothing runs on the phone.'));
+    }),
+    capCell('ok', 'Approve T0–T2 on the go', (s) =>
+      s.appendChild(
+        document.createTextNode(
+          "Each approval is signed with the phone's own device key and lands in the same kernel. Still single-use, still content-hashed.",
+        ),
+      ),
+    ),
+    capCell('no', 'T3 egress · T4', (s) =>
+      s.appendChild(
+        document.createTextNode('Anything that leaves the machine needs the workstation window. T4 stays permanently denied everywhere.'),
+      ),
+    ),
+    capCell('ok', 'See receipts & work', (s) =>
+      s.appendChild(document.createTextNode('Read-only ledger and ticket status, pushed when something needs you.')),
+    ),
+    capCell('ok', 'Record a meeting', (s) =>
+      s.appendChild(
+        document.createTextNode(
+          'Counsel uses the phone mic — the consent gate is identical; transcription happens on the workstation, audio is never stored.',
+        ),
+      ),
+    ),
+    capCell('ok', 'Capture to Vault', (s) => {
+      s.appendChild(document.createTextNode('A voice note becomes a memory '));
+      s.appendChild(el('em', null, 'proposal'));
+      s.appendChild(document.createTextNode('; you confirm it on either device.'));
+    }),
+    capCell('no', 'Edit code', (s) =>
+      s.appendChild(
+        document.createTextNode('Forge on the phone is watch-and-approve: the plan, tool cards and diffs, never the editor.'),
+      ),
+    ),
+    capCell('wait', 'Workstation offline', (s) =>
+      s.appendChild(document.createTextNode('The phone says so and queues your message. It never invents an answer or fakes a sync.')),
     ),
   );
-  return add(row, el('span', 'zm-mark', 'PC'), body);
+  return add(card, h, grid);
 }
 
 /** The open pairing: a real code, and the reason it cannot be answered. */
@@ -510,58 +672,26 @@ function panel() {
     return add(section, head, add(body, root));
   }
 
-  add(root, thisDeviceRow(devices.thisDevice));
+  // This PC + Phone, in the shell's .live-cards / .lcard shape (design
+  // artifact's Devices screen). The Phone slot IS the pairing action now —
+  // its own .lr carries Pair/Cancel — and the paired list, when it is ever
+  // non-empty, joins the same row of cards rather than a separate block.
+  const cards = el('div', 'live-cards');
+  cards.style.width = '100%';
+  add(cards, thisDeviceCard(devices.thisDevice), phoneCard());
+  if (devices.paired.length > 0) {
+    // Unreachable today. If it is ever reached, it is because something
+    // really did pair — so it is drawn from the store, never invented.
+    for (const id of devices.paired) add(cards, pairedDeviceCard(id));
+  }
+  add(root, cards);
+
+  // The policy explainer: what a paired phone may do, per the kernel's
+  // tiers. Static and honest, not a reading of live state.
+  add(root, capabilityGrid());
+
   add(root, phoneAccessBlock());
   add(root, localControlBlock());
-
-  // The paired list. Empty, and the reason is on the page — never left to be
-  // read as a device that went away.
-  const empty = el('div', 'empty');
-  const emptyBody = el('div');
-  add(emptyBody, el('p', 'empty-title', WORDS.emptyTitle), el('p', 'empty-sub', WORDS.emptySub));
-  const eg = el('span', 'empty-glyph', '○');
-  eg.setAttribute('aria-hidden', 'true');
-  if (devices.paired.length === 0) {
-    add(root, add(empty, eg, emptyBody));
-  } else {
-    // Unreachable today. If it is ever reached, it is because something really
-    // did pair — so it is drawn from the store, never invented.
-    const list = el('div', 'zm-block');
-    for (const id of devices.paired) {
-      const row = el('div', 'zm-dev');
-      const b = el('div', 'zm-devbody');
-      add(b, el('p', 'zm-nm', 'Paired device'), el('p', 'zm-meta', `device ${id}`));
-      add(list, add(row, el('span', 'zm-mark', 'DEV'), b));
-    }
-    add(root, list);
-  }
-
-  // Pairing: start it, or show the open one with the reason it cannot finish.
-  const acts = el('div', 'zm-acts');
-  if (devices.pairing) {
-    add(
-      acts,
-      button('Cancel pairing', '✕', null, cancelPairing, OWNER_TOKEN ? null : 'This page holds no owner token.'),
-    );
-  } else {
-    add(
-      acts,
-      button(
-        'Start pairing',
-        '◇',
-        'primary',
-        startPairing,
-        OWNER_TOKEN ? null : 'This page holds no owner token, so it cannot start a pairing.',
-      ),
-    );
-  }
-  if (!OWNER_TOKEN) {
-    add(
-      acts,
-      el('span', 'zm-why', 'Opened without the launch link, so this window is read-only and cannot pair.'),
-    );
-  }
-  add(root, acts);
 
   if (devices.pairing) add(root, pairingBlock(devices.pairing));
   if (actionNote) add(root, note(actionNote.text, actionNote.channel));

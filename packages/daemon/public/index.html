@@ -123,6 +123,7 @@
 </style>
 
 <link rel="stylesheet" href="/glass/tokens.css">
+<link rel="stylesheet" href="/screens/artifact.css">
 
 <style>
 /* ==========================================================================
@@ -2122,11 +2123,11 @@ dialog.fgmm::backdrop{ background:color-mix(in srgb,var(--g1,#0A0C0E) 76%,transp
 <a class="skip" href="#pending">Skip to what needs you</a>
 
 <!-- ============================ the top nav (glass) ====================== -->
-<header class="bar">
+<header class="bar top">
   <button type="button" class="brand" id="home" title="Home — Command · Today">
-    <img class="brand-mark" src="/brand/mark.svg" alt="" aria-hidden="true">
-  <span class="brand-word">Zeno Command</span>
-    <span class="brand-sub" aria-hidden="true">local</span>
+    <img class="brand-mark mk" src="/brand/mark.svg" alt="" aria-hidden="true">
+  <span class="brand-word">Zeno</span>
+    <span class="brand-sub env" aria-hidden="true">Local</span>
   </button>
 
   <!-- Three destinations. Each is glyph + label, an ordinary <button> (so it is
@@ -2161,10 +2162,15 @@ dialog.fgmm::backdrop{ background:color-mix(in srgb,var(--g1,#0A0C0E) 76%,transp
        user never sees. This surface's own rule (see capsule.js) is that a
        control which cannot act is absent rather than shown inert, because
        showing it is a lie about what is available. So it is absent. -->
-  <div class="bar-ctl" aria-label="Window controls">
-    <button type="button" class="ctl" id="ctl-motion" aria-pressed="false" title="Reduce motion">↺ reduce motion</button>
-    <button type="button" class="ctl" id="ctl-flat" aria-pressed="false" title="Reduce transparency — drop the glass blur">▱ reduce transparency</button>
-    <button type="button" class="ctl" id="ctl-theme" title="Theme: system / light / dark">◑ theme</button>
+  <!-- Right cluster, artifact `.topright`: the live model chip and a settings
+       gear. The three display controls are kept (they are real features) but
+       demoted to icon buttons so the bar reads like the design. -->
+  <div class="bar-ctl topright" aria-label="Window controls">
+    <button type="button" class="chip" data-model-pill="chip" title="Model for this window"><span class="dot"></span><span data-mount="top-model">qwen3:8b · local</span></button>
+    <button type="button" class="ctl iconbtn" id="ctl-motion" aria-pressed="false" title="Reduce motion">↺</button>
+    <button type="button" class="ctl iconbtn" id="ctl-flat" aria-pressed="false" title="Reduce transparency — drop the glass blur">▱</button>
+    <button type="button" class="ctl iconbtn" id="ctl-theme" title="Theme: system / light / dark">◑</button>
+    <button type="button" class="ctl iconbtn" data-open-settings title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </div>
 </header>
 

@@ -1,0 +1,88 @@
+/**
+ * Zeno · Command Home composer — ported from the design artifact.
+ * =================================================================
+ * ask.js's mountPanel() now builds the Home composer as '.composer' (a
+ * glass '.row' of attach/textarea/mic/send '.cbtn's, plus a mono '.foot'
+ * pill row) straight off the design artifact b551a806 (CSS ~108-126,
+ * markup ~790-798) — replacing the old ~400px inline-styled '.za-composer'
+ * that could not pin to the bottom of the Home column.
+ *
+ * '.pill' (+ .cy/.am/.gr/.rd/.wt + .d dot) and the base '.cbtn' are already
+ * global in index.html — reused as-is, NOT redefined here. index.html's own
+ * '.cbtn' is the 32px size Forge's compact composer uses; the artifact's
+ * Home composer wants the larger 46px version, so this file only scopes a
+ * size override under '.composer' rather than touching the shared rule.
+ *
+ * Tokens only — --g1..--g7, --ink*, --cyan, --gold, --amber, --red, --green,
+ * --rule, --gl-edge, --wash*, --font-mono, --font-display — no literals.
+ */
+
+.composer{
+  background:var(--g2); border:1px solid var(--gl-edge); border-radius:18px;
+  padding:6px 6px 6px 8px; box-shadow:0 12px 40px -18px #000, inset 0 1px 0 var(--wash-hi);
+  transition:.16s;
+}
+.composer:focus-within{
+  border-color:color-mix(in srgb,var(--cyan) 45%,var(--gl-edge));
+  box-shadow:0 12px 44px -16px #000,0 0 0 3px color-mix(in srgb,var(--cyan) 18%,transparent);
+}
+.composer .row{ display:flex; align-items:flex-end; gap:8px; }
+.composer textarea{
+  flex:1; resize:none; border:0; background:none; color:var(--ink); font:inherit;
+  font-size:17px; padding:15px 8px 13px; max-height:160px; outline:none; line-height:1.45;
+}
+.composer textarea::placeholder{ color:var(--ink-3); }
+
+/* Home's full-size icon buttons. index.html's shared .cbtn stays the 32px
+   Forge default; this scopes the artifact's 46px Home size on top of it. */
+.composer .cbtn{ width:46px; height:46px; border-radius:12px; }
+.composer .cbtn svg{ width:20px; height:20px; }
+
+/* The mic's "engaged" pulse while voice conversation is on — not part of the
+   shared .cbtn.mic rule, so it only applies to this composer's mic button. */
+.composer .cbtn.mic.rec{
+  color:var(--red); border-color:color-mix(in srgb,var(--red) 50%,var(--gl-edge));
+  background:color-mix(in srgb,var(--red) 10%,var(--g4));
+  animation:home-composer-rec 1.1s ease-in-out infinite;
+}
+@keyframes home-composer-rec{
+  0%,100%{ box-shadow:0 0 0 0 color-mix(in srgb,var(--red) 35%,transparent); }
+  50%{ box-shadow:0 0 0 6px transparent; }
+}
+@media (prefers-reduced-motion:reduce){ .composer .cbtn.mic.rec{ animation:none; } }
+
+/* The mono foot: model / voice-state / memory pills + the keyboard hint. */
+.composer .foot{
+  display:flex; align-items:center; gap:10px; padding:2px 8px 4px; color:var(--ink-3);
+  font-family:var(--font-mono); font-size:10.5px; flex-wrap:wrap;
+}
+.composer .foot .pill{
+  text-transform:none; letter-spacing:0; font-size:10.5px; padding:2px 8px; background:var(--g3);
+}
+.composer .foot .grow{ flex:1; }
+
+/* Pin the composer + kernel line to the bottom of the Home column, like the
+   design artifact's .hcenter: the orb/greeting region (.hscroll) becomes the
+   flexible, internally-scrolling area; the starters, the Ask panel and the
+   kernel line after it keep their natural height in flow below (index.html
+   already sets each of those flex:none).
+   Scoped to >820px on purpose: below that, index.html's own mobile rule
+   deliberately resets .hscroll to flex:none/overflow:visible so the page
+   scrolls as one flow instead of nesting a nested scrollbar inside it — a
+   bare `.home .hcenter > .hscroll` here has higher specificity than that
+   1-class mobile rule and would silently override it if left unguarded. */
+@media (min-width:821px){
+  .home .hcenter > .hscroll{
+    flex:1 1 auto;
+    min-height:0;
+    overflow:auto;
+  }
+}
+
+@media (max-width:820px){
+  .composer{ border-radius:16px; }
+  .composer textarea{ font-size:16px; padding:12px 6px 10px; }
+  .composer .cbtn{ width:40px; height:40px; }
+  .composer .foot > span:last-child{ display:none; }
+  .composer .foot{ gap:6px; }
+}

@@ -168,6 +168,13 @@ const ICONS = {
   clock: { sw: 1.7, s: [['circle', { cx: 12, cy: 12, r: 9 }], 'M12 7v5l3 2'] },
   edit: { sw: 1.8, s: ['M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z'] },
   close: { sw: 1.8, s: ['M6 6l12 12M18 6L6 18'] },
+  // Top-bar Command Center + workbench-layout glyphs, and the shell-profile
+  // chevron the bottom-panel tab strip repeats. From the Forge design artifact.
+  termChevron: { sw: 2, s: ['M4 17l6-5-6-5M12 19h8'] },
+  layoutPanel: { sw: 1.7, s: [['rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }], 'M3 15h18'] },
+  layoutSide: { sw: 1.7, s: [['rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }], 'M9 4v16'] },
+  layoutSess: { sw: 1.7, s: [['rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }], 'M15 4v16'] },
+  splitSquare: { sw: 1.7, s: [['rect', { x: 3, y: 4, width: 18, height: 16, rx: 2 }], 'M12 4v16'] },
 };
 function svgIcon(shapes, strokeWidth) {
   const svg = document.createElementNS(SVG_NS, 'svg');

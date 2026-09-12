@@ -53,6 +53,36 @@ function agentLabel(agentId) {
   return agentId || 'an unnamed agent';
 }
 
+/*
+ * The Home composer's icon buttons, built the same way as the rest of this
+ * app's SVG glyphs: createElementNS from a path spec, never an innerHTML
+ * string. Shapes ported verbatim from the design artifact's attach/mic/send
+ * icons (b551a806, markup ~792-795).
+ */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICON_ATTACH = ['M21 11l-8.6 8.6a4 4 0 0 1-5.7-5.7L13.9 6.7a2.5 2.5 0 0 1 3.5 3.5L10 17.6'];
+const ICON_MIC = [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], 'M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8'];
+const ICON_SEND = ['M12 19V5M6 11l6-6 6 6'];
+
+function composerIcon(shapes, strokeWidth) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', String(strokeWidth || 1.7));
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const shape of shapes) {
+    const isPath = typeof shape === 'string';
+    const node = document.createElementNS(SVG_NS, isPath ? 'path' : shape[0]);
+    const attrs = isPath ? { d: shape } : shape[1];
+    for (const key of Object.keys(attrs)) node.setAttribute(key, String(attrs[key]));
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
 function mountPanel() {
   const host = document.querySelector('[data-mount="ask"]');
   if (!host) return null;
@@ -119,60 +149,85 @@ function mountPanel() {
     'font-size:11.5px', 'color:var(--ink-2,#9AA1AC)', 'overflow-wrap:anywhere',
   ].join(';');
 
-  const composer = el('div', 'za-composer');
-  composer.style.cssText = [
-    'flex:none', 'margin:10px', 'border:1px solid var(--rule-2,#2C353B)',
-    'border-radius:10px', 'background:var(--g1,#0B0F11)', 'overflow:hidden',
-  ].join(';');
+  // The compact icon composer, ported from the design artifact's Home
+  // composer (CSS ~108-126, markup ~790-798): a glass '.row' of attach/
+  // textarea/mic/send '.cbtn's above a mono '.foot' pill row. '.composer' and
+  // '.cbtn' sizing for it live in screens/home-composer.css; '.pill' itself
+  // is already global (index.html) and is reused unmodified.
+  const composer = el('div', 'composer');
+
+  const row = el('div', 'row');
+
+  const attach = el('button', 'cbtn attach');
+  attach.type = 'button';
+  attach.disabled = true;
+  attach.title = 'Attachments are not available yet';
+  attach.setAttribute('aria-label', 'Attach a file (not available yet)');
+  attach.appendChild(composerIcon(ICON_ATTACH, 1.7));
 
   const input = document.createElement('textarea');
   input.className = 'za-input';
-  input.rows = 3;
+  input.rows = 1;
   input.maxLength = 4000;
   input.placeholder = 'Message Zeno…';
   input.setAttribute('aria-label', 'Message Ask Zeno');
-  input.style.cssText = [
-    'display:block', 'width:100%', 'box-sizing:border-box', 'min-height:68px', 'max-height:170px',
-    'resize:vertical', 'padding:10px 11px', 'border:0', 'outline:none',
-    'background:transparent', 'color:var(--ink,#ECEBE6)', 'font:13px/1.5 system-ui,sans-serif',
-  ].join(';');
 
-  const toolbar = el('div', 'za-tools');
-  toolbar.style.cssText = [
-    'display:flex', 'align-items:center', 'gap:7px', 'flex-wrap:wrap',
-    'padding:7px 8px', 'border-top:1px solid var(--rule,#242C31)',
-  ].join(';');
+  const mic = el('button', 'cbtn mic');
+  mic.type = 'button';
+  mic.setAttribute('aria-pressed', 'false');
+  mic.setAttribute('aria-label', 'Voice conversation');
+  mic.appendChild(composerIcon(ICON_MIC, 1.7));
 
+  const send = el('button', 'cbtn send');
+  send.type = 'button';
+  send.title = 'Send';
+  send.setAttribute('aria-label', 'Send');
+  send.appendChild(composerIcon(ICON_SEND, 1.9));
+
+  row.append(attach, input, mic, send);
+
+  // The mono foot: a real model pill (from /forge/agents, the same
+  // localModels list Forge's own picker reads), a real voice-state pill
+  // (from this file's own voice state), a static memory pill (this file's
+  // grounding is always the local Vault — see the header comment above —
+  // never a per-session toggle), and the keyboard hint.
+  const foot = el('div', 'foot');
+
+  const modelPill = el('span', 'pill wt');
+  const modelDot = el('span', 'd');
+  modelDot.setAttribute('aria-hidden', 'true');
+  const modelText = document.createTextNode('model: checking…');
+  modelPill.append(modelDot, modelText);
+
+  const voicePill = el('span', 'pill wt');
+  const voiceDot = el('span', 'd');
+  voiceDot.setAttribute('aria-hidden', 'true');
+  const voiceText = document.createTextNode('voice: idle');
+  voicePill.append(voiceDot, voiceText);
+
+  const memoryPill = el('span', 'pill wt', 'memory: Vault · local only');
+  memoryPill.title = 'What this conversation may use';
+
+  const grow = el('span', 'grow');
+  const hint = el('span', null, 'Enter to send · Shift+Enter for a new line');
+
+  foot.append(modelPill, voicePill, memoryPill, grow, hint);
+  composer.append(row, foot);
+
+  // The voice select still exists and still works exactly as before; it
+  // just no longer sits inside the compact composer row. updateMode() keeps
+  // hiding it while voice conversation is off.
   const voiceSelect = document.createElement('select');
-  voiceSelect.className = 'za-voice-select';
   voiceSelect.setAttribute('aria-label', 'Assistant speaking voice');
   voiceSelect.title = 'System voice used to read assistant replies';
   voiceSelect.style.cssText = [
-    'min-width:0', 'max-width:230px', 'padding:5px 7px', 'border-radius:6px',
+    'display:block', 'min-width:0', 'max-width:230px', 'margin:8px 10px 0',
+    'padding:5px 7px', 'border-radius:6px',
     'border:1px solid var(--rule-2,#2C353B)', 'background:var(--g2,#101416)',
     'color:var(--ink-2,#9AA1AC)', 'font:11.5px system-ui,sans-serif',
   ].join(';');
 
-  const mic = el('button', 'za-mic', 'Start voice');
-  mic.type = 'button';
-  mic.setAttribute('aria-pressed', 'false');
-  mic.style.cssText = [
-    'padding:6px 9px', 'border-radius:6px', 'border:1px solid var(--cyan-dim,#1E6B76)',
-    'background:transparent', 'color:var(--ink-2,#9AA1AC)',
-    'font:600 11.5px system-ui,sans-serif', 'cursor:pointer',
-  ].join(';');
-
-  const send = el('button', 'za-send', 'Send');
-  send.type = 'button';
-  send.style.cssText = [
-    'margin-left:auto', 'padding:7px 13px', 'border-radius:7px',
-    'border:1px solid var(--cyan-dim,#1E6B76)', 'background:var(--g5,#222A2E)',
-    'color:var(--ink,#ECEBE6)', 'font:700 12px system-ui,sans-serif', 'cursor:pointer',
-  ].join(';');
-
-  toolbar.append(mic, voiceSelect, send);
-  composer.append(input, toolbar);
-
+  // The privacy prose, moved out of the composer into a small note below it.
   const privacy = el(
     'p',
     'za-privacy',
@@ -181,11 +236,11 @@ function mountPanel() {
       : 'Voice input falls back to the browser speech service, which may send microphone audio to the browser maker. Zeno does not identify who is speaking; while voice conversation is on, any clear speech near the microphone can become a turn. Replies use the selected system/browser voice. Voice never confirms or approves.',
   );
   privacy.style.cssText = [
-    'margin:0', 'padding:0 12px 10px', 'font-size:11px', 'line-height:1.45',
+    'margin:6px 0 0', 'padding:0 2px', 'font-size:10.5px', 'line-height:1.4',
     'color:var(--ink-3,#6C7480)',
   ].join(';');
 
-  panel.append(header, thread, realStatus, composer, privacy);
+  panel.append(header, thread, realStatus, composer, voiceSelect, privacy);
   host.appendChild(panel);
   return {
     panel,
@@ -200,6 +255,10 @@ function mountPanel() {
     voiceSelect,
     mic,
     send,
+    modelPill,
+    modelText,
+    voicePill,
+    voiceText,
   };
 }
 
@@ -238,17 +297,72 @@ function updateMode() {
   ui.mic.setAttribute('aria-pressed', voiceModeOn ? 'true' : 'false');
   ui.typedMode.style.color = voiceModeOn ? 'var(--ink-2,#9AA1AC)' : 'var(--ink,#ECEBE6)';
   ui.voiceMode.style.color = voiceModeOn ? 'var(--cyan,#4FD1DB)' : 'var(--ink-2,#9AA1AC)';
-  ui.mic.style.color = voiceModeOn ? 'var(--cyan,#4FD1DB)' : 'var(--ink-2,#9AA1AC)';
-  ui.mic.textContent = speaking
-    ? 'Interrupt'
-    : voiceStarting
-      ? 'Cancel voice start'
-      : voiceModeOn
-        ? 'Stop voice'
-        : 'Start voice';
+  // The mic cbtn is icon-only; state is shown by the .rec pulse + its title,
+  // and by the foot's voice-state pill, not by a text label.
+  ui.mic.classList.toggle('rec', voiceModeOn);
+  if (SpeechRecognition) {
+    ui.mic.title = speaking
+      ? 'Interrupt'
+      : voiceStarting
+        ? 'Cancel voice start'
+        : voiceModeOn
+          ? 'Stop voice conversation'
+          : 'Start voice conversation';
+  }
   ui.voiceSelect.hidden = !voiceModeOn;
   ui.send.disabled = dispatchGate.busy();
-  ui.send.style.opacity = dispatchGate.busy() ? '0.55' : '1';
+  updateVoicePill();
+}
+
+/** The foot's voice-state pill, from this file's own real voice state. */
+function updateVoicePill() {
+  let text = 'voice: idle';
+  let tone = 'wt';
+  if (!SpeechRecognition) {
+    text = 'voice: unavailable';
+  } else if (speaking) {
+    text = 'voice: speaking';
+    tone = 'cy';
+  } else if (voiceStarting) {
+    text = 'voice: starting…';
+    tone = 'cy';
+  } else if (voiceModeOn) {
+    text = 'voice: listening';
+    tone = 'cy';
+  }
+  ui.voicePill.className = 'pill ' + tone;
+  ui.voiceText.data = text;
+}
+
+/** The foot's model pill, read from the same /forge/agents localModels list
+ *  Forge's own model picker reads — never an invented model name. */
+async function loadModelPill() {
+  try {
+    const response = await fetch('/forge/agents', { headers: authHeaders(), cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    const models = response.ok && Array.isArray(data?.localModels) ? data.localModels : null;
+    if (!response.ok) {
+      setModelPill('model: unknown', 'wt');
+    } else if (models && models.length > 0) {
+      setModelPill(String(models[0]) + ' · local', 'cy');
+    } else {
+      setModelPill('no local model installed', 'am');
+    }
+  } catch {
+    setModelPill('model: unknown', 'wt');
+  }
+}
+
+function setModelPill(text, tone) {
+  ui.modelPill.className = 'pill ' + tone;
+  ui.modelText.data = text;
+}
+
+/** Grow the composer's single-row textarea to its content, capped like the
+ *  artifact's own composer (max-height:160px, screens/home-composer.css). */
+function autosizeInput() {
+  ui.input.style.height = 'auto';
+  ui.input.style.height = Math.min(ui.input.scrollHeight, 160) + 'px';
 }
 
 function trimThread() {
@@ -823,6 +937,7 @@ async function submit(rawQuestion, options) {
   appendTurn('user', question, { voice: options?.voice === true });
   const activity = appendActivity();
   ui.input.value = '';
+  autosizeInput();
   updateMode();
   setStatus('Thinking… a local delegation may run, while hosted work still waits for a click.');
 
@@ -886,6 +1001,7 @@ ui.input.addEventListener('focus', () => {
 });
 ui.input.addEventListener('input', () => {
   if (speaking) stopSpeaking('Speech stopped because you interrupted with typed input.');
+  autosizeInput();
 });
 
 ui.typedMode.addEventListener('click', () => {
@@ -969,6 +1085,7 @@ if (window.speechSynthesis) {
   window.speechSynthesis.addEventListener?.('voiceschanged', refreshVoices);
   window.speechSynthesis.onvoiceschanged = refreshVoices;
 }
+void loadModelPill();
 updateMode();
 setStatus('Ready. This thread stays in memory while this Zeno window is open; raw chat is not silently saved.');
 ui.input.focus({ preventScroll: true });
