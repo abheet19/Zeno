@@ -48,6 +48,42 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
+/* Command's context rail, calmed down.
+   It was four stacked blocks competing at equal weight. The rail answers one
+   question — what needs me now — so "Needs you" and "Running" lead, the day's
+   counts sit quieter beneath them, and the field legend is reference material
+   behind a disclosure rather than a permanent wall of colour swatches. */
+.hside{gap:14px; padding:16px 14px 20px}
+.hside .hs-h{font-size:9px; letter-spacing:.13em}
+.hs-stats div{padding:5px 0; font-size:12px}
+.hs-stats dd{font-size:12px}
+.hs-key{border-top:1px solid var(--rule); padding-top:12px; margin-top:2px}
+.hs-key summary{color:var(--ink-3)}
+.hs-key summary::after{content:" ▾"; opacity:.6}
+.hs-key[open] summary::after{content:" ▴"}
+/* The legend only earns full colour once it is actually opened. */
+.hs-key:not([open]) .orb-key{display:none}
+.lcard{padding:11px 12px; gap:5px}
+.lcard .lm{font-size:10.5px}
+
+/* Switching product should feel like moving between rooms in one building, not
+   a page swap. The outgoing surface is simply replaced (it is display:none'd by
+   ui.js), so only the arriving one animates: a short rise + fade, with the
+   Forge/Counsel workbenches settling a touch later than their chrome.
+   Motion is a preference, not a requirement — both opt-outs kill it. */
+@keyframes zProductIn{from{opacity:0; transform:translateY(6px) scale(.996)}to{opacity:1; transform:none}}
+.product.on{animation:zProductIn .26s cubic-bezier(.22,.61,.36,1) both}
+.product.on .ide, .product.on .cn, .product.on .main{animation:zProductIn .34s cubic-bezier(.22,.61,.36,1) .04s both}
+/* The product switcher's own pill should track the move rather than jump. */
+.seg button{transition:background .2s ease, color .2s ease}
+@media (prefers-reduced-motion:reduce){
+  .product.on, .product.on .ide, .product.on .cn, .product.on .main{animation:none}
+}
+:root[data-reduce="1"] .product.on,
+:root[data-reduce="1"] .product.on .ide,
+:root[data-reduce="1"] .product.on .cn,
+:root[data-reduce="1"] .product.on .main{animation:none}
+
 /* Model picker, Compare mode.
    .mp-foot is a flex ROW (label left, button right) for Single/Route. Compare
    adds three stacked blocks — the VRAM meter, the Parallel/Sequential control and
@@ -900,7 +936,9 @@ button{font:inherit; color:inherit}
             <section class="hs-sec"><div class="hs-h">Today</div>
               <dl class="hs-stats"><div><dt>verified</dt><dd class="gr">3</dd></div><div><dt>in the sandbox</dt><dd class="cy">2</dd></div><div><dt>backlog</dt><dd>5</dd></div><div><dt>memories</dt><dd>12</dd></div><div><dt>left this machine</dt><dd>0</dd></div></dl>
             </section>
-            <details class="hs-key" open><summary class="hs-h">Reading the field <span class="sum">colour = state</span></summary>
+            <!-- Collapsed by default: the legend is reference, not status. The rail's
+                 job is what needs you now; the key is there when the orb confuses. -->
+            <details class="hs-key"><summary class="hs-h">Reading the field <span class="sum">colour = state</span></summary>
               <div class="orb-key">
                 <span class="k go"><i></i>Zeno core · routes, never approves</span>
                 <span class="k cy"><i></i>agent · pulsing = running</span>

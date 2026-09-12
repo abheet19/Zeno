@@ -208,7 +208,16 @@ async function bindForge() {
   let activeIdx = -1;
   let sessionSeq = 0;
 
-  const notWiredNotes = [];
+  // Known, deliberate gaps — surfaced once at boot (below) rather than
+  // silently absent. Each is a case where the honest answer is "not in this
+  // build" rather than a fabricated control or number.
+  const notWiredNotes = [
+    'Extensions view: a real search input with nothing to search — /forge/extensions is not read this pass.',
+    'Terminal: commands run exactly as typed. This daemon has no server-side or client-side gate that holds a write/push/rm/curl/deploy command for approval before it runs (only file writes from an agent run go through the approval gate) — the task description assumed one exists; it does not.',
+    'Compare mode "Run": starts a single run on the first selected model only. There is no daemon endpoint for a true side-by-side multi-model run.',
+    'Session runs: /forge/run reports tokensIn/tokensOut for local (Ollama) runs; this build does not display them anywhere in the session panel.',
+    'Forge Lens: shows what is actually sent (task + memory + skills), not the exact assembled/hashed prompt POST /forge/context returns — that preview is not read this pass.',
+  ];
 
   /* ============================================================ *
    * 2 · EXPLORER + STATUS BAR + TIMELINE (Priority 1)              *
@@ -568,7 +577,19 @@ async function bindForge() {
         const head = el('div', 'vsresf');
         add(head, el('span', 'chev', '▾'), document.createTextNode(name), el('em', null, dir ? ` ${dir}` : ''), el('span', null, String(rows.length)));
         nodes.push(head);
-        for (const m of rows) nodes.push(el('div', 'vsresl', typeof m.text === 'string' ? m.text : ''));
+        for (const m of rows) {
+          const row = el('div', 'vsresl', typeof m.text === 'string' ? m.text : '');
+          const line = Number.isInteger(m.line) ? m.line : null;
+          row.title = line ? `${path}:${line}` : path;
+          row.addEventListener('click', () => {
+            void openFile(path).then(() => {
+              if (!codeEl || !line) return;
+              const target = codeEl.querySelectorAll('.ln')[line - 1];
+              if (target) target.scrollIntoView({ block: 'center' });
+            });
+          });
+          nodes.push(row);
+        }
       }
       if (resWrap) fill(resWrap, ...nodes);
       const files = typeof d.files === 'number' ? d.files : byPath.size;
@@ -576,6 +597,143 @@ async function bindForge() {
       if (noteEl) noteEl.textContent = `${total} result${total === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${d.truncated ? ' — showing the first matches' : ''}`;
     }
     if (queryIn) queryIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } });
+  }
+
+  // The sidebar's OTHER "Ports" view (data-vsview="remote" — distinct from
+  // the bottom drawer's ports tab already handled above) ships the same
+  // three fabricated rows plus a "Forward a Port" button with no real
+  // forwarding capability behind it anywhere in this daemon.
+  const remoteView = $('.vsside .vsview[data-vsview="remote"] .vspad', ide);
+  if (remoteView) {
+    const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+    const row = el('div', 'fchg');
+    add(row, el('span', 'fdot ok'), document.createTextNode(` ${port} `), el('span', 'fm', `Zeno daemon · ${location.hostname}`));
+    const note = el('div', 'vsnote', 'Forge cannot observe or forward other ports from the browser.');
+    const fwd = el('button', 'btn g sm', 'Forward a Port');
+    fwd.type = 'button';
+    fwd.disabled = true;
+    fwd.title = 'Not available in this build.';
+    fill(remoteView, row, note, fwd);
+  }
+
+  /* ============================================================ *
+   * 2d · ZENO sidebar view — real rules/skills/schedule/connectors *
+   * ============================================================ *
+   * GET /skills -> {rules[], skills[], failed[]}; GET /schedule ->
+   * {tasks[]}; GET /forge/connectors -> {servers[]}. The artifact's
+   * version is entirely invented: fixed rule/skill byte counts, a
+   * "pdf … Install" skill-marketplace row nothing here backs, made-up
+   * schedule entries with times ("next in 6h"), an invented CLI
+   * version string, and a "GitHub Connect" button with nothing behind
+   * it. Every row below is read, or the section says it wasn't.
+   * Ticking a skill here is the REAL selection — selectedSkillIds is
+   * what sendTask()/runResolved() below actually send as `skillIds`,
+   * and the composer's "N skills" pill reads its size, not a fixed 2. */
+  const zenoView = $('.vsside .vsview[data-vsview="zeno"] .vspad', ide);
+  const skillsPill = $('#s-skills', ide);
+  const selectedSkillIds = new Set();
+  function renderSkillsPill() {
+    if (!skillsPill) return;
+    setTrailingText(skillsPill, ` ${selectedSkillIds.size} skill${selectedSkillIds.size === 1 ? '' : 's'} ▾`);
+  }
+  function sectHead(text) {
+    const h = el('div', 'vssect open');
+    add(h, el('span', 'chev', '▾'), document.createTextNode(text));
+    return h;
+  }
+  if (zenoView) fill(zenoView, el('div', 'fnote', 'Reading rules, skills, schedule and connectors from the daemon…'));
+  renderSkillsPill();
+  async function loadZenoView() {
+    if (!zenoView) return;
+    const [skillsRes, schedRes, connRes] = await Promise.all([
+      getJSON('/skills'), getJSON('/schedule'), getJSON('/forge/connectors'),
+    ]);
+    const nodes = [];
+
+    nodes.push(sectHead('RULES · loaded for this run'));
+    if (!skillsRes.ok) {
+      nodes.push(el('div', 'vsnote', `Rules could not be read: ${skillsRes.error}`));
+    } else {
+      const rules = Array.isArray(skillsRes.data.rules) ? skillsRes.data.rules : [];
+      if (!rules.length) nodes.push(el('div', 'vsnote', 'No AGENTS.md, CLAUDE.md, or .agents/.cursor/.claude rule files were found.'));
+      for (const r of rules) {
+        const [cls, txt] = fileMeta(r.path.split('/').pop());
+        const row = el('div', 'vsfile');
+        add(row, el('span', cls, txt), document.createTextNode(r.path), el('span', 'vsmod ok', bytesLabel(r.bytes)));
+        if (r.truncated) row.title = `${r.path} is truncated for this preview.`;
+        nodes.push(row);
+      }
+    }
+
+    nodes.push(sectHead('SKILLS · this run'));
+    if (!skillsRes.ok) {
+      nodes.push(el('div', 'vsnote', `Skills could not be read: ${skillsRes.error}`));
+    } else {
+      const skills = Array.isArray(skillsRes.data.skills) ? skillsRes.data.skills : [];
+      if (!skills.length) nodes.push(el('div', 'vsnote', 'No skills installed under .agents/skills.'));
+      for (const s of skills) {
+        const label = el('label', 'vsck');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        const suspicious = s.verdict === 'suspicious';
+        cb.checked = !suspicious; // clean skills load by default; a flagged one waits for an explicit tick
+        if (cb.checked) selectedSkillIds.add(s.id);
+        cb.addEventListener('change', () => {
+          if (cb.checked) selectedSkillIds.add(s.id); else selectedSkillIds.delete(s.id);
+          renderSkillsPill();
+        });
+        const trust = el('span', 'trust', suspicious ? 'flagged · review' : 'screened');
+        const whys = Array.isArray(s.findings) ? s.findings.map((f) => f.why).filter(Boolean) : [];
+        trust.title = suspicious && whys.length ? whys.join('; ') : 'Read as text by the model. It never grants a permission — every effect still goes through the kernel.';
+        add(label, cb, document.createTextNode(` ${s.name || s.id} `), trust, el('em', null, bytesLabel(s.bytes)));
+        nodes.push(label);
+      }
+      const failed = Array.isArray(skillsRes.data.failed) ? skillsRes.data.failed : [];
+      if (failed.length) nodes.push(el('div', 'vsnote', `${failed.length} skill file${failed.length === 1 ? '' : 's'} could not be parsed.`));
+    }
+    nodes.push(el('div', 'vsnote', 'A skill is text the model reads. It never grants a permission — every effect still goes through the kernel.'));
+    renderSkillsPill();
+
+    nodes.push(sectHead('SCHEDULED TASKS'));
+    if (!schedRes.ok) {
+      nodes.push(el('div', 'vsnote', `Scheduled tasks could not be read: ${schedRes.error}`));
+    } else {
+      const tasks = Array.isArray(schedRes.data.tasks) ? schedRes.data.tasks : [];
+      if (!tasks.length) nodes.push(el('div', 'vsnote', 'No scheduled tasks on this machine.'));
+      for (const t of tasks) {
+        const row = el('div', 'vsfile');
+        row.dataset.sched = '1';
+        let when;
+        try { when = t.paused ? 'paused' : t.overdue ? 'overdue' : `next ${new Date(t.nextRunAt).toLocaleString()}`; } catch { when = t.paused ? 'paused' : '—'; }
+        add(row, el('span', t.paused ? 'vsi' : 'vsi ok', t.paused ? '○' : '●'), document.createTextNode(String(t.title || '(untitled)')), el('span', t.paused ? 'vsmod' : 'vsmod ok', when));
+        nodes.push(row);
+      }
+    }
+    nodes.push(el('div', 'vsnote', 'Ceiling T1 · missed runs are skipped, not stacked · a schedule can never inherit a broader approval than you gave it.'));
+
+    nodes.push(sectHead('MCP & CONNECTORS · per-run'));
+    if (!connRes.ok) {
+      nodes.push(el('div', 'vsnote', `Connectors could not be read: ${connRes.error}`));
+    } else {
+      const servers = Array.isArray(connRes.data.servers) ? connRes.data.servers : [];
+      if (!servers.length) nodes.push(el('div', 'vsnote', 'No MCP connectors are configured.'));
+      for (const s of servers) {
+        const row = el('div', 'vsfile');
+        const nTools = Array.isArray(s.tools) ? s.tools.length : 0;
+        add(row, el('span', s.configured ? 'vsi ok' : 'vsi', s.configured ? '●' : '○'), document.createTextNode(String(s.name || s.id)),
+          el('span', s.configured ? 'vsmod ok' : 'vsmod', s.configured ? `${nTools} tool${nTools === 1 ? '' : 's'}` : 'not configured'));
+        if (s.permissions) row.title = s.permissions;
+        nodes.push(row);
+      }
+      if (connRes.data.note) nodes.push(el('div', 'vsnote', connRes.data.note));
+    }
+
+    // POLICY describes the kernel's fixed tiering (a build constant, not
+    // per-run instance data), so it is kept as the artifact stated it.
+    nodes.push(sectHead('POLICY'));
+    nodes.push(el('div', 'vsnote', 'built-in default · T2 needs one owner approval · single-use · receipts Ed25519-signed'));
+
+    fill(zenoView, ...nodes);
   }
 
   /* ============================================================ *
@@ -810,6 +968,20 @@ async function bindForge() {
   function showPanel(name) {
     const tab = $(`.vsptabs [data-vsp="${name}"]`);
     if (tab) tab.click(); // pure UI toggle already wired by ui.js
+  }
+
+  // The bottom "Ports" panel ships three fabricated rows (this daemon,
+  // Ollama, a vite dev server, all invented port numbers). This page can
+  // only ever observe the ONE process it is talking to — its own — so
+  // that is the only row drawn; the other two are removed rather than
+  // left standing as read state nobody read.
+  const portsPanel = $('.vsp[data-vsp="ports"]', ide);
+  if (portsPanel) {
+    const port = location.port || (location.protocol === 'https:' ? '443' : '80');
+    const row = el('div', 'fchg');
+    add(row, el('span', 'fdot ok'), document.createTextNode(` ${port} `), el('span', 'fm', `Zeno daemon · ${location.hostname}`));
+    const note = el('div', 'vsnote', 'Forge cannot observe other listening ports (Ollama, a dev server, etc.) from the browser, so none are listed here.');
+    fill(portsPanel, row, note);
   }
 
   /* ============================================================ *
@@ -1419,7 +1591,7 @@ async function bindForge() {
 
   async function runResolved(session, task, route, hostedConfirmed) {
     const runId = `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const body = { task, memoryEnabled: session.memoryEnabled !== false, skillIds: [], agentId: route.agentId, runId };
+    const body = { task, memoryEnabled: session.memoryEnabled !== false, skillIds: [...selectedSkillIds], agentId: route.agentId, runId };
     if (route.model) body.model = route.model;
     if (route.effort) body.effort = route.effort;
     if (hostedConfirmed) body.hostedConfirmed = true;
@@ -1469,7 +1641,7 @@ async function bindForge() {
   renderScm();
   showEmptyState();
   renderTerminal();
-  await Promise.all([loadStatus(), loadAgents(), renderGov()]);
+  await Promise.all([loadStatus(), loadAgents(), renderGov(), loadZenoView()]);
   paintModelPills();
 
   if (notWiredNotes.length) console.info('[zeno] forge binder — not wired this pass:', notWiredNotes);
