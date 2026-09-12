@@ -770,6 +770,10 @@ button{font:inherit; color:inherit}
       <button class="nav-i" data-screen="vault"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>Vault <span class="ct">12</span></button>
       <button class="nav-i" data-screen="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>Devices <span class="ct">1</span></button>
       <button class="nav-i" data-screen="integrations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Integrations <span class="ct">4</span></button>
+      <!-- Zeno has two workspace surfaces the design never depicted. They keep the
+           design's own rail language rather than being dropped. -->
+      <button class="nav-i" data-screen="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Projects <span class="ct" id="projects-count"></span></button>
+      <button class="nav-i" data-screen="customize"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 6.9L21 11l-6.6 2.1L12 20l-2.4-6.9L3 11l6.6-2.1z"/></svg>Customize <span class="ct" id="customize-count"></span></button>
       <div class="spacer"></div>
       <button class="nav-i" data-open-settings><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82 2 2 0 1 1-2.83 2.83 1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51 2 2 0 0 1-4 0 1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33 2 2 0 1 1-2.83-2.83A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1 2 2 0 0 1 0-4 1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82 2 2 0 1 1 2.83-2.83 1.65 1.65 0 0 0 1.82.33h.09A1.65 1.65 0 0 0 11 3.09 2 2 0 0 1 13 3a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33 2 2 0 1 1 2.83 2.83 1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1z"/></svg>Settings</button>
       <div class="railfoot"><span class="lg g">verified</span><span class="lg a">needs you</span><span class="lg r">blocked</span></div>
@@ -970,6 +974,21 @@ button{font:inherit; color:inherit}
             <div class="lcard"><div class="lk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H5.2L4 17.5z"/></svg>Chrome bridge</div><div class="lm">off by default · origin allowlist · read-only never-list · every action goes through the approval gate</div><div class="lr"><span class="pill wt">off</span><button class="laction">Manage</button></div></div>
           </div>
         </div>
+      </section>
+
+      <!-- ============ PROJECTS — a Zeno surface the design never drew ============
+           Kept because it is a real feature; expressed in the design's own
+           language (.phead + .card/.row-list) so it does not read as a bolt-on.
+           bind/lists.js fills it from the daemon; empty until it answers. -->
+      <section class="screen" data-screen="projects">
+        <div class="phead"><div><h2>Projects</h2><p>The repositories this Zeno can work in. Forge runs happen in a throwaway worktree of the one you pick — your checkout is never the workspace.</p></div><button class="btn g sm" data-projects-add>Add a project</button></div>
+        <div class="pbody"><div class="card rows"><div class="row-list" data-mount="projects-list"><div class="fnote">Reading the projects this daemon knows about…</div></div></div></div>
+      </section>
+
+      <!-- ============ CUSTOMIZE — skills, connectors and plugins hub ============ -->
+      <section class="screen" data-screen="customize">
+        <div class="phead"><div><h2>Customize</h2><p>Skills, connectors and plugins. Everything here is catalogued read-only and loaded per run — recording one is not connecting it, and nothing is ambient.</p></div></div>
+        <div class="pbody"><div class="card rows"><div class="row-list" data-mount="customize-list"><div class="fnote">Reading the catalogue…</div></div></div></div>
       </section>
     </main>
     <nav class="mtabs" aria-label="Command">
