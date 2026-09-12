@@ -317,6 +317,64 @@ function button(label, glyph, kind, onClick, disabledWhy) {
 }
 
 /** This PC, drawn from what the daemon actually reports about its identity. */
+/* Safe-mode LAN phone access. Not a paired device — the same daemon, reachable
+   from a phone on the network when the owner opted in with ZENO_LAN=1. Off by
+   default; when off, this says how to turn it on and what the trade-off is. */
+function copyPhoneUrl(u) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(u);
+      actionNote = { text: 'Copied the phone URL — open it on your phone.', channel: 'cyan' };
+      paint();
+      return;
+    }
+  } catch { /* fall through to the type-it note */ }
+  actionNote = { text: 'Copy is unavailable in this window; type the URL on your phone.', channel: 'amber' };
+  paint();
+}
+function phoneAccessBlock() {
+  const pa = devices && devices.phoneAccess;
+  const wrap = el('div', 'zm-phone');
+  wrap.style.cssText = ['display:flex', 'flex-direction:column', 'gap:7px', 'padding:12px 13px', 'border-radius:12px', 'border:1px solid var(--gl-edge,var(--rule,#242C31))', 'background:var(--g2,#101416)'].join(';');
+  const h = el('p', null, 'Use Zeno on your phone');
+  h.style.cssText = 'margin:0;font:600 13px/1.3 system-ui,sans-serif;color:var(--ink,#ECEBE6)';
+  add(wrap, h);
+  if (!pa || !pa.lanAccess) {
+    const badge = el('span', null, 'OFF · loopback only');
+    badge.style.cssText = 'align-self:flex-start;font:10px var(--font-mono,ui-monospace,monospace);color:var(--ink-3,#6C7480);border:1px solid var(--rule-2,#2C353B);border-radius:999px;padding:2px 8px';
+    const off = el('p', null,
+      'Safe-mode LAN access is OFF, so the daemon is loopback-only and your phone cannot reach it. Restart Zeno with '
+      + 'ZENO_LAN=1 to turn it on — it then binds to your network and shows the phone URLs here. It is plain HTTP over the '
+      + 'LAN, so use it only on a network you trust; unset ZENO_LAN to turn it off again.');
+    off.style.cssText = 'margin:0;font-size:11.5px;line-height:1.55;color:var(--ink-2,#9AA1AC)';
+    add(wrap, badge, off);
+    return wrap;
+  }
+  const on = el('span', null, '● ON · reachable on your network');
+  on.style.cssText = 'align-self:flex-start;font:10px var(--font-mono,ui-monospace,monospace);color:var(--amber,#E0A128);border:1px solid color-mix(in srgb,var(--amber,#E0A128) 45%,var(--rule,#242C31));border-radius:999px;padding:2px 8px';
+  const sub = el('p', null,
+    'Open one of these on a phone on the SAME network. You become the owner on that device. This is plain HTTP over '
+    + 'your LAN — use it only on a network you trust; anyone with the URL becomes owner.');
+  sub.style.cssText = 'margin:0;font-size:11.5px;line-height:1.55;color:var(--ink-2,#9AA1AC)';
+  add(wrap, on, sub);
+  const urls = pa.urls || [];
+  if (!urls.length) {
+    const none = el('p', null, 'No LAN address was found. Connect this machine to a network and restart.');
+    none.style.cssText = 'margin:0;font-size:11.5px;color:var(--ink-3,#6C7480)';
+    add(wrap, none);
+  } else {
+    for (const u of urls) {
+      const row = el('div', null);
+      row.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+      const code = el('code', null, u);
+      code.style.cssText = 'flex:1;min-width:0;font:11.5px var(--font-mono,ui-monospace,monospace);color:var(--cyan,#38C3D6);background:var(--g1,#0A0C0E);border:1px solid var(--rule,#242C31);border-radius:7px;padding:6px 9px;overflow-wrap:anywhere';
+      add(row, code, button('Copy', '⧉', null, () => copyPhoneUrl(u)));
+      add(wrap, row);
+    }
+  }
+  return wrap;
+}
+
 /* The always-visible local-control guarantee. Not a toggle — there is nothing to
    toggle, because there is no inbound remote-command channel to switch off. It is
    a standing statement of the structural guardrail, styled to read as one. */
@@ -453,6 +511,7 @@ function panel() {
   }
 
   add(root, thisDeviceRow(devices.thisDevice));
+  add(root, phoneAccessBlock());
   add(root, localControlBlock());
 
   // The paired list. Empty, and the reason is on the page — never left to be

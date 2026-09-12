@@ -7,6 +7,7 @@
  */
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -31,7 +32,26 @@ import { nodeGitRunner } from '@abheet19/zeno-kernel';
 import { nodeWorld } from './world.js';
 
 const PORT = Number(process.env['ZENO_PORT'] ?? 7317);
-const HOST = '127.0.0.1'; // loopback only, deliberately
+// Loopback only by default, deliberately: the daemon is not on the network. The
+// owner may OPT IN to safe-mode LAN access (ZENO_LAN=1) so a phone on the same
+// network can reach it — a real security trade-off, disclosed everywhere it
+// appears. Even then only the ?k= launch nonce hands out the owner token.
+const LAN_ACCESS = process.env['ZENO_LAN'] === '1' || process.env['ZENO_LAN'] === 'true';
+const HOST = LAN_ACCESS ? '0.0.0.0' : '127.0.0.1';
+
+/** This machine's LAN IPv4 addresses (non-internal), for the phone-access URLs. */
+function lanAddresses(): string[] {
+  const out: string[] = [];
+  try {
+    const ifaces = networkInterfaces();
+    for (const list of Object.values(ifaces)) {
+      for (const net of list ?? []) {
+        if (net.family === 'IPv4' && !net.internal) out.push(net.address);
+      }
+    }
+  } catch { /* no network info: the URL list is simply empty */ }
+  return out;
+}
 
 /**
  * Where the window's static files live.
@@ -252,7 +272,7 @@ function main(): void {
   // carry an answer back from the browser and it can approve nothing.
   const chromeToken = randomBytes(24).toString('hex');
 
-  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser, forgeChrome, chromeToken, ollamaAutoStart: true });
+  const server = createServer({ kernel, sandbox, workspace: dir, fs, tokens, stream, publicDir, work, heldStore, vault, meetings, launchNonce, forgeNetwork, forgeShell, forgeBrowser, forgeChrome, chromeToken, ollamaAutoStart: true, lanAccess: LAN_ACCESS, port: PORT });
   const shutdown = createDaemonShutdown({
     server,
     release: releaseWorkspace,
@@ -329,8 +349,16 @@ function main(): void {
     out('');
     out('  ZENO — reason before action');
     out('  ' + '-'.repeat(26));
-    out(`     window     http://${HOST}:${PORT}/?k=${launchNonce}`);
+    out(`     window     http://127.0.0.1:${PORT}/?k=${launchNonce}`);
     out('                (open THIS url — the ?k= is what authorises approvals; a plain visit is read-only)');
+    if (LAN_ACCESS) {
+      const urls = lanAddresses().map((ip) => `http://${ip}:${PORT}/?k=${launchNonce}`);
+      out('     phone      SAFE-MODE LAN ACCESS IS ON — this daemon is reachable from your network.');
+      if (urls.length) for (const u of urls) out(`                ${u}`);
+      else out('                (no LAN address found; connect to a network and restart)');
+      out('                Open a URL above on a phone on the SAME network. Anyone with the URL becomes owner,');
+      out('                and this is plain HTTP — use it only on a network you trust. Unset ZENO_LAN to turn it off.');
+    }
     out(`     workspace  ${dir}`);
     out(`     project    ${sandbox}${requestedProject === '' ? ' (Zeno scratch repository)' : ''}`);
     out(`     policy     ${policy === DEFAULT_POLICY ? 'built-in default' : 'policy.json'} · ${policyHash(policy).slice(0, 12)}`);

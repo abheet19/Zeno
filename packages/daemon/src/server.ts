@@ -16,7 +16,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, opendirSync, rea
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import { spawn } from 'node:child_process';
-import { homedir, hostname, totalmem, freemem } from 'node:os';
+import { homedir, hostname, totalmem, freemem, networkInterfaces } from 'node:os';
 import { delimiter as pathDelimiter, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import {
   Kernel,
@@ -168,6 +168,11 @@ export interface DaemonOptions {
    * blind local GET from scraping the owner token.
    */
   readonly launchNonce?: string;
+  /** Whether the daemon is bound to the LAN (opt-in ZENO_LAN). Drives the
+   * phone-access panel; the socket binding itself is done in main.ts. */
+  readonly lanAccess?: boolean;
+  /** The port the daemon listens on, for building phone-access URLs. */
+  readonly port?: number;
   /**
    * How the daemon finds out WHICH agent a delegation would run on this machine.
    *
@@ -1716,7 +1721,7 @@ export function createServer(opts: DaemonOptions): Server {
       });
     }
 
-    if (req.method === 'GET' && path === '/state') return serveState(res);
+    if (req.method === 'GET' && path === '/state') return serveState(res, role);
     if (req.method === 'GET' && path === '/receipts') return serveReceipts(res, url);
     if (req.method === 'GET' && path === '/stream') return serveStream(req, res);
     if (req.method === 'GET' && path === '/forge/run-progress') {
@@ -1801,7 +1806,7 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path.startsWith('/counsel/meetings/')) return serveMeeting(res, path);
     if (req.method === 'DELETE' && path.startsWith('/counsel/meetings/')) return deleteMeeting(res, path, role);
     if (req.method === 'POST' && path === '/counsel/ask') return await postCounselAsk(req, res);
-    if (req.method === 'GET' && path === '/mesh/devices') return serveMeshDevices(res);
+    if (req.method === 'GET' && path === '/mesh/devices') return serveMeshDevices(res, role);
     if (req.method === 'POST' && path === '/mesh/pairing') return postMeshPairing(res, role);
     if (req.method === 'POST' && path === '/mesh/pairing/cancel') return postMeshPairingCancel(res, role);
     if (req.method === 'POST' && path === '/mesh/selfcheck') return postMeshSelfCheck(res, role);
@@ -1906,7 +1911,13 @@ export function createServer(opts: DaemonOptions): Server {
     return { ...h.preview, payload: h.payload, review };
   }
 
-  function serveState(res: ServerResponse): void {
+  function serveState(res: ServerResponse, role: Role): void {
+    // Phone-access URLs carry the launch nonce, so they are OWNER-ONLY — a
+    // proposer reading /state must never learn the secret that mints owner.
+    const lanOn = opts.lanAccess === true;
+    const phoneUrls = (lanOn && role === 'owner' && opts.launchNonce !== undefined && opts.port !== undefined)
+      ? lanIps().map((ip) => `http://${ip}:${opts.port}/?k=${opts.launchNonce}`)
+      : [];
     json(res, 200, {
       // Both queues, because a window that reloaded mid-run must not lose sight
       // of a tool call an agent is still blocked on. They render identically:
@@ -1926,7 +1937,21 @@ export function createServer(opts: DaemonOptions): Server {
         sha: process.env['ZENO_BUILD_SHA'] || null,
         version: process.env['ZENO_VERSION'] || process.env['npm_package_version'] || null,
       },
+      // Safe-mode LAN access for a phone. lanAccess is legible to either role;
+      // the URLs (which carry the nonce) are owner-only, above.
+      net: { lanAccess: lanOn, phoneUrls },
     });
+  }
+
+  /** This machine's non-internal IPv4 addresses, for the phone-access URLs. */
+  function lanIps(): string[] {
+    const out: string[] = [];
+    try {
+      for (const list of Object.values(networkInterfaces())) {
+        for (const net of list ?? []) if (net.family === 'IPv4' && !net.internal) out.push(net.address);
+      }
+    } catch { /* no network info: an empty list, and the panel says so */ }
+    return out;
   }
 
   function serveReceipts(res: ServerResponse, url: URL): void {
@@ -5033,8 +5058,14 @@ export function createServer(opts: DaemonOptions): Server {
    * Readable by either role: knowing which devices exist is not pairing with
    * one, the same line /work draws. `paired` comes from the real TrustStore.
    */
-  function serveMeshDevices(res: ServerResponse): void {
+  function serveMeshDevices(res: ServerResponse, role: Role): void {
     const self = meshIdentity();
+    // Safe-mode LAN phone access. lanAccess is legible to either role; the URLs
+    // carry the launch nonce (the owner secret), so they are owner-only.
+    const lanOn = opts.lanAccess === true;
+    const phoneUrls = (lanOn && role === 'owner' && opts.launchNonce !== undefined && opts.port !== undefined)
+      ? lanIps().map((ip) => `http://${ip}:${opts.port}/?k=${opts.launchNonce}`)
+      : [];
     json(res, 200, {
       thisDevice: {
         label: 'This PC',
@@ -5053,6 +5084,9 @@ export function createServer(opts: DaemonOptions): Server {
           'The Zeno phone client is not built. No second device can complete a pairing yet — ' +
           'there is nothing on the other end to receive an invite or send one back.',
       },
+      // Safe-mode LAN: not a paired device, just this same daemon reachable from a
+      // phone on the network. Off unless the owner started with ZENO_LAN=1.
+      phoneAccess: { lanAccess: lanOn, urls: phoneUrls },
     });
   }
 
