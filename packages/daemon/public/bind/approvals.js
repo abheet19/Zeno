@@ -79,6 +79,28 @@ function isToolCall(binding) {
   return typeof binding?.targetRef === 'string' && binding.targetRef.startsWith('tool:');
 }
 
+/**
+ * Which pair of endpoints settles THIS held action.
+ *
+ * Three queues reach this screen and they are not interchangeable. Sending a
+ * held memory write to `/approvals` gets a 404 the owner reads as "the app is
+ * broken", and the deny button used to be hard-disabled for every file write
+ * with the note "this daemon exposes no decline endpoint" — which stopped being
+ * true when `/approvals/decline` landed, leaving a permanently dead control on
+ * the one screen whose entire job is making a decision possible.
+ */
+function endpointsFor(preview) {
+  const binding = preview.binding || {};
+  const kind = preview.kind || binding.kind || '';
+  if (kind === 'memory.write') {
+    return { approve: '/memory/approvals', decline: '/memory/approvals/decline', what: 'memory write' };
+  }
+  if (isToolCall(binding)) {
+    return { approve: '/approvals', decline: '/forge/permissions/decline', what: 'tool call' };
+  }
+  return { approve: '/approvals', decline: '/approvals/decline', what: 'file write' };
+}
+
 function kvRow(dl, label, value) {
   dl.append(el('dt', null, label), el('dd', null, value));
 }
@@ -251,6 +273,7 @@ function capsuleFor(preview, onSettled) {
 
   const readOnly = !token();
   const hasHash = typeof preview.actionHash === 'string' && preview.actionHash !== '';
+  const routes = endpointsFor(preview);
 
   if (!hasHash) {
     allowBtn.disabled = true;
@@ -272,7 +295,7 @@ function capsuleFor(preview, onSettled) {
     denyBtn.disabled = true;
     allowBtn.textContent = 'Approving…';
     try {
-      const res = await fetch('/approvals', {
+      const res = await fetch(routes.approve, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ actionHash: preview.actionHash }),
@@ -305,12 +328,21 @@ function capsuleFor(preview, onSettled) {
     }
   });
 
-  const denyable = hasHash && isToolCall(binding) && !denied && !auto;
+  /* Every held action can be refused now. This used to be `hasHash &&
+     isToolCall(binding)`, which hard-disabled Deny for every file write with
+     the note "this daemon exposes no decline endpoint" — true when it was
+     written, false once /approvals/decline landed, and it left a permanently
+     dead control on the one screen whose whole job is making a decision
+     possible. A T4 action stays undeniable because it was never approvable:
+     it is already refused by policy. */
+  const denyable = hasHash && !denied && !auto;
   if (!denyable) {
     denyBtn.disabled = true;
-    denyBtn.title = isToolCall(binding)
-      ? 'This call is not open to a decision right now.'
-      : 'This daemon exposes no decline endpoint for a held write — approve it or let it expire.';
+    denyBtn.title = denied
+      ? 'Prohibited by policy — this action is already refused; there is nothing to decide.'
+      : auto
+        ? 'Auto — no decision is owed on this action.'
+        : 'This preview carries no action hash, so there is nothing to refuse.';
   } else if (readOnly) {
     denyBtn.disabled = true;
     denyBtn.title = 'Read-only view — no owner token on this page.';
@@ -322,7 +354,7 @@ function capsuleFor(preview, onSettled) {
     denyBtn.disabled = true;
     denyBtn.textContent = 'Denying…';
     try {
-      const res = await fetch('/forge/permissions/decline', {
+      const res = await fetch(routes.decline, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ actionHash: preview.actionHash, reason: 'Denied from Command' }),

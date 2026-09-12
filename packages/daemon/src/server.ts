@@ -1945,12 +1945,16 @@ export function createServer(opts: DaemonOptions): Server {
       ? lanIps().map((ip) => `http://${ip}:${opts.port}/?k=${opts.launchNonce}`)
       : [];
     json(res, 200, {
-      // Both queues, because a window that reloaded mid-run must not lose sight
-      // of a tool call an agent is still blocked on. They render identically:
-      // one carries the bytes of a file write, the other the bytes of a call.
+      // All THREE queues. A window that reloaded mid-run must not lose sight of
+      // a tool call an agent is still blocked on, and a proposed memory write
+      // used to live in a fourth place nothing rendered — held forever, with no
+      // control on screen that could approve or refuse it. They render
+      // identically: one carries the bytes of a file write, one the bytes of a
+      // call, one the text of a note.
       pending: [
         ...[...held.values()].map(withPayload),
         ...[...gateHeld.values()].map((p) => ({ ...p.preview, payload: p.payload })),
+        ...(memoryRoutes ? memoryRoutes.waiting() : []),
       ],
       receipts: opts.kernel.receipts(),
       chain: opts.kernel.verifyChain(),

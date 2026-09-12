@@ -38,8 +38,6 @@
 .dv-hero{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; text-align:center; position:relative}
 .dv-hero b{font-family:var(--font-display,Newsreader,serif); font-size:22px; font-weight:500; color:var(--ink); letter-spacing:.01em}
 .dv-hero span{font-size:12.5px; color:var(--ink-3); line-height:1.5; max-width:30ch}
-.dv-tip{font-size:11.5px; color:var(--ink-3); border:1px solid var(--rule,#242C31); border-radius:9px; padding:8px 11px; margin-bottom:10px; background:color-mix(in srgb,var(--g2,#0F1214) 70%,transparent)}
-.dv-tip kbd{font-family:var(--font-mono,monospace); font-size:10.5px; color:var(--ink-2)}
 /* Composers grow with their text instead of clipping it.
    overflow is HIDDEN while growing — an auto-scrollbar in a short box is what
    produced those native up/down arrows and hid the second line. The JS
@@ -52,6 +50,17 @@
 .composer .row{gap:8px}
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
+
+/* Compact density — Settings › Appearance › Density, resolved by theme-boot.js
+   before CSS. It tightens list rows and cards exactly as the row promises, and
+   changes nothing else: no font rescaling, no hidden content. */
+:root[data-density="compact"] .lcard{padding:9px 11px; gap:4px}
+:root[data-density="compact"] .lcard .lm{font-size:10.5px}
+:root[data-density="compact"] .lrow{padding:7px 10px}
+:root[data-density="compact"] .setrow{padding:10px 0}
+:root[data-density="compact"] .hs-stats div{padding:4px 0}
+:root[data-density="compact"] .hside{gap:12px}
+:root[data-density="compact"] .cnrow, :root[data-density="compact"] .dvsess{padding:7px 10px}
 
 /* Command's context rail keeps the artifact's own proportions.
    A previous pass shrank the headings, tightened the stats and collapsed the
@@ -1264,7 +1273,9 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
               <span>Describe your task to Zeno</span>
             </div>
             <div class="ag-wrap">
-              <div class="dv-tip" id="s-tip2">Tip: Toggle the agent panel with <kbd>Ctrl+Alt+B</kbd></div>
+              <!-- The panel already carries this tip once, at its foot (#s-tip).
+                   A second copy directly above the composer said the same thing
+                   twice on one screen. -->
               <button class="ag-proj" title="Working folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>sandbox · main ▾</button>
               <div class="ag-composer">
                 <textarea id="ag-ta" rows="1" placeholder="Describe your task to Zeno"></textarea>

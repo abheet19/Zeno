@@ -89,6 +89,11 @@ const BINDERS = [
   './bind/counsel.js',
   './bind/devices.js',
   './bind/settings.js',
+  // voice BEFORE controls: controls.js retires or redirects any mic it finds,
+  // and a retired node is gone for good. Ordering is not enough on its own
+  // (these are dynamic imports resolved in parallel), so controls.js also skips
+  // every control voice.js has claimed — see the data-voice-wired check there.
+  './bind/voice.js',
   './bind/controls.js',
   './bind/ask.js',
 ];

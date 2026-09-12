@@ -106,6 +106,16 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
     role: Role,
     readBody: () => Promise<Record<string, unknown>>,
   ): Promise<RouteReply | null>;
+  /**
+   * The memory writes waiting on the owner, for `/state`.
+   *
+   * This queue used to be reachable only through `/memory/pending`, which no
+   * surface reads. So an agent's memory write was held in a queue the Approvals
+   * screen never showed and the rail never counted — held forever, with nothing
+   * on screen to act on. `/state` merges this in now, in the same shape as the
+   * other two queues, so one held action looks like any other.
+   */
+  waiting(): { actionHash: string; tier: string; summary: string; kind: 'memory.write'; payload: unknown }[];
 } {
   const pending = new Map<string, PendingMemory>();
 
@@ -299,6 +309,39 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
       return { status: 200, body: { approval, receipt, entry: box.entry === null ? null : wire(box.entry) } };
     }
 
+    /**
+     * The owner saying NO to one waiting memory write.
+     *
+     * Without this there was no refusal at all: a proposed memory could be
+     * approved or ignored, and ignoring it left the item in the queue forever
+     * with nothing on screen that could clear it. "No" is a decision the owner
+     * is entitled to make, and it has to be as reachable as "yes".
+     *
+     * It seals no receipt, deliberately. A receipt is the record of an EFFECT,
+     * and refusing produces none — the note is simply never written. The ledger
+     * stays a log of what happened to the world, not of what was considered.
+     */
+    if (method === 'POST' && path === '/memory/approvals/decline') {
+      if (role !== 'owner') return ownerOnly('refuse a memory write');
+      const body = await readBody();
+      const actionHash = str(body, 'actionHash');
+      if (actionHash === null) return bad('A refusal needs an actionHash.', 'POST {"actionHash":"..."}.');
+      if (!pending.has(actionHash)) {
+        return {
+          status: 404,
+          body: {
+            error: {
+              code: 'unknown-action',
+              message: 'No memory write with that hash is waiting.',
+              resolve: 'It may already have been approved, refused, or lost to a restart.',
+            },
+          },
+        };
+      }
+      pending.delete(actionHash);
+      return { status: 200, body: { declined: { actionHash, at: new Date().toISOString() }, receipt: null } };
+    }
+
     if (method === 'GET' && path === '/memory/pending') {
       return { status: 200, body: { pending: [...pending.values()].map((p) => ({ preview: p.preview, payload: p.payload })) } };
     }
@@ -357,11 +400,21 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         error: {
           code: 'not-found',
           message: `No memory route for ${method} ${path}.`,
-          resolve: 'GET /memory, GET /memory/recall?q=, GET /memory/context?task=, POST /memory, POST /memory/propose, POST /memory/approvals, POST /memory/import, DELETE /memory/<id>.',
+          resolve: 'GET /memory, GET /memory/recall?q=, GET /memory/context?task=, GET /memory/pending, POST /memory, POST /memory/propose, POST /memory/approvals, POST /memory/approvals/decline, POST /memory/import, DELETE /memory/<id>.',
         },
       },
     };
   }
 
-  return { handle };
+  function waiting(): { actionHash: string; tier: string; summary: string; kind: 'memory.write'; payload: unknown }[] {
+    return [...pending.values()].map((p) => ({
+      actionHash: p.preview.actionHash,
+      tier: p.preview.tier,
+      summary: p.preview.summary,
+      kind: 'memory.write' as const,
+      payload: p.payload,
+    }));
+  }
+
+  return { handle, waiting };
 }

@@ -20,10 +20,13 @@
  *     applies these at load — this binder does, using the exact same keys,
  *     so a preference set here would survive field.js coming back.
  *   - Theme: same scheme, key `zeno-th`, attribute `data-theme`.
- *   - Launch-to-surface and Density: no persisted preference exists ANYWHERE
- *     in this codebase (field.js's boot() comment: "Command is the
- *     always-present surface"; sections.js's real settings dialog has no
- *     Density setting at all). Disabled, not wired.
+ *   - Density: real, key `zeno-dn`, attribute `data-density`, resolved by
+ *     theme-boot.js before CSS. It had no preference behind it and was
+ *     disabled; rather than ship a switch that means nothing, it now means
+ *     what its label says.
+ *   - Launch-to-surface: no persisted preference exists ANYWHERE in this
+ *     codebase (field.js's boot() comment: "Command is the always-present
+ *     surface"). Disabled, not wired.
  *   - Models: GET /forge/agents?passive=1 (the `?passive=1` matches field.js's
  *     own call — this read must never be the thing that starts a local
  *     Ollama runtime). agents[] + localModels[] decide what Forge would
@@ -242,11 +245,30 @@ function bindAppearance(modal) {
     }             // if that ever disagrees with what we just applied.
   } catch { /* skip quietly */ }
 
+  /* Density is REAL now. It was disabled because no preference existed; a
+     switch that looks live and is not is the thing this surface refuses to
+     ship, and the honest options were to remove the row or to mean it. It
+     stores `zeno-dn` and sets data-density on <html>, the same scheme as the
+     theme — and theme-boot.js resolves it before CSS so it never arrives as a
+     visible reflow. */
   try {
     const row = rowByLabel(pane, 'Density');
-    if (row) {
-      disableButtons(row, 'There is no density preference anywhere in this build yet.');
-      setText($('.sub', row), 'This build renders one density. There is no stored preference to switch here yet.');
+    const seg = row && $('.segsm', row);
+    if (seg) {
+      const compact = () => root.getAttribute('data-density') === 'compact';
+      const buttons = $$('button', seg);
+      const wanted = (label) => (label === 'Compact' ? 'compact' : 'comfortable');
+      const markCurrent = () => buttons.forEach((b) => {
+        const is = wanted(b.textContent.trim()) === (compact() ? 'compact' : 'comfortable');
+        if (is) b.setAttribute('aria-current', 'page');
+        else b.removeAttribute('aria-current');
+      });
+      markCurrent();
+      buttons.forEach((b) => b.addEventListener('click', () => {
+        if (wanted(b.textContent.trim()) === 'compact') { root.setAttribute('data-density', 'compact'); zset('dn', 'compact'); }
+        else { root.removeAttribute('data-density'); zset('dn', 'comfortable'); }
+        markCurrent();
+      }));
     }
   } catch { /* skip quietly */ }
 }
@@ -266,13 +288,23 @@ async function bindModels(modal) {
   const pane = $('.set-pane[data-setpane="models"]', modal);
   if (!pane) return;
 
-  // Cloud API keys live in the OS keychain; no route this daemon serves can
-  // confirm one is actually set, so the mock's specific "Anthropic · set"
-  // claim has to go — it cannot be verified from here.
+  /* This row claimed "Anthropic · set", as though Zeno held an API key and
+     billed against it. It does not, and saying so was the costly kind of wrong:
+     Zeno's hosted rungs SPAWN the installed `claude` and `codex` binaries
+     (packages/forge/src/runner.ts — CLAUDE_BINARY / CODEX_BINARY) with the
+     inherited environment. No key is injected anywhere in forge or daemon —
+     grep for ANTHROPIC_API_KEY finds nothing. So a hosted run uses whatever
+     sign-in those CLIs already have, i.e. the owner's existing subscription,
+     and consumes no separate API credit. The row says that instead. */
   try {
     const row = rowByLabel(pane, 'Cloud API keys');
     const pill = row && $('.pill', row);
-    if (pill) setPill(pill, 'flat', 'kept in the OS keychain — not readable from this page', false);
+    if (pill) setPill(pill, 'flat', 'not used — hosted runs use your CLI sign-in', false);
+    setText($('.lab', row), 'Hosted agent sign-in');
+    setText($('.sub', row),
+      'Zeno stores no API key. A hosted run launches your installed claude or codex CLI, '
+      + 'so it uses the subscription those are already signed in to and bills nothing separately. '
+      + 'A cloud call is still a T3 egress effect and asks you every time.');
   } catch { /* skip quietly */ }
 
   const res = await getJSON('/forge/agents?passive=1');

@@ -63,29 +63,20 @@ export async function bind() {
     });
   }
 
-  /* ---- Voice buttons: hand them to the real recogniser ------------------
-     voice.js owns the only real capture path in this product (local, push-to
-     talk, disclosed). Command's hold-to-talk control is .zv-ptt. Rather than
-     re-implement capture here — and risk a second, undisclosed microphone
-     path — these buttons route to it. If it is not present, the button is
-     retired instead of miming a recording state. */
-  const ptt = document.querySelector('.zv-ptt');
-  for (const mic of $$('.cbtn.mic, .ag-ic[title="Voice"], [title="Voice"]')) {
-    if (mic.dataset.wired) continue;
-    if (mic.id === 's-mic' || mic.id === 'home-mic') continue; // already wired by ui.js
-    mic.dataset.wired = '1';
-    if (ptt) {
-      mic.title = 'Voice — opens Command’s hold-to-talk control';
-      mic.addEventListener('click', (e) => {
-        e.preventDefault();
-        const go = document.querySelector('[data-product="command"]');
-        if (go) go.click();
-        setTimeout(() => { const p = document.querySelector('.zv-ptt'); if (p) p.focus(); }, 80);
-      });
-    } else {
-      retire(mic, '');
-    }
-  }
+  /* ---- Voice buttons are NOT handled here any more ----------------------
+     bind/voice.js owns every microphone control in the product: it claims each
+     one, strips ui.js's mimed-recording mock, and drives all eight capture
+     states from the real recogniser.
+
+     This module used to redirect those buttons to Command's hold-to-talk
+     control, or RETIRE them outright when it could not find one. Both branches
+     were wrong once real voice existed, and the retire branch was actively
+     destructive: the two binders load in parallel, so whichever resolved first
+     won — and when this one won, it DELETED the Chats and Forge mic buttons
+     before voice.js could attach to them. Ordering alone cannot fix a race;
+     not competing can. The exemption that used to skip #home-mic and #s-mic
+     "already wired by ui.js" is gone with it — that claim was false, ui.js only
+     mimed a recording and typed a canned sentence into the composer. */
 
   /* ---- Attach: Zeno has no attachment path ----------------------------
      Nothing in the daemon accepts an uploaded file from these composers, and a

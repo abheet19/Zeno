@@ -15,6 +15,11 @@
     } else if (saved === 'dark' || saved === 'light') {
       root.setAttribute('data-theme', saved);
     }
+    // Density resolves here too, for the same reason: applied later it would
+    // arrive as a visible reflow of every list and card on screen.
+    if (localStorage.getItem('zeno-dn') === 'compact') {
+      root.setAttribute('data-density', 'compact');
+    }
   } catch {
     // Storage can be disabled. The safe visual fallback is the HTML default.
   }
