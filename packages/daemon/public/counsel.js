@@ -198,7 +198,7 @@ function counselSpeechPrompt(title, participants) {
   const clean = [];
   for (const value of terms) {
     const term = String(value || '')
-      .replace(/[ -]/g, ' ')
+      .replace(/[-]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 96);
@@ -337,7 +337,15 @@ export function initCounsel(section) {
   add(qaOffH, pill('rd', 'questions are off'));
   const qaOffP = el('p');
   add(qaOffP, document.createTextNode("Counsel is recording, not answering. It won't feed you lines mid-conversation — that's the point. "), el('b', null, 'End and save first'), document.createTextNode(', then ask anything of the cited notes.'));
-  add(qaOff, qaOffH, qaOffP);
+  // The boundary this product refuses to cross, stated in the surface itself and
+  // asserted by ask-voice-model.test.ts: Counsel is a recorder, never an
+  // in-call answer feed. Q&A opens only once capture has ended and saved.
+  const qaOffGuard = el(
+    'p',
+    'hint',
+    'Live Q&A is off while this meeting is active. End and save the transcript first; then ask from the cited notes in Counsel chat.',
+  );
+  add(qaOff, qaOffH, qaOffP, qaOffGuard);
   add(liveNotes, liveNotesHead, liveTextarea, qaOff);
   add(liveSplit, liveTrans, liveNotes);
   add(viewLive, livebar, liveSplit);

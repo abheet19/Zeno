@@ -146,7 +146,13 @@ test('Counsel only answers from saved meetings after active capture ends', () =>
   assert.doesNotMatch(source, /askPrivately/);
   assert.match(source, /Live Q&A is off while this meeting is active/);
   assert.match(source, /S\.archive !== 'ok' \|\| CALL !== null/);
-  assert.match(source, /input\.disabled = S\.asking \|\| S\.archive !== 'ok' \|\| CALL !== null/);
+  // The BOUNDARY is "no answering while a call is live". Assert the guarantee,
+  // not the tag name: the Ask control became a textarea when Counsel was ported
+  // to the design, and pinning `input.` made a safety test fail for a cosmetic
+  // reason. Two guards are required, because a disabled control can be re-enabled
+  // from devtools but a refusal inside the send path cannot be talked around.
+  assert.match(source, /\.disabled = S\.asking \|\| S\.archive !== 'ok' \|\| CALL !== null/);
+  assert.match(source, /if \(!question \|\| S\.asking \|\| S\.archive !== 'ok' \|\| CALL !== null\) return;/);
   assert.match(source, /requestedBy: 'Counsel'/);
   assert.match(source, /End and save the transcript first/);
 });

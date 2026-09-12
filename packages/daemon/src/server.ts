@@ -1775,6 +1775,7 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/brief') return serveBrief(res);
     if (req.method === 'POST' && path === '/previews') return await postPreview(req, res, role);
     if (req.method === 'POST' && path === '/approvals') return await postApproval(req, res, role);
+    if (req.method === 'POST' && path === '/approvals/decline') return await postApprovalDecline(req, res, role);
     if (req.method === 'GET' && path === '/forge/status') return serveForgeStatus(res);
     if (req.method === 'GET' && path === '/forge/file') return serveForgeFile(res, url);
     if (req.method === 'GET' && path === '/forge/search') return serveForgeSearch(res, url);
@@ -5431,6 +5432,54 @@ export function createServer(opts: DaemonOptions): Server {
     opts.stream.publish('receipt', receipt);
     opts.stream.publish('chain', opts.kernel.verifyChain());
     json(res, 200, { approval, receipt });
+  }
+
+  /**
+   * Refuse a held action.
+   *
+   * Approval had no opposite. A previewed write could be approved or left to sit
+   * in the queue for ever, which makes "Deny" in the window a button with nothing
+   * behind it and leaves the owner unable to clear a proposal they have judged
+   * and rejected. Saying no is half of a decision.
+   *
+   * A refusal DISCARDS the held capsule and writes NO receipt. That is deliberate
+   * and matches the ledger's meaning: a receipt records an effect that actually
+   * happened, and nothing happened here. The proposal simply ceases to be
+   * available — the next attempt must be previewed again, so a refused action can
+   * never be revived by replaying its hash.
+   */
+  async function postApprovalDecline(req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
+    if (role !== 'owner') {
+      return json(res, 403, {
+        error: {
+          code: 'owner-only',
+          message: 'Only the owner token can refuse a held action.',
+          resolve: 'Refuse it from the Zeno window. An agent cannot decide its own proposal either way.',
+        },
+      });
+    }
+    const body = await readJson(req);
+    const actionHash = str(body, 'actionHash');
+    if (actionHash === null) {
+      return json(res, 400, {
+        error: { code: 'bad-request', message: 'A refusal needs an actionHash.', resolve: 'POST {"actionHash":"..."}.' },
+      });
+    }
+    if (!held.has(actionHash)) {
+      return json(res, 404, {
+        error: {
+          code: 'unknown-action',
+          message: 'No previewed action with that hash is waiting.',
+          resolve: 'It may already have been approved, refused, or expired.',
+        },
+      });
+    }
+    held.delete(actionHash);
+    persistHeld();
+    // State changed even though no effect ran: the queue is shorter, so anything
+    // showing a pending count has to hear about it.
+    opts.stream.publish('state', { pending: held.size });
+    json(res, 200, { declined: { actionHash, at: new Date().toISOString() }, receipt: null });
   }
 }
 

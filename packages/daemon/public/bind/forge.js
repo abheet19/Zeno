@@ -20,6 +20,7 @@
  * mock tables.
  */
 import { getJSON, $, $$, el, fill, setText, authHeaders, token } from '../bind.js';
+import { DIAGNOSED, ZENO_THEME, languageForPath, loadMonaco, monacoIfLoaded, onThemeChange } from '../monaco.js';
 
 export async function bind() {
   try {
@@ -197,9 +198,7 @@ async function bindForge() {
   const collapsedDirs = new Set();
   const fileRowByPath = new Map();
   const fileCache = new Map(); // path -> {data,error}
-  let currentFile = null;
-  const openTabs = [];
-  let truncNote = null;
+  let currentFile = null; // the primary Monaco group's (group 0) open file
 
   const termHistory = [];
   let terminalBusy = false;
@@ -583,9 +582,13 @@ async function bindForge() {
           row.title = line ? `${path}:${line}` : path;
           row.addEventListener('click', () => {
             void openFile(path).then(() => {
-              if (!codeEl || !line) return;
-              const target = codeEl.querySelectorAll('.ln')[line - 1];
-              if (target) target.scrollIntoView({ block: 'center' });
+              if (!line) return;
+              const g = groups[0];
+              if (g && g.editor && g.file === path) {
+                g.editor.revealLineInCenter(line);
+                g.editor.setPosition({ lineNumber: line, column: 1 });
+                g.editor.focus();
+              }
             });
           });
           nodes.push(row);
