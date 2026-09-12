@@ -276,7 +276,7 @@
     $('#s-title').textContent=s.title; const st=$('#s-status'); st.className='pill '+s.st; st.innerHTML='<span class="d"></span>'+s.stt; sPlan.hidden=!s.plan; sTurns.innerHTML= s.turns==='live' ? LIVE_TURNS : s.turns.map(t=>'<div class="turn '+t.who+'"><div class="who">'+(t.who==='you'?'A':'Z')+'</div><div class="bt">'+t.html+'</div></div>').join('');
     $('#s-tip').hidden=true; showSTab('chat'); }
   function newSession(){ sBody.dataset.open='1'; sEmpty.hidden=true; sHist.hidden=true; sTabs.hidden=false; $$('.dvsess').forEach(d=>d.classList.remove('on')); $('#s-title').textContent='New session'; const st=$('#s-status'); st.className='pill wt'; st.innerHTML='<span class="d"></span>idle'; sPlan.hidden=true; sTurns.innerHTML='<div class="fnote">Describe the change. Zeno plans it, works in an isolated worktree, and sends every effect to Command for your approval.</div>'; showSTab('chat'); $('#s-ta').focus(); }
-  { const ss=$('#s-start'); if(ss) ss.addEventListener('click', newSession); } $('#s-new').addEventListener('click', newSession);
+  { const ss=$('#s-start'); if(ss) ss.addEventListener('click', newSession); } $('#s-new').addEventListener('click', ()=>{ sBody.dataset.open=''; sEmpty.hidden=false; sHist.hidden=true; sTabs.hidden=true; $$('.sessview').forEach(v=>v.hidden=true); const t=$('#ag-ta'); if(t) setTimeout(()=>t.focus(),0); });
   $('#s-hist').addEventListener('click', ()=>{ const open=!sHist.hidden; sHist.hidden=open; if(!open){ sEmpty.hidden=true; sTabs.hidden=true; $$('.sessview').forEach(v=>v.hidden=true); } else if(sBody.dataset.open){ sTabs.hidden=false; showSTab('chat'); } else { sEmpty.hidden=false; } });
   $$('.dvsess[data-sopen]').forEach(d=> d.addEventListener('click', ()=> openSession(+d.dataset.sopen)));
   $('#s-close').addEventListener('click', ()=> syncLayout('sess', false));
@@ -289,7 +289,32 @@
   $('#s-send').addEventListener('click', sendSession);
   $('#s-ta').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendSession(); } });
   $('#s-mic').addEventListener('click', ()=>{ const on=$('#s-mic').classList.toggle('rec'); $('#s-ta').placeholder=on?'Listening… press the mic to stop':'Ask Zeno to change the codebase…'; if(!on&&!$('#s-ta').value){ $('#s-ta').value='Add a retry with backoff to the ingest client'; } });
-  syncLayout('sess', true); openSession(0); // boot Forge into the editor + live agent panel (Cascade layout)
+  
+  /* ---- Devin-style first-run quick actions ---------------------------------
+     Each goes somewhere real: a task, the file palette, the customization view,
+     or the changes this session would make. */
+  $$('.dv-act').forEach((b)=> b.addEventListener('click', ()=>{
+    const k=b.dataset.dvq;
+    if(k==='new'){ const t=$('#ag-ta'); if(t) t.focus(); }
+    else if(k==='open'){ openQuick(''); }
+    else if(k==='cust'){ const z=$('.vsact [data-vsview="zeno"]'); if(z) z.click(); }
+    else if(k==='diffs'){ const g=$('.vsact [data-vsview="scm"]'); if(g) g.click(); }
+  }));
+
+  /* ---- composers grow with their text --------------------------------------
+     field-sizing:content covers new Chrome; this is the fallback everywhere
+     else, capped so a long paste scrolls instead of swallowing the pane. */
+  function autosize(t){ if(!t) return; const cap=Math.round(innerHeight*0.4);
+    t.style.height='auto';
+    const want=t.scrollHeight;
+    t.style.height=Math.min(want, cap)+'px';
+    // Only show a scrollbar once the text genuinely exceeds the cap; otherwise a
+    // short box renders native up/down arrows and hides the wrapped line.
+    t.style.overflowY = want > cap ? 'auto' : 'hidden'; }
+  document.addEventListener('input', (e)=>{ const t=e.target; if(t && t.tagName==='TEXTAREA') autosize(t); }, true);
+  document.querySelectorAll('textarea').forEach(autosize);
+
+  syncLayout('sess', true); // boot Forge with the editor + the agent panel's first-run state (#s-empty)
   // extensions install (governed: shows as a held effect)
   $$('.vsinst').forEach(b=> b.addEventListener('click', ()=>{ b.textContent='Installing…'; b.disabled=true; setTimeout(()=>{ b.replaceWith(Object.assign(document.createElement('span'),{className:'pill gr',innerHTML:'<span class="d"></span>installed'})); toast('Extension installed in the isolated extension host'); },900); }));
 

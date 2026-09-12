@@ -41,6 +41,20 @@ export async function getJSON(path) {
   }
 }
 
+/**
+ * The screen SECTION for a Command screen — never the rail button.
+ *
+ * Both the left rail's nav button and the screen itself carry
+ * data-screen="<name>", and the rail comes first in the document, so a bare
+ * querySelector('[data-screen="receipts"]') returns a <button>. A binder that
+ * scopes its lookups to that button finds none of its markup, returns quietly,
+ * and leaves the artifact's MOCK rows on screen looking like real data — the
+ * one failure this product must never ship. Always resolve a screen with this.
+ */
+export function screenEl(name) {
+  return document.querySelector(`section.screen[data-screen="${name}"], .screen[data-screen="${name}"]`);
+}
+
 /** Small DOM helpers the binders share. */
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];

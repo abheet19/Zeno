@@ -8,7 +8,46 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/glass/tokens.css">
 <link rel="stylesheet" href="/screens/artifact.css">
-<style>.avatar-mono{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--g5);color:var(--ink);font:600 12px/1 var(--font-mono,monospace);flex:none}</style>
+<style>
+.avatar-mono{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--g5);color:var(--ink);font:600 12px/1 var(--font-mono,monospace);flex:none}
+/* The Zeno core above the Forge session composer — the same gold core the
+   Standing Field draws, at rest. Breathes slowly; still under reduce-motion. */
+.ag-orb{width:64px;height:64px;margin:0 auto 18px;border-radius:50%;
+  background:radial-gradient(circle at 38% 34%, #F4E3B2 0%, var(--gold,#D8BE7E) 34%, #8A7134 68%, #3A3320 100%);
+  box-shadow:0 0 26px 6px color-mix(in srgb,var(--gold,#D8BE7E) 30%,transparent),
+             inset -5px -6px 14px rgba(0,0,0,.55), inset 3px 3px 10px rgba(255,255,255,.18);
+  animation:agorb 6.5s ease-in-out infinite}
+@keyframes agorb{0%,100%{transform:scale(1);filter:brightness(1)}50%{transform:scale(1.045);filter:brightness(1.1)}}
+@media (prefers-reduced-motion:reduce){.ag-orb{animation:none}}
+:root[data-reduce="1"] .ag-orb{animation:none}
+/* Devin-style first run: the ask, then the four things you can do from here. */
+.sessempty{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:28px 20px}
+.dv-title{text-align:center; display:flex; flex-direction:column; gap:7px; margin-bottom:4px}
+.dv-title b{font-family:var(--font-display,Newsreader,serif); font-size:26px; font-weight:500; color:var(--ink)}
+.dv-title span{font-size:13px; color:var(--ink-3); max-width:44ch; margin:0 auto; line-height:1.5}
+.dv-quick{order:2; width:min(560px,94%)}
+.dv-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+.dv-act{display:flex; flex-direction:column; align-items:flex-start; gap:3px; position:relative;
+  padding:11px 13px; border-radius:11px; border:1px solid var(--gl-edge,#2C363B); background:var(--g2,#0F1214);
+  color:var(--ink-2); cursor:pointer; text-align:left; transition:.16s}
+.dv-act:hover{border-color:color-mix(in srgb,var(--cyan,#38C3D6) 40%,var(--gl-edge,#2C363B)); background:var(--g3,#151A1D)}
+.dv-act b{color:var(--ink); font-size:13px; font-weight:600}
+.dv-act span:last-child{font-size:11.5px; color:var(--ink-3); line-height:1.4}
+.dv-act .dv-k{position:absolute; top:10px; right:11px; font-family:var(--font-mono,monospace); font-size:9.5px; color:var(--ink-3)}
+@media (max-width:620px){ .dv-actions{grid-template-columns:1fr} }
+/* Composers grow with their text instead of clipping it.
+   overflow is HIDDEN while growing — an auto-scrollbar in a short box is what
+   produced those native up/down arrows and hid the second line. The JS
+   autosizer flips it to auto only once the cap is actually reached. */
+.composer textarea, .ag-composer textarea, #s-ta, #home-ta, #chats-ta, #ag-ta{
+  resize:none; overflow-y:hidden; min-height:2.7em; max-height:40vh;
+  line-height:1.5; padding-block:8px; box-sizing:border-box; field-sizing:content}
+/* The row must top-align once the text wraps, or the buttons ride over it. */
+.composer .row, .ag-composer .ag-row{align-items:flex-end}
+.composer .row{gap:8px}
+.composer .row > textarea{flex:1 1 auto; min-width:0}
+.composer .row > .cbtn{align-self:flex-end}
+</style>
 </head>
 <body>
 
@@ -1148,7 +1187,22 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
         <div class="sesstabs" id="s-tabs" hidden role="tablist"><button aria-selected="true" data-stab="chat">Session</button><button data-stab="plan">Plan</button><button data-stab="runs">Runs</button><button data-stab="actions">Actions <span class="fct am">1</span></button><button data-stab="lens">Lens</button></div>
         <div class="sessbody" id="s-body">
           <div class="sessempty" id="s-empty">
+            <!-- Devin-style first run: the Zeno core, the ask, and the four
+                 things you can actually do from here — with the composer below. -->
+            <div class="dv-quick" role="group" aria-label="Start here">
+              <div class="dv-actions">
+                <button class="dv-act" data-dvq="new"><span class="dv-k">Ctrl T</span><b>New session</b><span>Start a governed run in a throwaway worktree</span></button>
+                <button class="dv-act" data-dvq="open"><span class="dv-k">Ctrl P</span><b>Open a file</b><span>Read the sandbox as it actually is</span></button>
+                <button class="dv-act" data-dvq="cust"><span class="dv-k"></span><b>Open customizations</b><span>Rules, skills, MCP servers and plugins</span></button>
+                <button class="dv-act" data-dvq="diffs"><span class="dv-k"></span><b>View diffs</b><span>Everything this session would change</span></button>
+              </div>
+            </div>
             <div class="ag-wrap">
+              <!-- The Zeno core. It was here before the Antigravity composer
+                   replaced the earlier empty state; the mark is the surface's
+                   identity, so it sits above the composer rather than being lost. -->
+              <div class="ag-orb" aria-hidden="true"></div>
+              <div class="dv-title"><b>Zeno Forge</b><span>Describe your task. Nothing touches your repository until you approve it.</span></div>
               <button class="ag-proj" title="Working folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>sandbox · main ▾</button>
               <div class="ag-composer">
                 <textarea id="ag-ta" rows="1" placeholder="Ask anything — describe a task, @ to mention, / for actions"></textarea>
