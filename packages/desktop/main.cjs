@@ -21,7 +21,7 @@
  *     owner clicked, handed to the system browser instead.
  *   - No remote content is ever loaded into this window.
  */
-const { app, BrowserWindow, shell, dialog, ipcMain, desktopCapturer } = require('electron');
+const { app, BrowserWindow, shell, dialog, ipcMain, desktopCapturer, session } = require('electron');
 const { createWhisperEngine, installWhisperSpeech, resolveWhisperRuntime } = require('./whisper.cjs');
 const { clearProjectPreference, inspectProject, readProjectPreference, writeProjectPreference } = require('./project.cjs');
 const {
@@ -275,6 +275,12 @@ if (ownsDesktopInstance) app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  // Load the window's code FRESH every launch. The daemon already serves the UI
+  // with `cache-control: no-store`, but Chromium keeps parsed ES modules in a
+  // per-origin cache that a normal reload does not clear — so after an update the
+  // window could keep running the old modules. Clearing the session cache on
+  // startup makes "launch the app" and "see the current build" the same thing.
+  try { await session.defaultSession.clearCache(); } catch { /* a cache that will not clear is not fatal */ }
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
