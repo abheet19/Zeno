@@ -451,8 +451,24 @@ const CSS = `
 }
 .zs-settings-tab-glyph{ text-align:center; color:var(--ink-3,#6C7480); font-family:var(--font-glyph,"Segoe UI Symbol",system-ui); }
 .zs-settings-tab[aria-selected="true"] .zs-settings-tab-glyph{ color:var(--cyan,#38C3D6); }
+.zs-settings-acct{
+  margin-top:auto; display:flex; align-items:center; gap:10px; width:100%;
+  padding:8px 9px; border:1px solid var(--gl-edge,var(--rule,#242C31)); border-radius:11px;
+  background:color-mix(in srgb,var(--g2,#0F1214) 88%,transparent); color:var(--ink,#ECEBE6);
+  text-align:left; cursor:pointer;
+}
+.zs-settings-acct:hover{ border-color:var(--rule-2,#2C363B); background:var(--wash-2); }
+.zs-settings-acct[aria-current="true"]{ box-shadow:inset 2px 0 0 var(--cyan,#38C3D6); }
+.zs-acct-av{
+  width:32px; height:32px; flex:none; display:grid; place-items:center; border-radius:50%;
+  font:600 12px/1 var(--font-ui,system-ui); color:var(--cyan,#38C3D6);
+  background:linear-gradient(150deg,#173e44,#0e1214); border:1px solid var(--gl-edge,var(--rule,#242C31));
+}
+.zs-acct-who{ min-width:0; display:flex; flex-direction:column; }
+.zs-acct-who b{ font-size:11.5px; font-weight:600; color:var(--ink,#ECEBE6); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.zs-acct-who span{ font:9.5px/1.3 var(--font-mono,ui-monospace,Consolas,monospace); color:var(--ink-3,#6C7480); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .zs-settings-local{
-  margin:auto 4px 0; padding-top:10px; border-top:1px solid var(--rule,#242C31);
+  margin:10px 4px 0; padding-top:10px; border-top:1px solid var(--rule,#242C31);
   color:var(--ink-3,#6C7480); font:9.5px/1.55 var(--font-mono,ui-monospace,Consolas,monospace);
 }
 
@@ -503,7 +519,7 @@ const CSS = `
   .zs-settings-side-head{ grid-column:1/-1; }
   .zs-settings-tabs{ display:grid; grid-template-columns:repeat(4,minmax(128px,1fr)); overflow:auto hidden; padding-bottom:2px; }
   .zs-settings-tab{ white-space:nowrap; }
-  .zs-settings-local{ display:none; }
+  .zs-settings-local, .zs-settings-acct{ display:none; }
   .zs-settings-main-head{ padding:16px 18px 13px; }
   .zs-settings-panel{ padding:2px 18px 22px; }
 }
@@ -972,6 +988,7 @@ const SETTINGS_CATEGORIES = Object.freeze([
   { id: 'policy', glyph: '✓', label: 'Policy & receipts', description: 'The policy evidence and receipt chain reported by this daemon.' },
   { id: 'capabilities', glyph: '◇', label: 'Capabilities', description: 'Which capability tokens this window and its agents can hold.' },
   { id: 'runtime', glyph: '⌁', label: 'Runtime', description: 'The loopback daemon this window is actually connected to.' },
+  { id: 'account', glyph: '☺', label: 'Account', description: 'Your identity and this window’s session.' },
 ]);
 
 function settingsCategory(id) {
@@ -1086,9 +1103,23 @@ function buildSettingsGroups(state) {
       diagnosticsHtml()),
   ];
 
+  const account = [
+    settingItem('account', 'Owner', 'The identity this window belongs to.', 'account profile email name owner identity signed in',
+      readOnlySetting('Owner', 'Abheet Singh', 'abheet19@gmail.com · owner of this machine.', hasOwner ? 'good' : '')),
+    settingItem('account', 'Plan', 'Zeno is local-first — no subscription and no plan.', 'plan subscription billing local cost free upgrade',
+      readOnlySetting('Plan', 'Local · on-device', 'Zeno runs entirely on your own hardware. There is no account server and nothing to upgrade.', 'good')),
+    settingItem('account', 'This window’s session', 'Whether this window can approve.', 'sign out session token owner read-only logout',
+      readOnlySetting('This window’s session', hasOwner ? 'Owner token held' : 'Read-only',
+        hasOwner
+          ? 'This window holds the owner token — the only thing that can approve an effect. Close the window to release it; a fresh launch is needed to approve again.'
+          : 'This window has no owner token, so it can read but cannot approve.', hasOwner ? 'good' : 'warn')),
+    settingItem('account', 'Telemetry', 'Zeno collects nothing.', 'telemetry privacy analytics tracking usage data crash',
+      readOnlySetting('Telemetry', 'Off · nothing sent', 'No usage data, no crash pings, no account server. There is nothing to turn on.', 'good')),
+  ];
+
   return SETTINGS_CATEGORIES.map((category) => ({
     ...category,
-    items: { general, policy, capabilities, runtime }[category.id],
+    items: { general, policy, capabilities, runtime, account }[category.id],
   }));
 }
 
@@ -1144,6 +1175,10 @@ function renderSettingsDialog(state) {
     + '<input id="zs-settings-search" data-settings-focus="search" type="search" value="' + esc(query) + '" '
     + 'placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false" aria-controls="zs-settings-panel"></label>'
     + '<div class="zs-settings-tabs" role="tablist" aria-orientation="vertical">' + tabs + '</div>'
+    + '<button type="button" class="zs-settings-acct" data-settings-category="account" data-settings-focus="tab:account" aria-label="Account — Abheet Singh"'
+    + (!terms.length && selected.id === 'account' ? ' aria-current="true"' : '') + '>'
+    + '<span class="zs-acct-av" aria-hidden="true">AS</span>'
+    + '<span class="zs-acct-who"><b>Abheet Singh</b><span>abheet19@gmail.com</span></span></button>'
     + '<p class="zs-settings-local">Preferences stay on this device. Policy and runtime facts come from the local daemon.</p>'
     + '</aside><section class="zs-settings-main">'
     + '<header class="zs-settings-main-head"><p class="zs-k">Command preferences</p><h2 id="zs-settings-title">' + esc(title) + '</h2>'
