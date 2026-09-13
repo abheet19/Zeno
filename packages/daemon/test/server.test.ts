@@ -708,7 +708,7 @@ test('L1 — a proposer CANNOT downgrade a risky write by claiming a lower kind'
   }
 });
 
-test('Forge — routine agent output waits for the owner instead of auto-landing', async () => {
+test('Forge — routine agent output auto-applies and is receipted (Devin feel)', async () => {
   const h = await start();
   try {
     const res = await post(h, '/previews', h.owner, {
@@ -719,11 +719,14 @@ test('Forge — routine agent output waits for the owner instead of auto-landing
     });
     assert.equal(res.status, 200);
     const body = await res.json() as { preview: { auto: boolean }; receipt?: unknown };
-    assert.equal(body.preview.auto, false, 'an agent never auto-applies its own output');
-    assert.equal(body.receipt, undefined, 'no write receipt exists before the owner decides');
-    assert.equal(h.kernel.receipts().length, 0, 'the selected repository remains unchanged');
+    // Devin pivot: a routine agent edit (small, non-sensitive, non-destructive)
+    // no longer waits — it auto-applies and is still receipted. The dangerous
+    // paths (destructive/sensitive/egress) are covered by the tests below.
+    assert.equal(body.preview.auto, true, 'a routine agent edit auto-applies — no ceremony for ordinary work');
+    assert.notEqual(body.receipt, undefined, 'the auto-applied write is still receipted');
+    assert.equal(h.kernel.receipts().length, 1, 'exactly one receipt for the applied write');
     const state = await (await fetch(h.base + '/state', { headers: { 'x-zeno-token': h.owner } })).json() as { pending: unknown[] };
-    assert.equal(state.pending.length, 1, 'the exact proposal is visible to the owner');
+    assert.equal(state.pending.length, 0, 'nothing waits for the owner — routine work landed');
   } finally {
     await h.close();
   }
@@ -1100,7 +1103,10 @@ test('Forge — pending file capsules carry a fresh review and expose later base
     writeFileSync(join(h.sandbox, relPath), 'export const value = 1;\n');
     const proposed = await post(h, '/previews', h.proposer, {
       relPath,
-      contents: 'export const value = 2;\n',
+      // A large edit (> the routine line budget) STILL holds for owner review
+      // after the Devin-feel strip — routine edits auto-apply, large ones do not.
+      // This is what lets us exercise the held-capsule review + base-drift path.
+      contents: 'export const value = 2;\n' + Array.from({ length: 60 }, (_, i) => '// reviewed note ' + i).join('\n') + '\n',
       summary: 'update the reviewed value',
       requestedBy: 'forge:local',
     });
@@ -1675,8 +1681,8 @@ test('Forge — a local model can answer without inventing a file, while edits a
     assert.equal(edited.run.ok, true);
     assert.deepEqual(edited.changed, ['loop.js']);
     assert.deepEqual(edited.proposed.map((item) => item.path), ['loop.js']);
-    assert.equal(edited.proposed[0]?.auto, false, 'a local model edit still waits at the owner gate');
-    assert.equal(existsSync(join(sandbox, 'loop.js')), false, 'the proposal never writes directly to the owner tree');
+    assert.equal(edited.proposed[0]?.auto, true, 'a routine local model edit auto-applies (Devin feel)');
+    assert.equal(existsSync(join(sandbox, 'loop.js')), true, 'the routine edit landed in the working tree and is receipted');
 
     for (const [runId, reason] of [
       ['local-mixed', /mixed.*answer envelope/i],
@@ -1743,7 +1749,7 @@ test('Forge — a local model can answer without inventing a file, while edits a
     assert.equal(spaced.run.ok, true, 'valid repository paths may contain spaces');
     assert.deepEqual(spaced.changed, ['docs/My Guide.md', 'src/second.ts']);
     assert.deepEqual(spaced.proposed.map((item) => item.path), ['docs/My Guide.md', 'src/second.ts']);
-    assert.equal(existsSync(join(sandbox, 'docs', 'My Guide.md')), false, 'even valid multi-file output stays in the proposal gate');
+    assert.equal(existsSync(join(sandbox, 'docs', 'My Guide.md')), true, 'routine multi-file output auto-applies (Devin feel)');
 
     for (const [runId, task, reason] of [
       ['local-duplicate-target', 'Create duplicate.ts twice', /duplicate file targets/i],

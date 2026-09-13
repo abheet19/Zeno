@@ -84,19 +84,25 @@ export async function proposeFileWrite(
   const secretWarning =
     secrets.length > 0 ? { count: secrets.length, kinds: [...new Set(secrets.map((f) => f.label))] } : null;
   // ASSESSED, never client-supplied (that was a live L1 breach). A secret in a
-  // routine write escalates it to needing the owner. Agent output always does
-  // too: a model may propose a harmless-looking file, but it cannot approve or
-  // auto-land its own output merely because the path happened to score T0.
+  // routine write STILL escalates it to needing the owner — a leaked key is not
+  // routine no matter who authored it. But ordinary agent output no longer waits
+  // just because a model proposed it: a routine edit (small, non-sensitive,
+  // non-destructive per assessWrite) AUTO-APPLIES and is still receipted. That is
+  // the direct-execution feel the owner asked for (the Devin pivot) — an approval
+  // that is always asked for is an approval nobody reads. The dangerous paths are
+  // untouched: destructive writes stay T3, sensitive paths (.env/.git/keys/CI) stay
+  // T1, and egress/shell/payment tool-calls stay gated by the kernel + tool gate.
+  // L6 still holds — a model can PROPOSE but never APPROVE; auto-applying a routine
+  // write is the kernel's ordinary T0 path, not the model self-approving.
   // A caller may also name a reason the write must be DECIDED (`options.hold`
   // — a rule or skill file that shapes every future run, see
   // routes/capabilities.ts). That only ever moves the tier UP: nothing here
   // can make a write more routine than the assessment said.
-  const fromAgent = requestedBy.startsWith('forge:');
   const held = options.hold !== undefined && assessed.routine;
   const risk = held
     ? { ...assessed, kind: 'patch.task' as ActionKind, routine: false, reasons: [...assessed.reasons, options.hold!] }
     : assessed;
-  const kind: ActionKind = (fromAgent || secretWarning) && risk.routine ? 'patch.task' : risk.kind;
+  const kind: ActionKind = secretWarning && risk.routine ? 'patch.task' : risk.kind;
   const request: ActionRequest = {
     kind, summary, targetRef: abs, payload, baseHash: payload.expectBaseHash, requestedBy, dataZones: ['personal'],
   };
