@@ -93,6 +93,10 @@ function connect() {
   }
   // A daemon that names an event we do not know about still means "something moved".
   source.addEventListener('message', note('state'));
+  // Call presence is not state to re-read — it is a nudge for one binder
+  // (bind/call-banner.js), which re-reads /calls/current itself. Forwarded as a
+  // DOM event so that binder need not open a second stream to hear it.
+  source.addEventListener('call', () => document.dispatchEvent(new CustomEvent('zeno:call')));
 
   source.addEventListener('open', () => { backoff = 1000; });
   source.addEventListener('error', () => {
