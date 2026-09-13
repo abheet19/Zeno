@@ -45,7 +45,14 @@
  *     and GET /state (receipts[].policyHash off the newest receipt — /state
  *     has no dedicated policy field; sections.js's real dialog reads it the
  *     same way).
- *   - Device key: GET /mesh/devices -> thisDevice.{host,publicKey}.
+ *   - Device key AND the account identity: GET /mesh/devices ->
+ *     thisDevice.{label,host,publicKey}. Zeno has no account, no sign-in and no
+ *     identity endpoint, so the artifact's hardcoded name and email were a
+ *     fetched-looking value that was false on every machine but one. The
+ *     machine is the only identity there is; the pane names it.
+ *   - Default model: read-only. `defaultModel` does not exist anywhere in
+ *     packages/daemon/src — there is no preference to write — so the pill is
+ *     disabled and says so rather than keep a caret that opens nothing.
  *   - Sign out: there is no client-side action that can revoke the owner
  *     capability. The daemon hands it out as an HttpOnly session cookie
  *     (server.ts ~line 1878) that a page script cannot read or clear, and
@@ -307,46 +314,79 @@ async function bindModels(modal) {
       + 'A cloud call is still a T3 egress effect and asks you every time.');
   } catch { /* skip quietly */ }
 
-  const res = await getJSON('/forge/agents?passive=1');
-
+  /* Removing data-model-pill stopped ui.js's mock picker, but the row still
+     shipped a <button> with a caret that looked exactly like a chooser and did
+     nothing when clicked — the one thing this surface must never be. There is
+     no "default model" preference anywhere in the daemon (grep defaultModel in
+     packages/daemon/src: nothing), so the honest shape is a read-only status,
+     said out loud. */
+  const modelRow = rowByLabel(pane, 'Default model');
   try {
-    const row = rowByLabel(pane, 'Default model');
-    const pill = row && $('[data-model-pill]', row);
+    const pill = modelRow && $('[data-model-pill]', modelRow);
     if (pill) {
-      pill.removeAttribute('data-model-pill'); // stop ui.js's mock model picker from opening
+      pill.removeAttribute('data-model-pill');
       pill.style.cursor = 'default';
-      if (!res.ok) {
-        setPill(pill, 'bad', 'could not be read', true);
-      } else {
-        const data = res.data || {};
-        const agents = Array.isArray(data.agents) ? data.agents : [];
-        const locals = Array.isArray(data.localModels) ? data.localModels : [];
-        const picked = pickAgent(agents);
-        if (!picked) setPill(pill, 'warn', 'no agent is available on this machine', true);
-        else if (picked.id === 'local') {
-          setPill(pill, 'cyan', locals.length
-            ? `${locals[0]}${locals.length > 1 ? ` +${locals.length - 1} more` : ''} · local`
-            : 'local runtime · no model pulled yet', true);
-        } else {
-          setPill(pill, 'flat', `${picked.label || picked.id} · cloud CLI`, true);
-        }
-      }
+      pill.disabled = true;
+      pill.setAttribute('aria-disabled', 'true');
+      pill.title = 'Read-only. Zeno stores no "default model" preference — this names what this machine would actually run right now. Local models are pulled and removed in Forge.';
     }
   } catch { /* skip quietly */ }
 
-  try {
-    const row = rowByLabel(pane, 'Manage models');
-    if (row) {
-      const sub = $('.sub', row);
-      if (sub) {
-        if (!res.ok) setText(sub, `Local models could not be read: ${res.error}`);
+  const manageRow = rowByLabel(pane, 'Manage models');
+
+  /**
+   * Paint both model rows from ONE passive read.
+   *
+   * `?passive=1` is load-bearing: this read must never be the thing that starts
+   * a local Ollama runtime. The cost of that is a cold machine answering with an
+   * empty localModels[] — so at first paint these rows could say "no local model
+   * is pulled yet" and name a cloud CLI as first choice while three local models
+   * sat on disk, and nothing ever read again, so that stayed on screen for the
+   * life of the window. bind.js's own rail-badge pass DOES call /forge/agents
+   * without `passive`, which awaits ensureOllama(); it is awaited before
+   * `zeno:bound` fires. Re-reading once on that event therefore reports the
+   * runtime as it actually ended up, without this file ever being what woke it.
+   */
+  async function paintModelRows() {
+    const res = await getJSON('/forge/agents?passive=1');
+    const locals = Array.isArray(res.data && res.data.localModels) ? res.data.localModels : [];
+
+    try {
+      const pill = modelRow && $('.pill', modelRow);
+      if (pill) {
+        if (!res.ok) setPill(pill, 'bad', 'could not be read', true);
         else {
-          const locals = Array.isArray(res.data && res.data.localModels) ? res.data.localModels : [];
-          setText(sub, locals.length
-            ? `${locals.length} local model${locals.length === 1 ? '' : 's'} installed: ${locals.join(', ')}. Pulled or removed in Forge.`
-            : 'No local model is pulled yet. Forge pulls and removes local models for you.');
+          const agents = Array.isArray(res.data.agents) ? res.data.agents : [];
+          const picked = pickAgent(agents);
+          if (!picked) setPill(pill, 'warn', 'no agent is available on this machine', true);
+          else if (picked.id === 'local') {
+            setPill(pill, 'cyan', locals.length
+              ? `${locals[0]}${locals.length > 1 ? ` +${locals.length - 1} more` : ''} · local`
+              : 'local runtime · no model pulled yet', true);
+          } else {
+            setPill(pill, 'flat', `${picked.label || picked.id} · cloud CLI`, true);
+          }
         }
       }
+    } catch { /* skip quietly */ }
+
+    try {
+      const sub = manageRow && $('.sub', manageRow);
+      if (sub) {
+        if (!res.ok) setText(sub, `Local models could not be read: ${res.error}`);
+        else setText(sub, locals.length
+          ? `${locals.length} local model${locals.length === 1 ? '' : 's'} installed: ${locals.join(', ')}. Pulled or removed in Forge.`
+          : 'No local model is pulled yet. Forge pulls and removes local models for you.');
+      }
+    } catch { /* skip quietly */ }
+  }
+
+  await paintModelRows();
+  document.addEventListener('zeno:bound', () => { void paintModelRows(); }, { once: true });
+
+  try {
+    const row = manageRow;
+    if (row) {
       const btn = $('[data-set-managemodels]', row);
       if (btn) btn.addEventListener('click', () => {
         // ui.js's own handler for this button already hides the modal and
@@ -365,12 +405,23 @@ async function bindModels(modal) {
  * Voice — Spoken replies (not real), Wake word (real)            *
  * ============================================================ */
 
+/* Must stay in step with bind/voice.js's DISCLOSURE_VERSION. Bumping it there
+   is how voice.js re-asks consent from anyone who accepted an older, weaker
+   description of what the microphone does — so a pref carrying an older version
+   is NOT an accepted consent, and voice.js boots with the wake word off. */
+const WAKE_DISCLOSURE_VERSION = 4;
+
+/* Read it the way bind/voice.js reads it. This used to accept any `{on:true}`,
+   which is a strictly weaker test than voice.js's: the moment the disclosure
+   version was bumped, voice.js correctly treated the stored consent as expired
+   and stayed OFF while this row painted the switch ON. The owner would have
+   been told the machine was listening for "Zeno" when it was not. */
 function readWakeWordPref() {
   try {
     const raw = localStorage.getItem('zeno.voice.wake');
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    return !!(parsed && parsed.on === true);
+    return !!(parsed && parsed.on === true && parsed.disclosure === WAKE_DISCLOSURE_VERSION);
   } catch { return false; }
 }
 
@@ -523,21 +574,51 @@ async function bindAccount(modal) {
 
   const hasOwner = token() !== '';
   const rows = $$('.setrow', pane);
+  const mesh = await getJSON('/mesh/devices');
+  const dev = (mesh.ok && mesh.data && mesh.data.thisDevice) || null;
 
+  /* The artifact hardcodes ONE developer's name and email into this pane and
+     into the nav's account button, as though Zeno had read them from an
+     account. It has not: Zeno has no account, no sign-in and no identity
+     endpoint — `grep -n "path === '/"` over server.ts has nothing of the kind.
+     So on every machine but that one developer's, this pane stated a false
+     identity with the confidence of a fetched value. The only identity the
+     daemon actually reports is the machine's: /mesh/devices → thisDevice. Say
+     that instead, and where it could not be read, say THAT rather than fall
+     back to the fixture. */
+  const initials = (s) => String(s || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || '··';
   try {
     const youRow = rows.find((r) => r.querySelector('.avatar-mono'));
     const pill = youRow && $('.pill', youRow);
     if (pill) setPill(pill, hasOwner ? 'good' : 'bad', hasOwner ? 'owner' : 'read-only', true);
+
+    const label = dev && dev.label ? String(dev.label) : '';
+    const host = dev && dev.host ? String(dev.host) : '';
+    const name = host || label || 'This machine';
+    const sub = mesh.ok
+      ? `${label ? `${label} · ` : ''}owner of this machine · Zeno has no account and no cloud identity`
+      : 'This machine could not be identified — /mesh/devices did not answer. Zeno has no account either way.';
+    if (youRow) {
+      setText($('.lab', youRow), name);
+      setText($('.sub', youRow), sub);
+    }
+    // The same claim is repeated on the nav's account button.
+    for (const av of $$('.avatar-mono', modal)) setText(av, initials(name));
+    const who = $('.set-acct .who', modal);
+    if (who) {
+      const b = $('b', who);
+      if (b) setText(b, name);
+      const small = [...who.children].find((n) => n.tagName === 'SPAN');
+      if (small) setText(small, mesh.ok ? 'local owner · no account' : 'identity unread');
+    }
   } catch { /* skip quietly */ }
 
   try {
     const row = rowByLabel(pane, 'Device key');
     const pill = row && $('.pill', row);
     if (pill) {
-      const mesh = await getJSON('/mesh/devices');
       if (!mesh.ok) setPill(pill, 'bad', 'could not be read', true);
       else {
-        const dev = mesh.data && mesh.data.thisDevice;
         const host = dev && dev.host ? String(dev.host) : '';
         const key = dev && dev.publicKey ? mono(String(dev.publicKey)) : '';
         setPill(pill, 'cyan', host && key ? `${host} · ${key}` : 'not reported', true);
@@ -562,6 +643,26 @@ async function bindAccount(modal) {
           ? 'Close this window to release the owner token — there is no in-page sign-out.'
           : 'Already read-only.';
       }
+    }
+  } catch { /* skip quietly */ }
+
+  /* The footer's "Review the security model" link carries `data-set-customize`,
+     so ui.js closed the modal and toasted "Customize: Skills · Connectors ·
+     Plugins" — a link whose label promises the security model and which instead
+     names the connector hub is a control that changes nothing the owner asked
+     for. The security model has a real surface two inches away: the Privacy &
+     Security pane of this same modal. Point it there. */
+  try {
+    const link = $('.set-tos a', pane);
+    if (link) {
+      const fresh = detach(link); // drop ui.js's toast-and-close handler
+      fresh.removeAttribute('data-set-customize');
+      fresh.title = 'Opens Privacy & Security in this window.';
+      fresh.addEventListener('click', (e) => {
+        e.preventDefault();
+        const nav = modal.querySelector('[data-setcat="security"]');
+        if (nav) nav.click();
+      });
     }
   } catch { /* skip quietly */ }
 }

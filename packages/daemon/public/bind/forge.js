@@ -216,6 +216,8 @@ async function bindForge() {
     'Compare mode "Run": starts a single run on the first selected model only. There is no daemon endpoint for a true side-by-side multi-model run.',
     'Session runs: /forge/run reports tokensIn/tokensOut for local (Ollama) runs; this build does not display them anywhere in the session panel.',
     'Forge Lens: shows what is actually sent (task + memory + skills), not the exact assembled/hashed prompt POST /forge/context returns — that preview is not read this pass.',
+    'Output panel: this daemon publishes no output channel for the Output view, so it says so. A run\'s real transcript is rendered by the Session panel from /forge/run.',
+    'Testing view: lists the package scripts GET /forge/tests discovered and runs one at a time via POST /forge/tests/run. There is no "run all" route and no per-test breakdown — a script\'s exit code and output are all the daemon reports.',
   ];
 
   /* ============================================================ *
@@ -600,6 +602,114 @@ async function bindForge() {
       if (noteEl) noteEl.textContent = `${total} result${total === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${d.truncated ? ' — showing the first matches' : ''}`;
     }
     if (queryIn) queryIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } });
+  }
+
+  /* ============================================================ *
+   * 2d · TESTING view — the real script catalog (GET /forge/tests) *
+   * ============================================================ *
+   * The artifact ships this view already reporting a GREEN SUITE:
+   * a tick beside "tests/ingest.spec.ts", a named passing test, and
+   * "142 passed · exited 0 · 3.1s". Nothing ran. That file is not in
+   * the sandbox and never was. A fabricated PASS is the worst thing
+   * this window can draw — it is the one claim an owner acts on
+   * without checking — so the fixture is cleared unconditionally the
+   * instant this binder runs, before any fetch can succeed or fail.
+   *
+   * What replaces it is GET /forge/tests: the package.json scripts the
+   * daemon actually discovered in the sandbox, and only the ones it is
+   * willing to run. A run goes through POST /forge/tests/run (owner
+   * only, one at a time, no command or arguments from the browser) and
+   * what is drawn afterwards is that answer's own exit code, duration
+   * and output. Nothing on this panel is summarised into a verdict
+   * here; "142 passed" can only ever be words the run itself printed.
+   *
+   * Read lazily — the catalog is a directory walk of the sandbox, so it
+   * happens when the view is opened or refreshed, not on every boot.
+   */
+  const testingView = $('.vsside .vsview[data-vsview="testing"]', ide);
+  if (testingView) {
+    const testPad = $('.vspad', testingView);
+    // "Run All Tests" has no route behind it: the daemon runs ONE declared
+    // script at a time, addressed by id. A control that cannot do what its
+    // label says is worse than no control, so it goes.
+    const runAllBtn = testingView.querySelector('button[title="Run All Tests"]');
+    if (runAllBtn) runAllBtn.remove();
+
+    let testsData = null, testsErr = null, testsBusy = false, testsRead = false;
+    const testRuns = new Map(); // script id -> the daemon's own answer, verbatim
+
+    function renderTests() {
+      if (!testPad) return;
+      if (!testsRead) { fill(testPad, el('div', 'fempty', 'Open this view to read the sandbox’s package scripts.')); return; }
+      if (testsErr) { fill(testPad, el('div', 'fempty', `The script catalog could not be read: ${testsErr}`)); return; }
+      if (!testsData) { fill(testPad, el('div', 'fempty', 'Reading the sandbox’s package scripts…')); return; }
+      const scripts = Array.isArray(testsData.scripts) ? testsData.scripts : [];
+      if (!scripts.length) {
+        fill(testPad,
+          el('div', 'fempty', 'No package.json in this sandbox declares a test, check, typecheck or lint script, so Forge has nothing here to run.'),
+          el('div', 'vsnote', testsData.note || ''));
+        return;
+      }
+      const nodes = [];
+      for (const s of scripts) {
+        const row = el('div', 'vsfile');
+        add(row, el('b', null, `${s.packageName || s.packagePath || 'package'} · ${s.script}`), el('span', 'fm', ` ${s.displayCommand || ''}`));
+        const runBtn = el('button', 'laction cy', testsBusy ? 'Running…' : 'Run');
+        runBtn.type = 'button';
+        runBtn.disabled = testsBusy || !OWNER;
+        runBtn.title = OWNER
+          ? 'Runs exactly this declared script through the daemon. The result below is its own exit code and output.'
+          : 'This window has no owner token, so it can list scripts but cannot run one.';
+        runBtn.addEventListener('click', () => void runTestScript(s.id));
+        add(row, runBtn);
+        nodes.push(row);
+        const r = testRuns.get(s.id);
+        if (!r) {
+          nodes.push(el('div', 'vsnote', 'Not run in this session — this says nothing about whether it passes.'));
+        } else if (r.error) {
+          nodes.push(el('div', 'vsnote', `The run could not be started: ${r.error}`));
+        } else {
+          const verdict = r.failedToSpawn
+            ? (r.timedOut ? 'timed out' : 'could not start')
+            : `exited ${r.code} · ${r.durationMs}ms`;
+          nodes.push(el('div', 'vsnote', `${r.displayCommand || s.displayCommand || s.script} — ${verdict}`));
+          const out = `${r.stdout || ''}${r.stderr || ''}`.trim();
+          if (out) {
+            const pre = el('pre', 'fterm', out.slice(-4000));
+            pre.style.cssText = 'margin:4px 0;max-height:180px;overflow:auto;white-space:pre-wrap';
+            nodes.push(pre);
+          }
+          if (r.outputClipped) nodes.push(el('div', 'vsnote', 'The daemon clipped this output — it is not the whole log.'));
+        }
+      }
+      nodes.push(el('div', 'vsnote', testsData.note || ''));
+      fill(testPad, ...nodes);
+    }
+
+    async function loadTests() {
+      testsRead = true;
+      const r = await getJSON('/forge/tests');
+      if (r.ok) { testsData = r.data; testsErr = null; } else { testsData = null; testsErr = r.error || 'could not be read'; }
+      renderTests();
+    }
+
+    async function runTestScript(id) {
+      if (testsBusy) return;
+      testsBusy = true;
+      renderTests();
+      const r = await postJSON('/forge/tests/run', { id });
+      testsBusy = false;
+      testRuns.set(id, r.ok ? r.data : { error: r.error });
+      renderTests();
+    }
+
+    // Clear the fabricated green suite NOW; the real catalog arrives when the
+    // view is opened. Nothing invented stands for even one frame.
+    renderTests();
+    const testsRefresh = testingView.querySelector('button[title="Refresh"]');
+    if (testsRefresh) testsRefresh.addEventListener('click', (e) => { e.stopPropagation(); void loadTests(); });
+    const testsActBtn = $('.vsact [data-vsview="testing"]', ide);
+    if (testsActBtn) testsActBtn.addEventListener('click', () => { if (!testsData) void loadTests(); });
   }
 
   // The sidebar's OTHER "Ports" view (data-vsview="remote" — distinct from
@@ -1387,6 +1497,29 @@ async function bindForge() {
     add(row, el('span', 'fdot ok'), document.createTextNode(` ${port} `), el('span', 'fm', `Zeno daemon · ${location.hostname}`));
     const note = el('div', 'vsnote', 'Forge cannot observe other listening ports (Ollama, a dev server, etc.) from the browser, so none are listed here.');
     fill(portsPanel, row, note);
+    // …and the TAB's count has to agree with the rows underneath it. The
+    // artifact hardcoded "3" there, so the tab went on advertising two ports
+    // nobody read long after the pane stopped listing them — a fabricated
+    // number standing in the one place a reader would trust it.
+    const portsCount = $('.vsptabs [data-vsp="ports"] .fct');
+    if (portsCount) portsCount.textContent = String(portsPanel.querySelectorAll('.fchg').length);
+  }
+
+  // The bottom "Output" panel ships a fabricated agent run log — a worktree
+  // that never existed (wt-7f2a), an edit to a file that is not in the
+  // sandbox, and "142 passed" from a test run nobody ran. It is the most
+  // convincing invented state on this screen, because it reads exactly like
+  // something the daemon printed. Nothing here ever read it: this build has no
+  // output channel for the Output view (a run's real transcript is rendered by
+  // the Session panel, from /forge/run). So the log is removed and the view
+  // says where run output actually lives, rather than keeping four lines of
+  // fiction one panel-tab click away.
+  const outputPanel = $('.vsp[data-vsp="output"]', ide);
+  if (outputPanel) {
+    fill(outputPanel, el('div', 'fempty',
+      'Forge has no Output channel in this build. A run’s real transcript — its edits, '
+      + 'its commands and their exit codes — is shown by the Session panel as the run happens, '
+      + 'and every effect it caused is on the receipt ledger in Command.'));
   }
 
   /* ============================================================ *
@@ -1811,7 +1944,18 @@ async function bindForge() {
     fill(view, ...session.runs.slice().reverse().map((r) => {
       const card = el('div', 'frun');
       const h = el('div', 'frh');
-      add(h, el('span', `pill ${r.ok ? 'gr' : 'rd'}`, r.ok ? 'applied' : 'failed'), el('b', null, r.task.length > 60 ? `${r.task.slice(0, 57)}…` : r.task));
+      // A Forge run NEVER applies anything. Every file it changes becomes an
+      // approval capsule, and the kernel writes only after the owner clicks in
+      // Command — so "applied" is the one outcome this card structurally
+      // cannot report. It reported it anyway for every successful run, in
+      // green, directly above its own line reading "1 waiting · 0 applied".
+      // That is the exact claim the gate exists to make impossible.
+      const mark = r.cancelled ? { tone: 'wt', word: 'cancelled' }
+        : !r.ok ? { tone: 'rd', word: 'failed' }
+          : r.waiting > 0 ? { tone: 'am', word: `${r.waiting} waiting on you` }
+            : r.applied > 0 ? { tone: 'gr', word: 'applied' }
+              : { tone: 'wt', word: 'no changes' };
+      add(h, el('span', `pill ${mark.tone}`, mark.word), el('b', null, r.task.length > 60 ? `${r.task.slice(0, 57)}…` : r.task));
       const m = el('div', 'frm', `${r.agentId}${r.model ? ' · ' + r.model : ''} · ${r.effort || ''} · ${r.files} file(s) · ${r.waiting} waiting · ${r.applied} applied${r.note ? ' · ' + r.note : ''}`);
       add(card, h, m);
       return card;
@@ -2025,7 +2169,8 @@ async function bindForge() {
       note: run.ok === false ? (run.note || 'The agent did not complete this task.') : (run.note || ''),
     });
     session.runs.push({
-      task, ok: run.ok === true, agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
+      task, ok: run.ok === true, cancelled: run.cancelled === true,
+      agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
       files: changed.length, waiting, applied, note: run.ok === false ? (run.note || '') : '',
     });
     renderSessionHeader(session); renderChat(session); renderRuns(session); renderActions(session); renderPlan(session); renderHistoryIfOpen();

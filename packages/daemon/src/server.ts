@@ -1038,6 +1038,27 @@ export function createServer(opts: DaemonOptions): Server {
     opts.stream.publish('state', { pending: held.size + gateHeld.size + memoryWaiting });
   }
 
+  /**
+   * Tell every open window that the VAULT moved.
+   *
+   * An agent's memory write already announced itself, because it goes through the
+   * queue and `publishPending` fires when the queue changes. The owner's own
+   * writes and deletes are ungated — by design, the owner IS the approval
+   * authority — and that made them the one memory mutation that told nobody. So a
+   * note written from the CLI, from a paired phone, or by this window's own API
+   * call left every open Vault screen, and the rail's note count, showing memory
+   * that no longer existed, until someone happened to reload. For a surface whose
+   * only job is to be a true record of what is on disk, that silence is the bug.
+   *
+   * It publishes the same `state` event every other movement does: the stream
+   * carries a nudge, never the truth (see bind/live.js), so the window re-reads
+   * `/memory` itself and there is no second source of truth to drift. The payload
+   * is the real, unchanged queue size — a vault write moves no queue.
+   */
+  function publishMemoryChanged(): void {
+    publishPending();
+  }
+
   // An agent's memory write is a kernel action (see memory-gate.ts): preview,
   // owner approval, one commit, a receipt — the same governance every other
   // effect in this file gets. Built here, over the same Vault `/memory` already
@@ -1052,6 +1073,7 @@ export function createServer(opts: DaemonOptions): Server {
         vaultRef: opts.workspace ?? opts.sandbox,
         projectRoot: opts.sandbox,
         onPendingChanged: () => publishPending(),
+        onMemoryChanged: () => publishMemoryChanged(),
         onReceipt: (receipt) => {
           opts.stream.publish('receipt', receipt);
           opts.stream.publish('chain', opts.kernel.verifyChain());
@@ -2121,6 +2143,10 @@ export function createServer(opts: DaemonOptions): Server {
       tags,
     });
     const note = opts.vault.get(entry.id);
+    // The window has to hear about this. See publishMemoryChanged: an ungated
+    // write that tells nobody leaves every open Vault screen showing a memory
+    // that is no longer the one on disk.
+    publishMemoryChanged();
     json(res, 200, { note });
   }
 

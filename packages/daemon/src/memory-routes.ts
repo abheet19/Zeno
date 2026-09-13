@@ -69,6 +69,14 @@ export interface MemoryRouteDeps {
    * at boot.
    */
   readonly onPendingChanged?: () => void;
+  /**
+   * Called whenever the STORED memory changes — an owner write, an import, a
+   * delete. `onPendingChanged` covers only the queue, so forgetting a note left
+   * every open window listing it until a reload: the routes that need no approval
+   * were the ones that announced nothing. The window re-reads `/memory` on this;
+   * nothing is carried in the event.
+   */
+  readonly onMemoryChanged?: () => void;
 }
 
 interface PendingMemory {
@@ -262,7 +270,9 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         tags: scrubTags(body['tags']),
       });
       if (!checked.ok) return bad(checked.reason, 'Fix that field and post it again.');
-      return { status: 200, body: { entry: wire(applyMemoryWrite(deps.memory, checked.payload)) } };
+      const entry = wire(applyMemoryWrite(deps.memory, checked.payload));
+      deps.onMemoryChanged?.();
+      return { status: 200, body: { entry } };
     }
 
     /**
@@ -419,6 +429,7 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
         entries.push(wire(applyMemoryWrite(deps.memory, checked.payload)));
         imported += 1;
       }
+      if (imported > 0) deps.onMemoryChanged?.();
       return { status: 200, body: { imported, skipped, redacted, total: raw.length, entries } };
     }
 
@@ -428,7 +439,9 @@ export function createMemoryRoutes(deps: MemoryRouteDeps): {
       // Deleting is the owner erasing their own record, not an effect on the world.
       // It is ungated for the same reason writing their own note is, and it is the
       // one operation that must never be harder than remembering.
-      return { status: 200, body: { id, forgotten: deps.memory.forget(id) } };
+      const forgotten = deps.memory.forget(id);
+      if (forgotten) deps.onMemoryChanged?.();
+      return { status: 200, body: { id, forgotten } };
     }
 
     return {

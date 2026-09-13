@@ -20,6 +20,21 @@
     if (localStorage.getItem('zeno-dn') === 'compact') {
       root.setAttribute('data-density', 'compact');
     }
+    /* Reduce motion and reduce transparency belong here for a stronger reason
+       than the theme does. They were applied only by bind/settings.js, which
+       runs after the module graph has loaded — so an owner who had asked for
+       reduced motion watched the field rotate and the cards animate for the
+       whole of boot before the preference took hold, and got nothing at all if
+       that binder failed. An accessibility preference that arrives late has
+       already done the thing it was set to prevent. Same keys and same
+       attributes bind/settings.js uses (field.js's `zeno-mo` / `zeno-fl`,
+       :root[data-reduce] / [data-flat]); this only resolves them earlier. */
+    var mo = localStorage.getItem('zeno-mo');
+    var reduce = mo === '0' ? true
+      : mo === '1' ? false
+        : matchMedia('(prefers-reduced-motion: reduce)').matches;
+    root.setAttribute('data-reduce', reduce ? '1' : '0');
+    root.setAttribute('data-flat', localStorage.getItem('zeno-fl') === '1' ? '1' : '0');
   } catch {
     // Storage can be disabled. The safe visual fallback is the HTML default.
   }

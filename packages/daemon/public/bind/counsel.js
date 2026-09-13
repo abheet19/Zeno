@@ -29,9 +29,13 @@
  * Product rules preserved exactly, per the brief: consent-first (both
  * checkboxes gate Start for real), microphone only (never system/call
  * audio), audio is never stored (only finalized text lines are kept and
- * sent), and questions are structurally unavailable while a call is live
- * (the Ask tab lives only in the post-call view, which a live call never
- * shows). Where the artifact's static copy overclaims (e.g. that notes are
+ * sent), and questions are refused while a call is live. That last one is
+ * enforced in TWO places on purpose: the composer is disabled (and says
+ * why), and `ask1` refuses outright. Hiding the post-call view is not a
+ * boundary — the pane is still in the DOM, and a disabled attribute is one
+ * devtools click from gone — so the composer is re-rendered on every change
+ * to the three things that gate it (a live call, the archive state, an ask
+ * in flight). Where the artifact's static copy overclaims (e.g. that notes are
  * "saved with the transcript", when POST /counsel/meetings never accepts a
  * notes field), this binder corrects the copy rather than leaving a false
  * claim standing next to real behaviour.
@@ -174,9 +178,18 @@ async function postJSON(path, body) {
 }
 
 /** A short Whisper vocabulary hint for Counsel only — comma-separated terms,
- *  never an instruction, so it cannot teach silence to hallucinate. */
-function counselSpeechPrompt(title) {
-  const terms = ['Zeno', 'Counsel', 'Forge', 'Ollama', 'Claude Code', 'Codex', 'TypeScript', 'FastAPI', 'PostgreSQL', 'Kubernetes', title];
+ *  never an instruction, so it cannot teach silence to hallucinate. Takes the
+ *  call's participants too (named speakers help the recognizer far more than
+ *  the fixed product-term list alone), even though this surface has no input
+ *  that populates them yet — the same forward-compatible plumbing root's
+ *  Counsel kept for a future "name the participants" field. */
+function counselSpeechPrompt(title, participants) {
+  const terms = [
+    'Zeno', 'Counsel', 'Forge', 'Ollama', 'Claude Code', 'Codex',
+    'TypeScript', 'FastAPI', 'PostgreSQL', 'Kubernetes',
+    title,
+    ...(Array.isArray(participants) ? participants : []),
+  ];
   const seen = new Set();
   const clean = [];
   for (const value of terms) {
@@ -187,6 +200,40 @@ function counselSpeechPrompt(title) {
     clean.push(term);
   }
   return clean.join(', ').slice(0, 512);
+}
+
+/** Treat even the trusted preload response as bounded data at the renderer
+ *  edge — ported verbatim from root counsel.js, which restored this after an
+ *  earlier relayout dropped it: a stale "attached meeting" cannot silently
+ *  start capture unless every field here is validated first. */
+function normalizeMeetingPresence(value) {
+  const status = value && ['detected', 'none', 'unavailable'].includes(value.status)
+    ? value.status
+    : 'unavailable';
+  const candidates = [];
+  const seen = new Set();
+  const raw = value && Array.isArray(value.candidates) ? value.candidates : [];
+  for (const item of raw.slice(0, 8)) {
+    const key = String((item && item.key) || '');
+    const provider = String((item && item.provider) || '')
+      .replace(/[ -]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 48);
+    const title = String((item && item.title) || '')
+      .replace(/[ -]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 160);
+    if (!/^[a-f0-9]{24}$/.test(key) || !provider || !title || seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ key, provider, title });
+  }
+  return {
+    status: status === 'detected' && candidates.length === 0 ? 'unavailable' : status,
+    candidates,
+    checkedAt: value && typeof value.checkedAt === 'string' ? value.checkedAt : null,
+  };
 }
 
 /* ===================================================================== *
@@ -221,6 +268,37 @@ async function bindCounsel() {
   const recordBtn = takeOver($('#cn-record', root));
   const heroRecordBtn = takeOver($('.cnhero button[data-cngo="preflight"]', root));
 
+  /* A Discard control the artifact's markup never drew: it has no button for
+     it at all, so there is nothing to clone-and-rewire here — it is created
+     fresh, right beside Pause, the same way `hintEl` below is created fresh
+     for the preflight card. Throwing away a live recording needs one click
+     with a confirmation, not a mis-click away from losing it, and not a
+     forced End-twice with no dedicated affordance either. */
+  const discardBtn = (() => {
+    if (!pauseBtn || !pauseBtn.parentElement) return null;
+    const b = el('button', 'btn g sm', 'Discard');
+    b.type = 'button';
+    b.title = 'Throw away this recording — no undo, nothing saved to Vault.';
+    pauseBtn.insertAdjacentElement('afterend', b);
+    return b;
+  })();
+
+  /* A screen-reader announcer the artifact's markup does not carry either.
+     `.cn-sr` is already declared in screens/counsel.css (root counsel.js uses
+     the same class) — visually hidden, read by assistive tech only. */
+  const liveRegion = (() => {
+    const cn = $('.cn', root) || root;
+    const p = document.createElement('p');
+    p.className = 'cn-sr';
+    p.setAttribute('role', 'status');
+    p.setAttribute('aria-live', 'polite');
+    cn.appendChild(p);
+    return p;
+  })();
+  function announce(msg) {
+    liveRegion.textContent = msg;
+  }
+
   /* ================================================================= *
    * state — every field below is filled from a real response, or from *
    * what the browser itself can verify (mic devices, speech engine).  *
@@ -238,6 +316,14 @@ async function bindCounsel() {
   let askThread = []; // {question, node} — real across the whole archive
   let asking = false;
   let CALL = null; // the live call; null at rest
+
+  /* The meeting-window attach/detect state the preflight gate needs. The
+     artifact's preflight card has no markup for this at all, so the section
+     is built and inserted at runtime — same technique as `hintEl` below. */
+  let selectedMeetingKey = '';
+  let meetingCandidates = [];
+  let meetingCheck = { state: 'checking', text: 'checking local meeting windows…' };
+  let meetingCheckPending = false; // true only while beginCall is re-confirming a pick
 
   function showCnView(name) {
     $$('.cnview', root).forEach((v) => v.classList.toggle('on', v.dataset.cnview === name));
@@ -291,6 +377,10 @@ async function bindCounsel() {
     }
     renderList();
     syncStartGate();
+    // The Ask composer is enabled only when the archive is readable, so it has
+    // to be re-rendered whenever the archive state changes — otherwise it keeps
+    // whatever state it was last drawn in (at boot: the artifact's fixture).
+    renderAskTab();
   }
 
   function renderList() {
@@ -762,6 +852,91 @@ async function bindCounsel() {
     })();
   }
 
+  /* A window picked here can close, or the meeting can end, between the pick
+     and pressing Start — beginCall() re-confirms presence right before
+     capture opens rather than trusting this stale list. Restored from root
+     counsel.js: an earlier relayout of this screen dropped the whole
+     attach/detect flow on the theory the artifact's markup showed no control
+     for it; the artifact's markup still shows none, so this section is built
+     and inserted at runtime rather than lifted from static HTML. */
+  async function readMeetingPresence() {
+    const detector = window.zenoMeeting;
+    if (!detector || typeof detector.detect !== 'function') {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
+    }
+    try {
+      return normalizeMeetingPresence(await detector.detect());
+    } catch {
+      return { status: 'unavailable', candidates: [], checkedAt: null };
+    }
+  }
+
+  let meetingSourcesBox = null;
+  function ensureMeetingSourcesBox() {
+    if (meetingSourcesBox || !preflightCard) return meetingSourcesBox;
+    meetingSourcesBox = document.createElement('div');
+    meetingSourcesBox.className = 'pre-source-list';
+    const capsActs = preflightCard.querySelector('.caps-acts');
+    if (capsActs) preflightCard.insertBefore(meetingSourcesBox, capsActs);
+    else preflightCard.appendChild(meetingSourcesBox);
+    return meetingSourcesBox;
+  }
+
+  /** Every row here reflects a check that was actually made; manual capture
+   *  is always offered because a detected window only proves a supported
+   *  title exists, never that its audio is captured. */
+  function renderMeetingSources() {
+    const box = ensureMeetingSourcesBox();
+    if (!box) return;
+    const nodes = [];
+    nodes.push(el('div', 'cnnote', `meeting window: ${meetingCheck.text}`));
+    const manual = el('label', 'cnchk');
+    const manualBox = document.createElement('input');
+    manualBox.type = 'checkbox';
+    manualBox.checked = selectedMeetingKey === '';
+    manualBox.addEventListener('change', () => {
+      if (!manualBox.checked) return;
+      selectedMeetingKey = '';
+      renderMeetingSources();
+    });
+    manual.append(manualBox, el('b', null, 'Manual microphone capture'), el('span', null, '— no external application is attached.'));
+    nodes.push(manual);
+    for (const candidate of meetingCandidates) {
+      const row = el('label', 'cnchk');
+      const box2 = document.createElement('input');
+      box2.type = 'checkbox';
+      box2.id = `zc-source-${candidate.key}`;
+      box2.checked = selectedMeetingKey === candidate.key;
+      box2.addEventListener('change', () => {
+        if (!box2.checked) return;
+        selectedMeetingKey = candidate.key;
+        renderMeetingSources();
+      });
+      row.append(box2, el('b', null, `Attach to ${candidate.provider}`), el('span', null, `— ${candidate.title}`));
+      nodes.push(row);
+    }
+    fill(box, ...nodes);
+  }
+
+  async function refreshMeetingCandidates() {
+    const presence = await readMeetingPresence();
+    meetingCandidates = presence.candidates;
+    if (selectedMeetingKey && !presence.candidates.some((c) => c.key === selectedMeetingKey)) {
+      selectedMeetingKey = '';
+    }
+    if (presence.status === 'detected') {
+      meetingCheck = {
+        state: 'ok',
+        text: `${presence.candidates.length} supported meeting window${presence.candidates.length === 1 ? '' : 's'} found`,
+      };
+    } else if (presence.status === 'none') {
+      meetingCheck = { state: 'unverified', text: 'no supported meeting window found · manual capture only' };
+    } else {
+      meetingCheck = { state: 'unverified', text: 'window detection unavailable · manual capture only' };
+    }
+    renderMeetingSources();
+  }
+
   let hintEl = null;
   if (preflightCard) {
     hintEl = document.createElement('p');
@@ -770,6 +945,7 @@ async function bindCounsel() {
   }
 
   function computeWhyDisabled() {
+    if (meetingCheckPending) return 'Checking that the selected meeting window is still present…';
     if (!c1 || !c1.checked) return "Tick the first box — everyone in the room needs to know they're being recorded.";
     if (!c2 || !c2.checked) return 'Tick the second box — this only captures your microphone.';
     if (!SpeechRecognition) return 'This app has no speech engine available, so there is nothing to record with.';
@@ -790,8 +966,14 @@ async function bindCounsel() {
     if (titleInput) titleInput.value = '';
     if (c1) c1.checked = false;
     if (c2) c2.checked = false;
+    selectedMeetingKey = '';
+    meetingCandidates = [];
+    meetingCheck = { state: 'checking', text: 'checking local meeting windows…' };
+    meetingCheckPending = false;
+    renderMeetingSources();
     syncStartGate();
     showCnView('preflight');
+    void refreshMeetingCandidates();
   }
   if (recordBtn) recordBtn.addEventListener('click', (e) => { e.stopPropagation(); openPreflight(); });
   if (heroRecordBtn) heroRecordBtn.addEventListener('click', (e) => { e.stopPropagation(); openPreflight(); });
@@ -827,6 +1009,7 @@ async function bindCounsel() {
       setPillText(micStatePill, info[0], info[1], info[0] === 'cy' || info[0] === 'am');
     }
     if (pauseBtn) { pauseBtn.textContent = CALL.paused ? 'Resume' : 'Pause'; pauseBtn.disabled = CALL.saving; }
+    if (discardBtn) discardBtn.disabled = CALL.saving;
     if (endBtn) { endBtn.disabled = CALL.saving; endBtn.textContent = CALL.saving ? 'Saving…' : 'End meeting'; }
     if (linesBox) {
       const nodes = [];
@@ -856,10 +1039,21 @@ async function bindCounsel() {
     }
   }
 
-  function commit(text) {
+  /* A speaker tag changed after audio started must not rewrite queued audio:
+   * `capturedSpeaker` is the tag `onsegmentstart` snapshotted the instant that
+   * segment began, and is trusted only when it is one of the three real
+   * values this surface ever assigns — anything else (segment metadata this
+   * engine never sent) falls back to the session's CURRENT tag, same as
+   * before this guard existed. There is still no control in this view that
+   * changes `session.speaker` — the plumbing is real and forward-compatible
+   * (root counsel.js kept it for the same reason) for whenever one ships. */
+  function commit(text, capturedSpeaker) {
     const t = String(text || '').trim();
     if (!CALL || !t) return;
-    CALL.utterances.push({ id: `u${CALL.seq++}`, at: new Date().toISOString(), speaker: 'unknown', text: t });
+    const speaker = capturedSpeaker === 'owner' || capturedSpeaker === 'other' || capturedSpeaker === 'unknown'
+      ? capturedSpeaker
+      : CALL.speaker;
+    CALL.utterances.push({ id: `u${CALL.seq++}`, at: new Date().toISOString(), speaker, text: t });
   }
 
   function armEngine(session) {
@@ -868,7 +1062,11 @@ async function bindCounsel() {
     rec.continuous = true;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
-    rec.initialPrompt = counselSpeechPrompt(session.title);
+    rec.initialPrompt = counselSpeechPrompt(session.title, session.participants);
+    // Snapshot the speaker tag at the instant a segment of audio starts, so a
+    // later change to who is talking cannot retroactively relabel audio that
+    // was already captured while transcription for it is still in flight.
+    rec.onsegmentstart = () => session.speaker;
 
     rec.onstart = () => {
       if (CALL !== session || session.recognition !== rec || !session.want) {
@@ -885,7 +1083,7 @@ async function bindCounsel() {
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const res = event.results[i];
         if (!res || !res[0]) continue;
-        if (res.isFinal) commit(res[0].transcript);
+        if (res.isFinal) commit(res[0].transcript, event.segmentMeta);
         else interim += res[0].transcript;
       }
       session.interim = interim;
@@ -917,7 +1115,17 @@ async function bindCounsel() {
       if (session.endResolve) { session.endResolve(true); session.endResolve = null; }
       if (session.want) {
         session.enginePending = true;
-        try { rec.start(); } catch { session.enginePending = false; session.want = false; session.running = false; renderLive(); }
+        try { rec.start(); } catch {
+          // Capture has died and is not coming back. Every other terminal path
+          // here says why; this one used to go quiet, leaving the live bar
+          // reading "STOPPED · not recording" with no reason beside it.
+          session.enginePending = false;
+          session.want = false;
+          session.running = false;
+          session.note = 'The microphone could not be reopened, so capture stopped. Nothing was heard after this point.';
+          session.noteTone = 'error';
+          renderLive();
+        }
         return;
       }
       session.running = false;
@@ -944,6 +1152,13 @@ async function bindCounsel() {
     session.want = true;
     session.note = 'Preparing microphone. Command listening is paused while this call records.';
     session.noteTone = 'warn';
+    /* Draw the state we just moved into. Without this the live bar keeps the
+       render from beginCall() — "STOPPED · not recording", "mic: stopped" —
+       from the moment the owner presses Start until the engine's own onstart
+       fires, and the note above is never shown at all. On a machine where the
+       engine never starts (no speech service), that stale line is the only
+       thing the owner ever sees, and it says the opposite of what is true. */
+    renderLive();
     const handoff = { waiters: [], requestedBy: 'Counsel' };
     window.dispatchEvent(new CustomEvent('zeno:release-command-voice', { detail: handoff }));
     Promise.all(handoff.waiters)
@@ -1023,15 +1238,65 @@ async function bindCounsel() {
     if (CALL.tick) window.clearInterval(CALL.tick);
     CALL = null;
     delete document.body.dataset.zenoCapture;
+    renderAskTab(); // questions are available again now that nothing is recording
+  }
+
+  /**
+   * Discarding throws away the whole recording, transcript and notes — there
+   * is no undo and nothing is written to Vault. Confirm before tearing it
+   * down so a mis-click during a live meeting cannot silently lose it.
+   * Restored from root counsel.js: an earlier relayout of this screen dropped
+   * this on the theory the artifact's markup showed no control for it — the
+   * artifact's markup still shows none, so the button lives beside Pause/End
+   * (created above, next to `pauseBtn`) rather than in the static HTML.
+   */
+  function discardCall() {
+    if (!CALL || CALL.saving) return;
+    const heard = Array.isArray(CALL.utterances) ? CALL.utterances.length : 0;
+    const warn = 'Discard this recording?\n\nThe transcript' + (heard ? ' (' + heard + ' line' + (heard === 1 ? '' : 's') + ' so far)' : '')
+      + ' and any notes are dropped and nothing is saved to Vault. This cannot be undone.';
+    if (typeof window.confirm === 'function' && !window.confirm(warn)) return;
+    teardownCall();
+    showCnView('archive');
+    announce('Recording discarded. Nothing was saved.');
   }
 
   async function beginCall() {
     if (CALL || computeWhyDisabled()) return;
+    // A window picked in the preflight can close, or the meeting can end, in
+    // the time between selecting it and pressing Start. Re-confirm it is
+    // still there right before capture opens rather than trusting a stale
+    // pick — restored from root counsel.js along with the rest of the
+    // meeting-window attach/detect flow.
+    if (selectedMeetingKey) {
+      meetingCheckPending = true;
+      meetingCheck = { state: 'checking', text: 'confirming the selected meeting window…' };
+      renderMeetingSources();
+      syncStartGate();
+      const presence = await readMeetingPresence();
+      meetingCheckPending = false;
+      if (CALL) return; // a call started from elsewhere while this awaited
+      const attached = presence.candidates.find((c) => c.key === selectedMeetingKey) || null;
+      if (!attached) {
+        selectedMeetingKey = '';
+        meetingCandidates = presence.candidates;
+        meetingCheck = {
+          state: 'unverified',
+          text: 'the selected meeting window is no longer present · capture did not start',
+        };
+        renderMeetingSources();
+        syncStartGate();
+        return;
+      }
+    }
+    if (CALL || computeWhyDisabled()) return;
     const title = (titleInput && titleInput.value.trim()) || 'Untitled meeting';
     CALL = {
       title,
+      participants: [],
       utterances: [],
       seq: 0,
+      speaker: 'unknown', // nothing is detected; unknown until the owner says
       interim: '',
       startedAt: Date.now(),
       recognition: null,
@@ -1043,8 +1308,14 @@ async function bindCounsel() {
       noteTone: 'warn',
       tick: null,
       captureIncomplete: false,
+      emptyPrompted: false,
     };
     document.body.dataset.zenoCapture = 'counsel';
+    /* Questions are off for the duration of the call — that is the product's
+       promise, not a decoration. The composer has to be re-rendered here or it
+       keeps the enabled state it was drawn in before the call started, and a
+       "questions are off" screen ships a live question box behind it. */
+    renderAskTab();
     const liveNotes = $('.cnview[data-cnview="live"] .cnta', root);
     if (liveNotes) liveNotes.value = '';
     showCnView('live');
@@ -1065,7 +1336,22 @@ async function bindCounsel() {
     if (CALL !== session) return;
     if (CALL.utterances.length === 0) {
       CALL.saving = false;
-      CALL.note = 'Nothing was transcribed, so there is nothing to save. Keep recording, or end again to leave without saving.';
+      if (session.emptyPrompted) {
+        /* The first press promised that ending again leaves without saving. It
+           has to actually leave: otherwise End is a no-op loop, the owner is
+           stuck on the live view, and `body.dataset.zenoCapture` is never
+           released — which silently keeps Command's voice off for the rest of
+           the session. Nothing is written here; there was nothing to write. */
+        teardownCall();
+        showCnView('archive');
+        return;
+      }
+      session.emptyPrompted = true;
+      /* stopEngine() above has already stopped capture, so the call is paused
+         in fact. Say that, and make Resume the control that means it, rather
+         than telling the owner to "keep recording" at a stopped microphone. */
+      CALL.paused = true;
+      CALL.note = 'Nothing was transcribed, so there is nothing to save. Capture has stopped — press Resume to keep recording, or End meeting again to leave without saving.';
       CALL.noteTone = 'warn';
       renderLive();
       return;
@@ -1074,7 +1360,7 @@ async function bindCounsel() {
     renderLive();
     const r = await postJSON('/counsel/meetings', {
       title: CALL.title,
-      participants: [],
+      participants: CALL.participants,
       utterances: CALL.utterances.map((u) => ({ id: u.id, at: u.at, speaker: u.speaker, text: u.text })),
     });
     if (CALL !== session) return;
@@ -1095,6 +1381,9 @@ async function bindCounsel() {
     }
     const redacted = (r.data && r.data.redacted) || 0;
     teardownCall();
+    announce(session.captureIncomplete
+      ? 'Call saved. The final microphone result did not settle before timeout; the final phrase may be incomplete.'
+      : 'Call saved.');
     cache.set(saved.id, saved);
     if (redacted > 0) { lastRedactedId = saved.id; lastRedactedCount = redacted; }
     await loadArchive();
@@ -1103,6 +1392,7 @@ async function bindCounsel() {
 
   if (startBtn) startBtn.addEventListener('click', () => { void beginCall(); });
   if (pauseBtn) pauseBtn.addEventListener('click', () => togglePause());
+  if (discardBtn) discardBtn.addEventListener('click', () => discardCall());
   if (endBtn) endBtn.addEventListener('click', () => { void endCall(); });
 
   window.addEventListener('beforeunload', (e) => {
@@ -1122,6 +1412,19 @@ async function bindCounsel() {
   if (notesHint) notesHint.textContent = 'this browser tab only — not sent anywhere';
   const liveNotesTA = $('.cnview[data-cnview="live"] .cnta', root);
   if (liveNotesTA) liveNotesTA.placeholder = 'Type what matters. Nothing here is saved when the call ends — copy anything you want to keep first.';
+  // The boundary this product refuses to cross, stated in the surface itself
+  // and asserted by ask-voice-model.test.ts: Counsel is a recorder, never an
+  // in-call answer feed. Q&A opens only once capture has ended and saved. The
+  // artifact's static copy already says questions are off; this adds the
+  // explicit guarantee sentence root counsel.js carried, rather than leaving
+  // it implied.
+  const qaOffP = $('.cnview[data-cnview="live"] .cnqa-off p', root);
+  if (qaOffP) {
+    const guard = document.createElement('p');
+    guard.className = 'hint';
+    guard.textContent = 'Live Q&A is off while this meeting is active. End and save the transcript first; then ask from the cited notes in Counsel chat.';
+    qaOffP.insertAdjacentElement('afterend', guard);
+  }
 
   /* ================================================================= *
    * G · boot                                                            *

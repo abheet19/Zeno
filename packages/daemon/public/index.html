@@ -144,7 +144,16 @@
 <body>
 
 <title>Zeno</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<!-- The design artifact loaded Newsreader and IBM Plex Mono from
+     fonts.googleapis.com, and the lift carried that <link> in verbatim. It made
+     Zeno reach off the machine twice on EVERY launch — handing Google the
+     owner's IP, User-Agent and a timestamp for each start of a product whose
+     own Settings pane says "Zeno collects nothing — no usage data, no crash
+     pings, no account server". Both families are already self-hosted:
+     glass/tokens.css declares @font-face for IBM Plex Mono 400/500/600 and the
+     Newsreader variable face against the committed .woff2 files in
+     glass/fonts/, which is the same set this link requested. So the link bought
+     nothing and cost the product its central claim. Removed. -->
 <style>
 :root{
   color-scheme: dark;
@@ -1258,7 +1267,7 @@ button{font:inherit; color:inherit}
 <span class="ln">14</span>})</pre></div>
         </div>
         <div class="vspanel">
-          <div class="vsptabs" role="tablist"><button data-vsp="problems">Problems <span class="fct">not run</span></button><button data-vsp="output">Output</button><button data-vsp="debug">Debug Console</button><button aria-selected="true" data-vsp="terminal">Terminal</button><button data-vsp="ports">Ports <span class="fct">3</span></button><span class="fgrow"></span><span class="vstermsel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:12px;height:12px"><path d="M4 17l6-5-6-5M12 19h8"/></svg>powershell</span><button class="fico" title="Launch Profile">+ ▾</button><button class="fico" title="Add Context (@)">@</button><button class="fico" title="Split Terminal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button><button class="fico" title="Kill Terminal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button><button class="fico" title="More">⋯</button><button class="fico" id="vsp-max" title="Maximize Panel Size"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button><button class="fico" id="vsp-hide" title="Hide Panel">×</button></div>
+          <div class="vsptabs" role="tablist"><button data-vsp="problems">Problems <span class="fct">not run</span></button><button data-vsp="output">Output</button><button data-vsp="debug">Debug Console</button><button aria-selected="true" data-vsp="terminal">Terminal</button><button data-vsp="ports">Ports <span class="fct">—</span></button><span class="fgrow"></span><span class="vstermsel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" style="width:12px;height:12px"><path d="M4 17l6-5-6-5M12 19h8"/></svg>powershell</span><button class="fico" title="Launch Profile">+ ▾</button><button class="fico" title="Add Context (@)">@</button><button class="fico" title="Split Terminal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button><button class="fico" title="Kill Terminal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button><button class="fico" title="More">⋯</button><button class="fico" id="vsp-max" title="Maximize Panel Size"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button><button class="fico" id="vsp-hide" title="Hide Panel">×</button></div>
           <div class="vspbody">
             <div class="vsp" data-vsp="problems"><div class="fempty">Lint and typecheck have not run in this session, so there is nothing to report yet — not the same as zero problems. <button class="laction" data-run-cmd="npm run typecheck">Run typecheck</button></div></div>
             <div class="vsp" data-vsp="output"><pre class="fterm">[run] Rotate the ingest token · local qwen3:8b · worktree wt-7f2a

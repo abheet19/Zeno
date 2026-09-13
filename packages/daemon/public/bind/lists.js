@@ -351,12 +351,17 @@ async function bindVault() {
   neutralizeImportCard(importCard);
 
   const cards = $$('.card', screen);
-  const listCard = cards.find((c) => c !== importCard);
+  const listCard = cards.find((c) => c !== importCard && !c.hasAttribute('data-brief-card'));
   const rowList = listCard ? listCard.querySelector('.row-list') : null;
   const searchInput = screen.querySelector('.sbar input');
   if (!rowList) return;
 
-  let query = '';
+  /* live.js re-runs this binder on every stream event, so it has to be
+     idempotent — and it was not. Each run started with an empty `query` while
+     the search box still held the owner's words, so a note written anywhere
+     silently threw their search away and redrew the full list underneath an
+     input that said otherwise. Read the box instead of assuming it is empty. */
+  let query = searchInput ? searchInput.value : '';
   let notesRes = null;
   let hitsRes = null;
   let pendingRes = null;
@@ -447,12 +452,24 @@ async function bindVault() {
   }
 
   render();
-  const [notes, pending] = await Promise.all([getJSON('/memory'), getJSON('/memory/pending')]);
-  notesRes = notes; pendingRes = pending;
+  const reads = [getJSON('/memory'), getJSON('/memory/pending')];
+  // A re-run while a search is open must re-run the SEARCH, not quietly fall
+  // back to the full list.
+  if (query.trim()) reads.push(getJSON('/memory?q=' + encodeURIComponent(query.trim())));
+  const [notes, pending, hits] = await Promise.all(reads);
+  notesRes = notes; pendingRes = pending; hitsRes = hits ?? null;
   render();
 
   if (searchInput) {
-    searchInput.addEventListener('input', () => {
+    /* One listener, not one per stream event. Every re-run used to add another,
+       each closed over ITS OWN stale `notesRes`, so after a few events a single
+       keystroke fired several fetches and the last render to land could be the
+       one holding the oldest data. Drop the previous handler before adding
+       this one — and the previous debounce with it, or a timer from the old
+       closure lands after the rebind and repaints stale rows. */
+    if (searchInput._zenoVaultInput) searchInput.removeEventListener('input', searchInput._zenoVaultInput);
+    clearTimeout(searchInput._zenoVaultTimer);
+    const onInput = () => {
       query = searchInput.value;
       const q = query.trim();
       if (!q) { hitsRes = null; render(); return; }
@@ -462,7 +479,10 @@ async function bindVault() {
         hitsRes = await getJSON('/memory?q=' + encodeURIComponent(q));
         render();
       }, 300);
-    });
+      searchInput._zenoVaultTimer = searchTimer;
+    };
+    searchInput._zenoVaultInput = onInput;
+    searchInput.addEventListener('input', onInput);
   }
 
   bindBrief(screen);
@@ -490,12 +510,26 @@ function neutralizeImportCard(card) {
 async function bindBrief(screen) {
   const pbody = screen.querySelector('.pbody');
   if (!pbody) return;
-  const card = el('div', 'card');
-  card.style.marginTop = '16px';
-  const body = el('div', null);
-  card.appendChild(headingEl('today’s brief'));
-  card.appendChild(body);
-  pbody.appendChild(card);
+  /* Reuse the card if this binder has already built one. It appended a new one
+     on every call, and live.js re-runs it on every stream event — so a window
+     left open through a few approvals grew a stack of identical briefs, each
+     one a separate read of /brief. The marker is on the element rather than a
+     module flag because the screen can be rebuilt underneath us. */
+  let card = pbody.querySelector('[data-brief-card]');
+  let body;
+  if (card) {
+    body = card.querySelector('[data-brief-body]');
+  } else {
+    card = el('div', 'card');
+    card.setAttribute('data-brief-card', '');
+    card.style.marginTop = '16px';
+    body = el('div', null);
+    body.setAttribute('data-brief-body', '');
+    card.appendChild(headingEl('today’s brief'));
+    card.appendChild(body);
+    pbody.appendChild(card);
+  }
+  if (!body) return;
   fill(body, loadingEl('Reading the brief…'));
 
   const res = await getJSON('/brief');

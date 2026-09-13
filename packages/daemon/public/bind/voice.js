@@ -131,6 +131,12 @@ const STATE_INFO = {
   speaking: { cls: 'cy', text: () => 'voice: speaking…' },
   stopped: { cls: 'wt', text: () => 'voice: stopped' },
   error: { cls: 'rd', text: () => 'voice: error' },
+  // Not a state the engine reaches — the state there IS no engine to reach one
+  // from. "voice: idle" reads as "ready, just not listening right now", which is
+  // the one thing this pill must not say when nothing in this window can hear:
+  // the owner would hold the mic, get nothing, and blame the microphone. The
+  // reason is already in the tooltip; the visible word has to agree with it.
+  unavailable: { cls: 'am', text: () => 'voice: unavailable' },
 };
 
 let pillEl = null;
@@ -153,7 +159,11 @@ function engineDescription() {
 /** Repaint the pill and every mic button from the one piece of state. Never
  * shows a state the engine did not actually reach. */
 function paintState() {
-  const info = STATE_INFO[currentState] || STATE_INFO.idle;
+  // "idle" is a resting engine. With no engine at all there is nothing resting,
+  // so the pill says so rather than borrowing the word for "ready".
+  const info = (!SpeechRecognition && currentState === 'idle')
+    ? STATE_INFO.unavailable
+    : (STATE_INFO[currentState] || STATE_INFO.idle);
   if (pillEl) {
     pillEl.className = `pill ${info.cls}`;
     fill(pillEl, el('span', 'd'), document.createTextNode(info.text(currentDetail)));
@@ -763,6 +773,12 @@ async function turnWakeOn() {
   wakeListenerObj = wakeListenerObj || new WakeListener();
   wakeListenerObj.arm();
   writeWakePref(true);
+  // The switch the owner just flipped is the ONLY persistent place that says
+  // the microphone is open — the pill lives on Home and the mic buttons are
+  // per-screen. disarmWake has always synced it down; nothing synced it up, so
+  // an armed wake word read "off" in Settings for the rest of the session, and
+  // flipping it again looked like turning it ON while it actually turned it off.
+  syncSettingsToggle(true);
   paintState(); // disables the hold buttons immediately — one mic at a time
   try {
     await abortPttNow();
@@ -773,11 +789,26 @@ async function turnWakeOn() {
   startWakeEngine();
 }
 
-function disarmWake(reason, stateOverride) {
+/**
+ * Stop listening.
+ *
+ * `opts.keepPreference` separates the two things this function was doing at
+ * once: tearing down a live capture, and revoking the owner's stored consent.
+ * Every caller below except one is a real "off" — the owner flipped the switch,
+ * permission was refused, no microphone was found, the recogniser kept dying,
+ * the owner navigated away from the only screens that show it is listening —
+ * and those must clear the preference. The `pagehide` teardown is not an "off":
+ * the window is simply going away, and clearing the consent there meant a wake
+ * word could never survive a reload at all. bind()'s own restore branch (and
+ * its comment, "re-asking every reload would train them to click through it
+ * unread") was unreachable, and the Settings switch reported OFF after every
+ * reload no matter what the owner had chosen.
+ */
+function disarmWake(reason, stateOverride, opts) {
   const wasOn = wakeOn;
   wakeOn = false;
   if (wakeListenerObj) wakeListenerObj.disarm(); // drops the retained transcript
-  writeWakePref(false);
+  if (!(opts && opts.keepPreference)) writeWakePref(false);
   if (wakeRestartTimer) { clearTimeout(wakeRestartTimer); wakeRestartTimer = null; }
   if (wakeTickTimer) { clearInterval(wakeTickTimer); wakeTickTimer = null; }
   syncSettingsToggle(false);
@@ -931,7 +962,8 @@ export async function bind() {
     paintState(); // draws idle/disabled honestly before any async work below
 
     window.addEventListener('zeno:release-command-voice', onExternalRelease);
-    window.addEventListener('pagehide', () => { void abortPttNow(); void disarmWake(); });
+    // The window going away stops the microphone; it does not revoke consent.
+    window.addEventListener('pagehide', () => { void abortPttNow(); void disarmWake(undefined, undefined, { keepPreference: true }); });
 
     // Restore a previously-accepted wake preference — but only after asserting
     // (via wakeIndicatorVisible, checked on the first tick) that something on

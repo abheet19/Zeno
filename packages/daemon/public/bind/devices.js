@@ -40,6 +40,11 @@
  *   - "paired" is drawn from the real list, never invented, and a truly
  *     empty list says "not paired yet" plus the real reason (no phone
  *     client), never a bare 0 dressed up as an empty state;
+ *   - while no phone client exists, the sheet's subtitle and its three
+ *     numbered steps are rewritten too: they narrated a pairing that
+ *     completes ("scan this", "confirm the fingerprint on both", "the phone
+ *     becomes an owner device"), which contradicted the very footnote below
+ *     them saying nothing can answer. One sheet, one story;
  *   - if GET /mesh/devices itself fails, both cards say the mesh could not
  *     be read and every pairing trigger is disabled — no pairing UI is
  *     shown that could not possibly work;
@@ -138,6 +143,14 @@ export async function bind() {
     let pcmEl = pairSheet ? $('.pcm', pairSheet) : null;
     const newBtn = pairSheet ? $('#pair-new', pairSheet) : null;
     const fnoteEl = pairSheet ? $('.fnote', pairSheet) : null;
+    // The sheet's subtitle and its three numbered steps are the first words an
+    // owner reads, and the artifact writes them as a phone flow that runs end
+    // to end. They are rewritten below whenever the daemon says no client
+    // exists; the originals are kept so a real one restores them verbatim.
+    const mhSubEl = pairSheet ? $('.mh-sub', pairSheet) : null;
+    const stepsEl = pairSheet ? $('.pairsteps', pairSheet) : null;
+    const mhSubOriginal = mhSubEl ? mhSubEl.textContent : '';
+    const stepsOriginal = stepsEl ? [...stepsEl.childNodes] : [];
 
     const ownerHeld = !!token();
     const daemonHost = typeof location !== 'undefined' && location.host ? location.host : '';
@@ -164,12 +177,52 @@ export async function bind() {
       if (fnoteEl) fnoteEl.textContent = text;
     }
 
+    /* One sheet must tell ONE story.
+     *
+     * The artifact narrates pairing as something that completes: "Open Zeno on
+     * the phone → scan this", "both screens show the same 4-word fingerprint —
+     * confirm it on both", "the phone becomes an owner device". While the
+     * daemon reports phoneClient.built === false (and the pairing itself
+     * reports completable === false), none of those steps can happen — and a
+     * truthful footnote underneath does not undo instructions printed above
+     * it; it just gives the owner two contradictory stories to pick from.
+     * So the narrative is rewritten to what a started pairing ACTUALLY is: a
+     * real invite and a real code, minted here, with nothing on the other end.
+     */
+    function stepEl(n, text) {
+      const s = el('span');
+      s.appendChild(el('b', null, String(n)));
+      s.appendChild(document.createTextNode(' ' + text));
+      return s;
+    }
+    function setSheetNarrative(phoneClient) {
+      const noClient = !!(phoneClient && phoneClient.built === false);
+      if (mhSubEl) {
+        mhSubEl.textContent = noClient
+          ? 'This mints a real invite and a real code on this machine. Nothing can answer it yet: the Zeno phone client is not built.'
+          : mhSubOriginal;
+      }
+      if (!stepsEl) return;
+      if (noClient) {
+        fill(
+          stepsEl,
+          stepEl(1, 'This machine has minted a real invite and the code above.'),
+          stepEl(2, 'A second device would answer it, and both sides would have to derive the same verification code.'),
+          stepEl(3, 'Nothing can do that yet, so this pairing stays open until you cancel it. No device is trusted by it.'),
+        );
+      } else {
+        fill(stepsEl, ...stepsOriginal);
+      }
+    }
+
     function showSheetLoading(msg) {
       setCode(msg || 'reading pairing code…');
       setPcm('contacting the daemon…');
+      setSheetNarrative(state.phoneClient);
       if (newBtn) newBtn.disabled = true;
     }
     function showSheetPairing(pairing, phoneClient) {
+      setSheetNarrative(phoneClient);
       setCode(formatCode(pairing && pairing.code));
       const started = pairing && fmtClock(pairing.startedAt);
       setPcm(
@@ -185,6 +238,7 @@ export async function bind() {
       );
     }
     function showSheetNone(reasonText) {
+      setSheetNarrative(state.phoneClient);
       setCode('—');
       setPcm(reasonText || 'no pairing open');
       if (newBtn) newBtn.disabled = true;
