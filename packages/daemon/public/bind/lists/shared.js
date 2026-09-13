@@ -3,10 +3,10 @@
  * module builds on: string/date formatting, the artifact's own DOM shapes
  * (`.lrow`, `.pill`, `.lcard`, `.empty`, a heading/note pair), a POST/DELETE
  * pair with the same never-throw contract as bind.js's `getJSON`, a toast
- * borrowed from the `#toast` element/CSS ui.js already ships, and the
- * "facts" shaping shared by Integrations' `.lcard` rows and Customize's
- * `.lrow` rows for the same `/forge/connectors` and `/forge/extensions`
- * payloads (so the two screens can never drift on what a field means).
+ * borrowed from the `#toast` element/CSS ui.js already ships, the form
+ * fields the add-server / add-rule / add-skill forms are built from, and the
+ * "facts" shaping for the `/forge/connectors` and `/forge/extensions`
+ * payloads (kept in one place so no two rows can drift on what a field means).
  *
  * See bind/lists.js for the full endpoint list and per-screen documentation.
  */
@@ -160,6 +160,80 @@ function lcardOuter(titleText, metaText, rightNode) {
   return card;
 }
 
+/** A small "Yours | Discover" (or similar) toggle built only from the
+ *  existing `.btn`/`.btn.sm` classes — the same primary/ghost pairing
+ *  bind/lists/mcp.js already uses for its "+ Add server"/"Close" button, so
+ *  this introduces no new visual language. `options` is `[{value,label}]`;
+ *  the option matching `active` renders primary (`btn sm p`), every other
+ *  option renders ghost (`btn sm g`); clicking a non-active option calls
+ *  `onChange(value)`. The caller owns the state and re-renders. */
+function viewToggleEl(options, active, onChange) {
+  const wrap = el('div', null);
+  wrap.style.cssText = 'display:flex; gap:6px; margin:2px 2px 8px';
+  options.forEach((opt) => {
+    const btn = el('button', 'btn sm ' + (opt.value === active ? 'p' : 'g'), opt.label);
+    btn.type = 'button';
+    // The active tab stays a normal (non-dimmed) button — it just has nothing
+    // left to do, so its own click is a no-op rather than a disabled control.
+    if (opt.value !== active) btn.addEventListener('click', () => onChange(opt.value));
+    wrap.appendChild(btn);
+  });
+  return wrap;
+}
+
+/* ---- form fields — the one inline field style the add-server form in
+ * bind/lists/mcp.js introduced, shared with the rule/skill forms in
+ * bind/lists/authoring.js so the three forms cannot drift apart. Inline, like
+ * every other layout tweak in this codebase, rather than a class the
+ * artifact's stylesheet never defined. ---- */
+const FIELD_STYLE = 'font:inherit; font-size:12px; padding:7px 10px; border-radius:6px; '
+  + 'border:1px solid var(--rule-2,#2C363B); background:var(--g2,#0F1214); color:var(--ink,#ECEBE6)';
+
+/** A text input. `onInput(value)` lets the caller keep a draft that survives
+ *  a re-render — every form here is rebuilt from state on each render. */
+function inputEl(placeholder, value, onInput) {
+  const i = document.createElement('input');
+  i.placeholder = placeholder || '';
+  i.style.cssText = FIELD_STYLE;
+  if (value) i.value = value;
+  if (onInput) i.addEventListener('input', () => onInput(i.value));
+  return i;
+}
+function textareaEl(placeholder, value, onInput, rows) {
+  const t = document.createElement('textarea');
+  t.placeholder = placeholder || '';
+  t.rows = rows || 6;
+  t.style.cssText = FIELD_STYLE + '; resize:vertical; font-family:var(--font-mono,ui-monospace,Consolas,monospace)';
+  if (value) t.value = value;
+  if (onInput) t.addEventListener('input', () => onInput(t.value));
+  return t;
+}
+/** `options` is `[{value,label}]`; `title` is the accessible name. */
+function selectEl(options, value, onChange, title) {
+  const s = document.createElement('select');
+  s.style.cssText = FIELD_STYLE;
+  if (title) s.title = title;
+  options.forEach((opt) => {
+    const o = document.createElement('option');
+    o.value = opt.value; o.textContent = opt.label;
+    s.appendChild(o);
+  });
+  if (value !== undefined && value !== null) s.value = value;
+  if (onChange) s.addEventListener('change', () => onChange(s.value));
+  return s;
+}
+/** The column container a form sits in, in the screen's own row/card shape. */
+function formBox(shape) {
+  const box = el('div', shape === 'lcard' ? 'lcard' : 'lrow');
+  box.style.cssText = 'display:flex; flex-direction:column; align-items:stretch; gap:8px; padding:12px 16px';
+  return box;
+}
+function statusEl(text) {
+  const s = el('span', null, text || '');
+  s.style.cssText = 'font-size:10.5px; color:var(--ink-3,#6C7480); white-space:pre-wrap';
+  return s;
+}
+
 /** Sets a control honestly inert: disabled, visibly dimmed, and — unlike a
  *  live control that merely happens to do nothing — carrying the reason in
  *  its `title` so the state is discoverable, not just implied. Matches the
@@ -230,5 +304,6 @@ export {
   clip, plural, minutesSince, ageStr, gitWord,
   postJSON, deleteJSON, toast,
   lrowEl, pillEl, emptyEl, loadingEl, unreadableEl, headingEl, noteEl, lcardOuter, disableBtn,
+  viewToggleEl, inputEl, textareaEl, selectEl, formBox, statusEl,
   connectorFacts, builtinFacts, snippetFacts, skillSourceLine,
 };

@@ -41,9 +41,34 @@ interface ProjectRule {
   readonly truncated: boolean;
 }
 
+/**
+ * The fixed set of rule-file conventions Forge scans, in scan order. This is
+ * the ONE list: `projectRules` reads from it, `/capabilities/conventions`
+ * reports it to Command's Customize screen, and `/capabilities/rules` will
+ * only propose a file that matches one of these — so "not present" on screen
+ * and "not read" at run time can never disagree.
+ */
+export interface RuleConvention {
+  /** A single file (`AGENTS.md`) or a directory (`.agents/rules`), relative to the repository root. */
+  readonly path: string;
+  readonly kind: 'file' | 'dir';
+  /** For a directory convention, the extension a new rule file is given. */
+  readonly extension: '.md' | '.mdc';
+  readonly note: string;
+}
+
+export const RULE_CONVENTIONS: readonly RuleConvention[] = [
+  { path: 'AGENTS.md', kind: 'file', extension: '.md', note: 'Generic, cross-tool agent instructions.' },
+  { path: 'CLAUDE.md', kind: 'file', extension: '.md', note: 'Claude Code project instructions.' },
+  { path: '.github/copilot-instructions.md', kind: 'file', extension: '.md', note: 'GitHub Copilot repository instructions.' },
+  { path: '.agents/rules', kind: 'dir', extension: '.md', note: 'Zeno/agents rule directory — one file per rule.' },
+  { path: '.cursor/rules', kind: 'dir', extension: '.mdc', note: 'Cursor rule directory.' },
+  { path: '.claude/rules', kind: 'dir', extension: '.md', note: 'Claude Code rule directory.' },
+];
+
 export function projectRules(ctx: ServerCtx): ProjectRule[] {
-  const relativePaths = ['AGENTS.md', 'CLAUDE.md', '.github/copilot-instructions.md'];
-  for (const dir of ['.agents/rules', '.cursor/rules', '.claude/rules']) {
+  const relativePaths = RULE_CONVENTIONS.filter((c) => c.kind === 'file').map((c) => c.path);
+  for (const dir of RULE_CONVENTIONS.filter((c) => c.kind === 'dir').map((c) => c.path)) {
     const absDir = join(ctx.opts.sandbox, ...dir.split('/'));
     if (!existsSync(absDir)) continue;
     let handle: ReturnType<typeof opendirSync> | undefined;

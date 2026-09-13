@@ -74,11 +74,12 @@ export async function proposeFileWrite(
   contents: string,
   summary: string,
   requestedBy: string,
+  options: { readonly hold?: string } = {},
 ): Promise<Record<string, unknown>> {
   const abs = jail(ctx.opts.fs, ctx.opts.sandbox, relPath);
   const before = ctx.opts.fs.readFile(abs);
   const payload = makeWritePayload(relPath, before, contents);
-  const risk = assessWrite(relPath, before, contents);
+  const assessed = assessWrite(relPath, before, contents);
   const secrets = sanitize(contents).findings;
   const secretWarning =
     secrets.length > 0 ? { count: secrets.length, kinds: [...new Set(secrets.map((f) => f.label))] } : null;
@@ -86,7 +87,15 @@ export async function proposeFileWrite(
   // routine write escalates it to needing the owner. Agent output always does
   // too: a model may propose a harmless-looking file, but it cannot approve or
   // auto-land its own output merely because the path happened to score T0.
+  // A caller may also name a reason the write must be DECIDED (`options.hold`
+  // — a rule or skill file that shapes every future run, see
+  // routes/capabilities.ts). That only ever moves the tier UP: nothing here
+  // can make a write more routine than the assessment said.
   const fromAgent = requestedBy.startsWith('forge:');
+  const held = options.hold !== undefined && assessed.routine;
+  const risk = held
+    ? { ...assessed, kind: 'patch.task' as ActionKind, routine: false, reasons: [...assessed.reasons, options.hold!] }
+    : assessed;
   const kind: ActionKind = (fromAgent || secretWarning) && risk.routine ? 'patch.task' : risk.kind;
   const request: ActionRequest = {
     kind, summary, targetRef: abs, payload, baseHash: payload.expectBaseHash, requestedBy, dataZones: ['personal'],

@@ -44,17 +44,19 @@ export async function bindConnectors(modal) {
     if (customizeRow) {
       const sub = $('.sub', customizeRow);
       if (sub) {
+        // Skills/rules live in Customize; MCP/connectors moved to Integrations
+        // when the two screens were split. Name where each actually is now.
         const parts = [];
         if (skillsRes.ok) {
           const skills = Array.isArray(skillsRes.data && skillsRes.data.skills) ? skillsRes.data.skills : [];
-          parts.push(`${skills.length} skill${skills.length === 1 ? '' : 's'} catalogued`);
+          parts.push(`${skills.length} skill${skills.length === 1 ? '' : 's'} in Customize`);
         } else parts.push('skills could not be read');
         if (mcpRes.ok) {
           const servers = Array.isArray(mcpRes.data && mcpRes.data.servers) ? mcpRes.data.servers : [];
           const names = servers.map((s) => s && s.name).filter(Boolean);
-          parts.push(names.length ? `MCP: ${names.join(', ')}` : '0 MCP servers recorded');
+          parts.push(names.length ? `MCP in Integrations: ${names.join(', ')}` : '0 MCP servers (add in Integrations)');
         } else parts.push('MCP servers could not be read');
-        setText(sub, `${parts.join(' · ')}. Each one is added by you and stays behind the approval gate — nothing is loaded ambiently.`);
+        setText(sub, `${parts.join(' · ')}. Each is added by you and stays behind the approval gate — nothing is loaded ambiently.`);
       }
     }
   } catch { /* skip quietly */ }

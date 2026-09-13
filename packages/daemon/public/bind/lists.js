@@ -7,13 +7,17 @@
  * then `bind()`); each screen's own binder lives in its own module under
  * bind/lists/, split out because a single ~1,300-line file binding six
  * unrelated screens had stopped being one cohesive thing:
- *   bind/lists/shared.js        format/DOM helpers, POST/DELETE, toast, and
- *                                the connector/extension "facts" shaping
- *                                shared by Integrations and Customize.
+ *   bind/lists/shared.js        format/DOM helpers, POST/DELETE, toast, the
+ *                                form fields, and the connector/extension
+ *                                "facts" shaping.
  *   bind/lists/mcp.js           createMcpManager — the one GET/POST/DELETE
- *                                /forge/mcp/servers component Integrations
- *                                and Customize both render (as `.lcard` or
- *                                `.lrow`, per `shape`).
+ *                                /forge/mcp/servers component (Integrations).
+ *   bind/lists/discover.js      the "Discover" catalogs: MCP templates,
+ *                                connector switches, rule conventions, the
+ *                                global skill catalog.
+ *   bind/lists/authoring.js     createRuleAuthor / createSkillAuthor — the
+ *                                governed add-rule / add-skill forms
+ *                                (Customize) over POST /capabilities/*.
  *   bind/lists/work.js          WORK screen.
  *   bind/lists/vault.js         VAULT screen (+ today's brief).
  *   bind/lists/integrations.js  INTEGRATIONS screen.
@@ -28,15 +32,15 @@
  *                  "import preview") and a second `.card > .row-list` of
  *                  `.lrow`s.
  *   Integrations   a `.live-cards` of `.lcard`s (`.lk`/`.lm`/`.lr`) — NOT the
- *                  `.lrow` shape the other screens use. Sections: work
- *                  sources, agents/local runtime, connectors
- *                  (`GET /forge/connectors`), MCP servers (`GET /forge/mcp
- *                  /servers`, plus a real add-server form — see Customize),
- *                  extensions (`GET /forge/extensions`) and repository
- *                  skills (`GET /skills`). Nothing here is the artifact's
- *                  invented GitHub/Vantage/Chrome-bridge fixture rows —
- *                  those are replaced outright by whatever the daemon
- *                  actually reports, including "nothing configured".
+ *                  `.lrow` shape the other screens use. Everything that
+ *                  reaches OUT of the machine: work sources, the model
+ *                  runtime (`GET /forge/agents`), connectors (`GET
+ *                  /forge/connectors`) and MCP servers (`GET/POST/DELETE
+ *                  /forge/mcp/servers`, with a real add-server form).
+ *                  Nothing here is the artifact's invented GitHub/Vantage/
+ *                  Chrome-bridge fixture rows — those are replaced outright
+ *                  by whatever the daemon actually reports, including
+ *                  "nothing configured".
  *   Chats          `.sbar` (search) above `#chats-list-view` (a
  *                  `.row-list#chats-list` of rows) and `#chats-open-view`
  *                  (`#chats-title`, `#chats-turns`, and its own composer:
@@ -49,12 +53,13 @@
  *                  endpoint is stated plainly rather than papered over with
  *                  invented rows.
  *   Customize      a plain `.card > .row-list[data-mount="customize-list"]`.
- *                  Real, every row: MCP servers (`GET`/`POST`/`DELETE
- *                  /forge/mcp/servers`, add/remove owner-only), installed
- *                  skills (`GET /skills`), connectors (`GET
- *                  /forge/connectors` — Zeno's own bundled, run-scoped
- *                  bridges; NOT a third-party-account catalog, because this
- *                  daemon has none) and extensions (`GET /forge/extensions`
+ *                  What shapes a run from INSIDE the repository: rules
+ *                  (`GET /skills`'s `rules`, conventions from `GET
+ *                  /capabilities/conventions`, add/edit via `POST
+ *                  /capabilities/rules` — a HELD proposal the owner
+ *                  approves), installed skills (`GET /skills`, add via
+ *                  `POST /capabilities/skills` — likewise held) and the
+ *                  informational extensions catalog (`GET /forge/extensions`
  *                  — built-ins, skill provenance and editor snippets). The
  *                  artifact's old top-level `public/customize.js` invented a
  *                  Google-Drive/Slack/Notion connector catalog and an
@@ -104,6 +109,12 @@
  *                                     provenance,installed,unreadable,reason?}],
  *                                     snippets:[{file,provenance,entries,status,reason?,
  *                                     enabledInMonaco}], note }
+ *   GET    /capabilities/conventions -> { conventions:[{path,kind,extension,note}] }
+ *   POST   /capabilities/rules   -> { convention, name?, text } -> { relPath, preview, risk, … }
+ *   POST   /capabilities/skills  -> { id, name, description, instructions } -> { relPath, id,
+ *                                     screening:{verdict,findings}, preview, risk, … }
+ *                                   (both: the same shape POST /previews returns — a held
+ *                                    proposal, or a receipt when the kernel applied it)
  *
  * A WorkItem carries NO tier/status field (packages/intake/src/work-item.ts),
  * so ticket rows never claim a "T2 · owner: you" the mock invented — only

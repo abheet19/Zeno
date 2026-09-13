@@ -1,24 +1,41 @@
 /**
- * bind/lists/integrations.js — INTEGRATIONS screen: real connectors,
- * agents/local runtime, MCP servers and extensions.
+ * bind/lists/integrations.js — INTEGRATIONS screen: everything that reaches
+ * OUT of this machine, or could. Work sources, the model runtime (local
+ * Ollama and hosted agents), Zeno's bundled connectors, and the MCP servers
+ * the owner records. What shapes a run from INSIDE the repository — rules,
+ * skills, the local extensions catalog — is Customize's job
+ * (bind/lists/customize.js), so the two screens no longer draw the same
+ * catalog twice.
  *
  * Draws a `.live-cards` of `.lcard`s (`.lk`/`.lm`/`.lr`) — NOT the `.lrow`
- * shape the other screens use. Sections: work sources, agents/local runtime,
- * connectors (`GET /forge/connectors`), MCP servers (`GET /forge/mcp
- * /servers`, plus a real add-server form via bind/lists/mcp.js), extensions
- * (`GET /forge/extensions`) and repository skills (`GET /skills`). Nothing
- * here is the artifact's invented GitHub/Vantage/Chrome-bridge fixture rows
- * — those are replaced outright by whatever the daemon actually reports,
- * including "nothing configured". See bind/lists.js for the full endpoint
- * list.
+ * shape the other screens use. Sections:
+ *   work sources   GET /work's `sources` — each with whether it is configured,
+ *                  whether it answered, and whether a call leaves the machine.
+ *   model runtime  GET /forge/agents — Ollama's local model list and each
+ *                  agent backend's availability, with its egress stated.
+ *   connectors     GET /forge/connectors — Zeno's own bundled, run-scoped
+ *                  bridges. "Yours" shows their live state; "Discover" says
+ *                  what each is and the daemon startup switch that turns it
+ *                  on. There is NO "+ Add": the set is fixed, this daemon
+ *                  holds no third-party accounts, and there is no external
+ *                  connector catalog to browse.
+ *   MCP servers    GET/POST/DELETE /forge/mcp/servers via bind/lists/mcp.js:
+ *                  real add (names-only env keys) and remove, plus a
+ *                  "Discover" list of templates that pre-fill the form.
+ *
+ * Nothing here is the artifact's invented GitHub/Vantage/Chrome-bridge fixture
+ * rows — those are replaced outright by whatever the daemon actually reports,
+ * including "nothing configured". See bind/lists.js for the endpoint list.
  */
 
 import { getJSON, fill, token, screenEl } from '../../bind.js';
 import {
-  plural, clip, disableBtn, lcardOuter, pillEl, noteEl, headingEl,
-  connectorFacts, builtinFacts, snippetFacts, skillSourceLine,
+  plural, disableBtn, lcardOuter, pillEl, noteEl, headingEl, viewToggleEl, connectorFacts,
 } from './shared.js';
 import { createMcpManager } from './mcp.js';
+import { connectorDiscoverNode } from './discover.js';
+
+const YOURS_DISCOVER = [{ value: 'yours', label: 'Yours' }, { value: 'discover', label: 'Discover' }];
 
 function lcardNote(text, err) {
   return lcardOuter(text, err ? String(err) : 'Nothing is configured here yet.', pillEl(err ? 'could not read' : 'none', err ? 'rd' : 'wt'));
@@ -48,78 +65,70 @@ function agentCard(a) {
     local ? 'stays on this machine' : 'sends code to its provider'].join(' · ');
   return lcardOuter(a.label || a.id || 'agent', meta, pillEl(a.available ? 'available' : 'unavailable', a.available ? 'gr' : 'wt'));
 }
-function skillCard(sk) {
-  const meta = (sk.description ? clip(sk.description, 100) + ' — ' : '') + (sk.bytes || 0) + ' bytes';
-  const susp = sk.verdict === 'suspicious';
-  return lcardOuter(sk.name || sk.id || 'skill', meta, pillEl(susp ? 'review findings' : 'screened', susp ? 'am' : 'gr'));
-}
 function connectorCard(c) {
   const f = connectorFacts(c);
   const card = lcardOuter(f.name, f.meta, pillEl(f.pillText, f.pillCls));
   if (f.permissions) card.appendChild(noteEl(f.permissions));
   return card;
 }
-function builtinCard(b) {
-  const f = builtinFacts(b);
-  const card = lcardOuter(f.name, f.meta, pillEl(f.pillText, f.pillCls));
-  if (f.permissions) card.appendChild(noteEl('Permissions: ' + f.permissions));
-  return card;
-}
-function snippetCard(sn) {
-  const f = snippetFacts(sn);
-  return lcardOuter(f.name, f.meta, pillEl(f.pillText, f.pillCls));
-}
 
 const integrationsMcp = createMcpManager('lcard');
+// The Yours/Discover choice, the last successful reads and the renderer all
+// live at module level: bind/live.js re-runs this binder on every
+// state/receipt event, and /forge/agents probes the runtime on each read.
+// While that probe is in flight the screen keeps drawing the LAST read — and
+// a click (a template's "+ Add", the header's "+ Add MCP server") still
+// redraws at once instead of waiting on a fetch it has nothing to do with.
+const view = { connectors: 'yours' };
+let last = null;         // { work, agents, connectors } from the latest completed read
+let container = null;
+let hasOwner = false;
 
-export async function bindIntegrations() {
-  const screen = screenEl('integrations');
-  if (!screen) return;
-  const container = screen.querySelector('.live-cards');
-  if (!container) return;
+function render() {
+  if (!container || !last) return;
+  const { work, agents, connectors } = last;
+  const nodes = [];
 
-  fill(container, lcardOuter('Reading integrations…', '', null));
-
-  const hasOwner = !!token();
-  const addBtn = screen.querySelector('.phead button');
-  if (addBtn) {
-    disableBtn(addBtn, 'Zeno holds no third-party account connectors and never simulates one — see the real, '
-      + 'bundled connectors and the MCP servers you can add below.');
+  nodes.push(headingEl('work sources'));
+  if (!work.ok) {
+    nodes.push(lcardNote('Work sources could not be read.', work.error));
+  } else {
+    const sources = Array.isArray(work.data && work.data.sources) ? work.data.sources : [];
+    if (!sources.length) nodes.push(lcardNote('No work source is configured.', null));
+    sources.forEach((s) => nodes.push(sourceCard(s)));
   }
 
-  let render = () => {};
-  integrationsMcp.setRerender(() => render());
+  nodes.push(headingEl('model runtime'));
+  if (!agents.ok) {
+    nodes.push(lcardNote('The local runtime could not be read.', agents.error));
+  } else {
+    const models = Array.isArray(agents.data && agents.data.localModels) ? agents.data.localModels : [];
+    nodes.push(ollamaCard(models));
+    const list = Array.isArray(agents.data && agents.data.agents) ? agents.data.agents : [];
+    list.forEach((a) => nodes.push(agentCard(a)));
+  }
 
-  const [work, agents, skills, connectors, extensions] = await Promise.all([
-    getJSON('/work'), getJSON('/forge/agents'), getJSON('/skills'), getJSON('/forge/connectors'), getJSON('/forge/extensions'),
-  ]);
-  await integrationsMcp.load();
-
-  render = () => {
-    const nodes = [];
-
-    nodes.push(headingEl('work sources'));
-    if (!work.ok) {
-      nodes.push(lcardNote('Work sources could not be read.', work.error));
+  nodes.push(headingEl('connectors'));
+  nodes.push(viewToggleEl(YOURS_DISCOVER, view.connectors, (v) => { view.connectors = v; render(); }));
+  if (view.connectors === 'discover') {
+    nodes.push(noteEl('What each bundled connector is and how it is switched on. Zeno holds no third-party accounts '
+      + 'and has no external connector catalog to browse — this is the entire set, and each is turned on by a daemon '
+      + 'startup switch (an environment variable read in packages/daemon/src/main.ts), not by an "Add" in this UI. '
+      + 'Even switched on, every operation is still a governed call.'));
+    if (!connectors.ok) {
+      nodes.push(lcardNote('Connectors could not be read.', connectors.error));
     } else {
-      const sources = Array.isArray(work.data && work.data.sources) ? work.data.sources : [];
-      if (!sources.length) nodes.push(lcardNote('No work source is configured.', null));
-      sources.forEach((s) => nodes.push(sourceCard(s)));
+      const data = connectors.data || {};
+      const servers = Array.isArray(data.servers) ? data.servers : [];
+      const external = Array.isArray(data.external) ? data.external : [];
+      if (!servers.length && !external.length) nodes.push(lcardNote('No connector is registered.', null));
+      servers.forEach((c) => nodes.push(connectorDiscoverNode('lcard', c)));
+      external.forEach((c) => nodes.push(connectorDiscoverNode('lcard', c)));
     }
-
-    nodes.push(headingEl('agents & local runtime'));
-    if (!agents.ok) {
-      nodes.push(lcardNote('The local runtime could not be read.', agents.error));
-    } else {
-      const models = Array.isArray(agents.data && agents.data.localModels) ? agents.data.localModels : [];
-      nodes.push(ollamaCard(models));
-      const list = Array.isArray(agents.data && agents.data.agents) ? agents.data.agents : [];
-      list.forEach((a) => nodes.push(agentCard(a)));
-    }
-
-    nodes.push(headingEl('connectors'));
+  } else {
     nodes.push(noteEl('Zeno holds no third-party accounts and never simulates a connection. Each entry below is a '
-      + 'bundled bridge Forge may admit into a governed run — not an external account.'));
+      + 'bundled bridge Forge may admit into a governed run — not an external account, and nothing here is '
+      + 'connected unless it says "configured" or "attached".'));
     if (!connectors.ok) {
       nodes.push(lcardNote('Connectors could not be read.', connectors.error));
     } else {
@@ -132,45 +141,39 @@ export async function bindIntegrations() {
       if (external.length) external.forEach((c) => nodes.push(connectorCard(c)));
       else nodes.push(lcardNote('No external connector is registered.', null));
     }
+  }
 
-    nodes.push(headingEl('MCP servers'));
-    integrationsMcp.nodes(hasOwner).forEach((n) => nodes.push(n));
+  nodes.push(headingEl('MCP servers'));
+  integrationsMcp.nodes(hasOwner).forEach((n) => nodes.push(n));
 
-    nodes.push(headingEl('extensions'));
-    if (!extensions.ok) {
-      nodes.push(lcardNote('Extensions could not be read.', extensions.error));
-    } else {
-      const data = extensions.data || {};
-      nodes.push(noteEl('This is Zeno’s own local capability catalog — not the VS Code Marketplace and not an '
-        + 'installable-extension host. Rows here are informational; there is no install route.'));
-      const builtins = Array.isArray(data.builtins) ? data.builtins : [];
-      builtins.forEach((b) => nodes.push(builtinCard(b)));
-      const snippets = Array.isArray(data.snippets) ? data.snippets : [];
-      snippets.forEach((sn) => nodes.push(snippetCard(sn)));
-      const sources = Array.isArray(data.skillSources) ? data.skillSources : [];
-      if (sources.length) {
-        nodes.push(noteEl('Skill sources scanned for provenance (see Skills below for what this repository can '
-          + 'actually select):'));
-        sources.forEach((s) => nodes.push(noteEl(skillSourceLine(s))));
-      }
-    }
+  fill(container, ...nodes);
+}
 
-    nodes.push(headingEl('skills'));
-    nodes.push(noteEl('A skill is catalogued read-only and never loaded ambiently; it acts only after it is '
-      + 'installed into a repository and selected in Forge, and it grants no tool permission on its own.'));
-    if (!skills.ok) {
-      nodes.push(lcardNote('Installed skills could not be read.', skills.error));
-    } else {
-      const installed = Array.isArray(skills.data && skills.data.skills) ? skills.data.skills : [];
-      if (!installed.length) nodes.push(lcardNote('No repository skills are installed.', null));
-      installed.slice(0, 10).forEach((sk) => nodes.push(skillCard(sk)));
-      if (installed.length > 10) nodes.push(noteEl('+ ' + (installed.length - 10) + ' more not shown.'));
-      const failed = Array.isArray(skills.data && skills.data.failed) ? skills.data.failed : [];
-      if (failed.length) nodes.push(noteEl(failed.length + ' skill file(s) could not be loaded.'));
-    }
+integrationsMcp.setRerender(render);
 
-    fill(container, ...nodes);
-  };
+export async function bindIntegrations() {
+  const screen = screenEl('integrations');
+  if (!screen) return;
+  container = screen.querySelector('.live-cards');
+  if (!container) return;
+  hasOwner = !!token();
 
+  // Only a first bind shows "Reading…"; a re-bind keeps the last read on
+  // screen until the new one has actually arrived.
+  if (!last) fill(container, lcardOuter('Reading integrations…', '', null));
+  else render();
+
+  // The header's one action is the one real add on this screen.
+  const addBtn = screen.querySelector('[data-integrations-add-mcp]');
+  if (addBtn && !addBtn.dataset.bound) {
+    addBtn.dataset.bound = '1';
+    if (!hasOwner) disableBtn(addBtn, 'This window has no owner token, so it cannot add an MCP server.');
+    else addBtn.addEventListener('click', () => integrationsMcp.openForm());
+  }
+
+  const [work, agents, connectors] = await Promise.all([
+    getJSON('/work'), getJSON('/forge/agents'), getJSON('/forge/connectors'), integrationsMcp.load(),
+  ]);
+  last = { work, agents, connectors };
   render();
 }

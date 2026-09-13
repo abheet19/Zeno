@@ -1,37 +1,48 @@
 /**
- * bind/lists/customize.js — CUSTOMIZE screen: Skills / MCP servers /
- * Connectors / Extensions.
+ * bind/lists/customize.js — CUSTOMIZE screen: what shapes a Forge run in the
+ * selected repository. Rules and Skills, plus the informational local
+ * extensions catalog. Nothing that reaches OUT of the machine lives here —
+ * work sources, connectors, MCP servers and the model runtime are
+ * Integrations' job (bind/lists/integrations.js), so the two screens no
+ * longer draw the same catalog twice.
  *
  * Draws a plain `.card > .row-list[data-mount="customize-list"]`. Every row
- * here is real, sourced the same way as Integrations (see the MCP manager
- * in bind/lists/mcp.js and the connectorRow/builtinRow/snippetRow builders
- * below, which reuse bind/lists/shared.js's connectorFacts/builtinFacts/
- * snippetFacts so the two screens can never disagree on a field's meaning):
- * installed skills (GET /skills), MCP server records (GET/POST/DELETE
- * /forge/mcp/servers, add and remove owner-only), connectors (GET
- * /forge/connectors — Zeno's own bundled bridges, not a third-party-account
- * catalog) and extensions (GET /forge/extensions). The top-level
- * `public/customize.js` this screen used to describe is not loaded by
- * bind.js any more; its invented Google Drive/Slack/Notion connector list
- * and Anthropic-plugin catalog do not appear here because nothing in this
- * daemon reports them.
+ * is real:
+ *   rules       GET /skills's `rules` (the files routes/forge-context.ts
+ *               actually found) under "Yours"; GET /capabilities/conventions
+ *               (the one list it scans) under "Discover". "+ Add" and "Edit"
+ *               open the governed rule form in bind/lists/authoring.js, which
+ *               POSTs /capabilities/rules — a HELD file-write proposal the
+ *               owner approves in Approvals. Never a direct write.
+ *   skills      GET /skills under "Yours" (a suspicious screening verdict
+ *               shows "review findings", as it always has); GET
+ *               /forge/extensions' global catalog under "Discover". "+ Add
+ *               skill" opens the governed skill form (POST
+ *               /capabilities/skills → .agents/skills/<id>/SKILL.md, held).
+ *   extensions  GET /forge/extensions — built-ins, skill sources, editor
+ *               snippets. Informational; there is no install route and the
+ *               rows say so.
+ *
+ * The rule and skill managers keep module-level state so an open form and a
+ * "proposed — waiting on you" status survive bind/live.js re-running this
+ * binder on each state/receipt event — which is also how an approved file
+ * shows up under "Yours": the binder re-reads GET /skills.
  */
 
 import { getJSON, fill, token, screenEl } from '../../bind.js';
 import {
-  headingEl, noteEl, emptyEl, loadingEl, unreadableEl, lrowEl, pillEl,
-  connectorFacts, builtinFacts, snippetFacts, skillSourceLine,
+  headingEl, noteEl, emptyEl, loadingEl, unreadableEl, lrowEl, pillEl, viewToggleEl, disableBtn,
+  builtinFacts, snippetFacts, skillSourceLine,
 } from './shared.js';
-import { createMcpManager } from './mcp.js';
+import { ruleConventionMatches, skillDiscoverNode, ruleDiscoverNode, ruleNode } from './discover.js';
+import { createRuleAuthor, createSkillAuthor } from './authoring.js';
+
+const YOURS_DISCOVER = [{ value: 'yours', label: 'Yours' }, { value: 'discover', label: 'Discover' }];
 
 function skillRow(sk) {
   const meta = 'id ' + (sk.id || '?') + ' · ' + (sk.bytes || 0) + ' bytes';
   const susp = sk.verdict === 'suspicious';
   return lrowEl('SKL', sk.name || sk.id || 'skill', meta, pillEl(susp ? 'review findings' : 'screened', susp ? 'am' : 'gr'));
-}
-function connectorRow(c) {
-  const f = connectorFacts(c);
-  return lrowEl('CON', f.name, f.permissions ? f.meta + ' — ' + f.permissions : f.meta, pillEl(f.pillText, f.pillCls));
 }
 function builtinRow(b) {
   const f = builtinFacts(b);
@@ -42,7 +53,10 @@ function snippetRow(sn) {
   return lrowEl('SNP', f.name, f.meta, pillEl(f.pillText, f.pillCls));
 }
 
-const customizeMcp = createMcpManager('lrow');
+const rules = createRuleAuthor('lrow');
+const skillsAuthor = createSkillAuthor('lrow');
+// The Yours/Discover choice per section survives a live re-bind too.
+const view = { rules: 'yours', skills: 'yours' };
 
 export async function bindCustomize() {
   const screen = screenEl('customize');
@@ -52,49 +66,85 @@ export async function bindCustomize() {
 
   const hasOwner = !!token();
   let skillsRes = null;
-  let connectorsRes = null;
   let extensionsRes = null;
+
+  // The screen's own header buttons open the same two forms the sections do.
+  const addRuleBtn = screen.querySelector('[data-customize-add-rule]');
+  const addSkillBtn = screen.querySelector('[data-customize-add-skill]');
+  if (addRuleBtn && !addRuleBtn.dataset.bound) {
+    addRuleBtn.dataset.bound = '1';
+    if (!hasOwner) disableBtn(addRuleBtn, 'This window has no owner token, so it cannot propose a file write.');
+    else addRuleBtn.addEventListener('click', () => { view.rules = 'yours'; rules.openFor({}); });
+  }
+  if (addSkillBtn && !addSkillBtn.dataset.bound) {
+    addSkillBtn.dataset.bound = '1';
+    if (!hasOwner) disableBtn(addSkillBtn, 'This window has no owner token, so it cannot propose a file write.');
+    else addSkillBtn.addEventListener('click', () => { view.skills = 'yours'; skillsAuthor.open(); });
+  }
 
   function render() {
     const nodes = [];
+    const rulesList = (skillsRes && skillsRes.ok && skillsRes.data && Array.isArray(skillsRes.data.rules)) ? skillsRes.data.rules : [];
+    const onEditRule = (r) => { view.rules = 'yours'; rules.openFor({ path: r.path, text: r.body }); };
 
-    nodes.push(headingEl('MCP servers'));
-    customizeMcp.nodes(hasOwner).forEach((n) => nodes.push(n));
-
-    nodes.push(headingEl('installed skills'));
-    nodes.push(noteEl('Skills are catalogued read-only and never loaded ambiently; a skill acts only after it '
-      + 'is installed into a repository and selected in Forge, and it grants no tool permission on its own.'));
-    if (!skillsRes) {
-      nodes.push(loadingEl('Reading installed skills…'));
-    } else if (!skillsRes.ok) {
-      nodes.push(unreadableEl('Installed skills', skillsRes.error));
+    nodes.push(headingEl('rules'));
+    nodes.push(viewToggleEl(YOURS_DISCOVER, view.rules, (v) => { view.rules = v; render(); }));
+    if (view.rules === 'discover') {
+      nodes.push(noteEl('The fixed set of rule-file conventions Forge scans in the selected repository — read from the '
+        + 'daemon (routes/forge-context.ts), so this list and the run-time scan cannot disagree. "+ Add" opens a governed '
+        + 'proposal: the file is written only after you approve it in Approvals.'));
+      const convs = rules.conventions();
+      if (!convs.length) nodes.push(unreadableEl('The rule conventions', 'GET /capabilities/conventions gave nothing back.'));
+      convs.forEach((conv) => nodes.push(ruleDiscoverNode('lrow', conv, ruleConventionMatches(conv, rulesList), {
+        hasOwner,
+        onAdd: (c) => { view.rules = 'yours'; rules.openFor({ convention: c.path }); },
+        onEdit: (c) => { const r = rulesList.find((x) => x && x.path === c.path); if (r) onEditRule(r); },
+      })));
     } else {
-      const installed = Array.isArray(skillsRes.data && skillsRes.data.skills) ? skillsRes.data.skills : [];
-      const failed = Array.isArray(skillsRes.data && skillsRes.data.failed) ? skillsRes.data.failed : [];
-      if (!installed.length) {
-        nodes.push(emptyEl('No repository skills are installed.', 'Add .agents/skills/<id>/SKILL.md to the selected repository, then reload Forge.'));
-      } else {
-        installed.forEach((sk) => nodes.push(skillRow(sk)));
-      }
-      if (failed.length) nodes.push(noteEl(failed.length + ' skill file(s) could not be loaded.'));
+      nodes.push(noteEl('Repository rule files Forge actually found and folds into a run’s prompt as repository '
+        + 'constraints — never executed on their own. Adding or editing one is a governed file write you approve.'));
+      nodes.push(rules.toggleNode(hasOwner));
+      rules.nodes(hasOwner).forEach((n) => nodes.push(n));
+      if (!skillsRes) nodes.push(loadingEl('Reading rules…'));
+      else if (!skillsRes.ok) nodes.push(unreadableEl('Rules', skillsRes.error));
+      else if (!rulesList.length) nodes.push(emptyEl('No rule files were found in this repository.', 'Add one above, or pick a convention under "Discover".'));
+      else rulesList.forEach((r) => nodes.push(ruleNode('lrow', r, { hasOwner, onEdit: onEditRule })));
     }
 
-    nodes.push(headingEl('connectors'));
-    nodes.push(noteEl('Zeno holds no third-party accounts and never simulates a connection. Each row below is a '
-      + 'bundled bridge Forge may admit into a governed run — not an external account, and nothing here is '
-      + 'actually connected unless it says "configured" or "attached".'));
-    if (!connectorsRes) {
-      nodes.push(loadingEl('Reading connectors…'));
-    } else if (!connectorsRes.ok) {
-      nodes.push(unreadableEl('Connectors', connectorsRes.error));
+    nodes.push(headingEl('skills'));
+    nodes.push(viewToggleEl(YOURS_DISCOVER, view.skills, (v) => { view.skills = v; render(); }));
+    if (view.skills === 'discover') {
+      nodes.push(noteEl('Every Agent Skill Zeno can see anywhere on this machine — this repository and every '
+        + 'known global source — with its provenance and whether it is installed in the selected repository. The '
+        + 'catalog carries names and descriptions, not skill bodies, so nothing here can be added by click; write one '
+        + 'under "Yours" or copy a folder into .agents/skills.'));
+      if (!extensionsRes) {
+        nodes.push(loadingEl('Reading the skill catalog…'));
+      } else if (!extensionsRes.ok) {
+        nodes.push(unreadableEl('The skill catalog', extensionsRes.error));
+      } else {
+        const entries = Array.isArray(extensionsRes.data && extensionsRes.data.skills) ? extensionsRes.data.skills : [];
+        if (!entries.length) nodes.push(emptyEl('No skill sources were found.', ''));
+        entries.slice(0, 20).forEach((e) => nodes.push(skillDiscoverNode('lrow', e)));
+        if (entries.length > 20) nodes.push(noteEl('+ ' + (entries.length - 20) + ' more not shown.'));
+      }
     } else {
-      const data = connectorsRes.data || {};
-      const servers = Array.isArray(data.servers) ? data.servers : [];
-      if (!servers.length) nodes.push(emptyEl('No connector is registered.', ''));
-      else servers.forEach((c) => nodes.push(connectorRow(c)));
-      const external = Array.isArray(data.external) ? data.external : [];
-      if (external.length) external.forEach((c) => nodes.push(connectorRow(c)));
-      else nodes.push(emptyEl('No external connector is registered.', 'This daemon has no catalog of third-party services (Google Drive, Slack, etc.) to add from here.'));
+      nodes.push(noteEl('Skills are catalogued read-only and never loaded ambiently; a skill acts only after it '
+        + 'is installed into the repository and selected in Forge, and it grants no tool permission on its own. '
+        + 'Adding one is a governed file write you approve.'));
+      nodes.push(skillsAuthor.toggleNode(hasOwner));
+      skillsAuthor.nodes(hasOwner).forEach((n) => nodes.push(n));
+      if (!skillsRes) {
+        nodes.push(loadingEl('Reading installed skills…'));
+      } else if (!skillsRes.ok) {
+        nodes.push(unreadableEl('Installed skills', skillsRes.error));
+      } else {
+        const installed = Array.isArray(skillsRes.data && skillsRes.data.skills) ? skillsRes.data.skills : [];
+        const failed = Array.isArray(skillsRes.data && skillsRes.data.failed) ? skillsRes.data.failed : [];
+        if (!installed.length) nodes.push(emptyEl('No repository skills are installed.', 'Add one above; it lands in .agents/skills/<id>/SKILL.md once you approve it.'));
+        else installed.forEach((sk) => nodes.push(skillRow(sk)));
+        if (failed.length) nodes.push(noteEl(failed.length + ' skill file(s) could not be loaded.'));
+      }
     }
 
     nodes.push(headingEl('extensions'));
@@ -117,12 +167,12 @@ export async function bindCustomize() {
     fill(listEl, ...nodes);
   }
 
-  customizeMcp.setRerender(render);
+  rules.setRerender(render);
+  skillsAuthor.setRerender(render);
   render();
-  const [skills, connectors, extensions] = await Promise.all([
-    getJSON('/skills'), getJSON('/forge/connectors'), getJSON('/forge/extensions'),
+  const [skills, extensions] = await Promise.all([
+    getJSON('/skills'), getJSON('/forge/extensions'), rules.load(), skillsAuthor.load(),
   ]);
-  skillsRes = skills; connectorsRes = connectors; extensionsRes = extensions;
-  await customizeMcp.load();
+  skillsRes = skills; extensionsRes = extensions;
   render();
 }
