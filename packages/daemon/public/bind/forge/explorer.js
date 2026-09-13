@@ -1,137 +1,48 @@
 /**
- * bind/forge/explorer.js — EXPLORER + STATUS BAR + TIMELINE + QUICK OPEN +
- * SEARCH + SCM panel.
+ * bind/forge/explorer.js — EXPLORER tree + STATUS BAR, and `loadStatus`.
  *
  * Everything here is read from GET /forge/status (git branch/HEAD/changed
- * files/log) plus GET /forge/search (git grep). This module owns `loadStatus`
- * — the one re-read every other Forge module triggers after an action that
- * could change the sandbox (a save, a terminal command, an agent run) — so
- * it registers `S.loadStatus`, `S.renderFileStatusBits`, `S.proposeNewFile`,
- * `S.renderQuickIfOpen` and `S.setExitCode` for the rest of Forge to call.
+ * files/tracked list) and GET /forge/project (WHICH repository that is —
+ * the owner's chosen folder, or the scratch repository when none is chosen).
+ * This module owns `loadStatus` — the one re-read every other Forge module
+ * triggers after an action that could change the repository (a save, a
+ * terminal command, an agent run, an approval landing in Command) — and
+ * registers `S.loadStatus`, `S.renderFileStatusBits`, `S.setExitCode` and
+ * `S.project` for the rest of Forge to use.
+ *
+ * The rest of the sidebar lives beside this file, on the same `S` registry:
+ * explorer-project.js (the working-folder header, its menu, and the governed
+ * New File / New Folder actions), explorer-search.js (Quick Open, the Search
+ * view, the SCM panel) and explorer-outline.js (OUTLINE and TIMELINE).
+ * forge.js still calls only `setupExplorer`.
  */
 import {
   $, $$, el, fill, getJSON,
 } from '../../bind.js';
 import {
-  add, disableCtl, fileMeta, languageLabel, postJSON, safeAsk, setTrailingText, statusWord,
+  add, fileMeta, languageLabel, setTrailingText, statusWord,
 } from './dom.js';
+import { setupExplorerProject } from './explorer-project.js';
+import { setupExplorerSearch } from './explorer-search.js';
+import { setupExplorerOutline } from './explorer-outline.js';
 
 export function setupExplorer(S) {
   const ide = S.ide;
 
-  /* ============================================================ *
-   * EXPLORER + STATUS BAR + TIMELINE                              *
-   * ============================================================ */
-
   // Activity-rail badges: the SCM one is real (git's own changed-file count,
-  // filled in once /forge/status answers, below); the Zeno one claims a
-  // pending-approval count this binder has no way to verify, so it is
-  // hidden rather than left standing as an unread number.
+  // filled in once /forge/status answers, below); the Zeno one is written by
+  // bind.js's refreshChrome() from the real pending count, so it is only
+  // hidden here until that read lands — never left standing as a fixture.
   const scmBadge = $('.vsact [data-vsview="scm"] .vsbadge');
   if (scmBadge) setTrailingText(scmBadge, '—');
   const zenoBadge = $('.vsact [data-vsview="zeno"] .vsbadge');
   if (zenoBadge) zenoBadge.hidden = true;
 
   const explorerView = $('.vsside .vsview[data-vsview="explorer"]');
-  const explorerSections = explorerView ? $$('.vssect', explorerView) : [];
-  const sandboxHeader = explorerSections.find((s) => /SANDBOX/.test(s.textContent || ''));
-  const outlineHeader = explorerSections.find((s) => /OUTLINE/.test(s.textContent || ''));
-  const timelineHeader = explorerSections.find((s) => /TIMELINE/.test(s.textContent || ''));
 
-  // Real refresh: the artifact's Refresh icon has no listener of its own
-  // (ui.js's generic section-header toggle explicitly ignores clicks on
-  // `.fico`), so wiring it here adds behaviour rather than replacing any.
-  if (sandboxHeader) {
-    const refreshBtn = sandboxHeader.querySelector('button[title="Refresh"]');
-    if (refreshBtn) refreshBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      void loadStatus();
-      if (S.currentFile) void S.openFile(S.currentFile, true);
-    });
-  }
-
-  // Explorer header: New File / New Folder / Collapse — none of these had a
-  // listener anywhere (ui.js's own section-header toggle ignores `.fico`
-  // clicks on purpose, same as Refresh above). "New File" proposes a
-  // genuinely new, empty file through the SAME governed gate the editor's
-  // own save uses (POST /previews) — there is no path from this button to
-  // disk that skips it. "New Folder" has nothing honest to do: git does not
-  // track empty directories and there is no daemon route that creates one,
-  // so it is disabled rather than left to silently do nothing. "Collapse" is
-  // real, local UI state — it adds every directory currently in the tree to
-  // `collapsedDirs` and repaints, exactly like each directory's own toggle.
-  async function proposeNewFile(relPath) {
-    const r = await postJSON('/previews', {
-      relPath, contents: '', summary: `Forge: create ${relPath}`, requestedBy: 'forge-editor',
-    });
-    if (!r.ok) { safeAsk(() => window.alert(`"${relPath}" could not be proposed: ${r.error || 'unknown error'}`)); return; }
-    const preview = r.data && r.data.preview;
-    if (!preview) { safeAsk(() => window.alert(`"${relPath}" was not proposed — the daemon answered without a preview.`)); return; }
-    void loadStatus();
-    if (r.data.receipt) void S.openFile(relPath, true);
-    else safeAsk(() => window.alert(`"${relPath}" is held for approval (tier ${preview.tier || '?'}) — open Command → Approvals to decide.`));
-  }
-  if (sandboxHeader) {
-    const newFileBtn = sandboxHeader.querySelector('button[title="New File"]');
-    if (newFileBtn) {
-      newFileBtn.disabled = !S.OWNER;
-      newFileBtn.title = S.OWNER
-        ? 'Propose a new, empty file — governed, same as any other write.'
-        : 'This window has no owner token, so it cannot propose a new file.';
-      newFileBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!S.OWNER) return;
-        const relPath = safeAsk(() => window.prompt('Path for the new file (relative to the sandbox root):'), null);
-        if (relPath && relPath.trim()) void proposeNewFile(relPath.trim().replace(/^\/+/, ''));
-      });
-    }
-    const newFolderBtn = sandboxHeader.querySelector('button[title="New Folder"]');
-    disableCtl(newFolderBtn, 'Git does not track empty folders, and there is no folder-creation route — create a file inside one instead (New File).');
-    const collapseBtn = sandboxHeader.querySelector('button[title="Collapse"]');
-    if (collapseBtn) collapseBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (!S.statusData || !S.statusData.repo) return;
-      const changed = new Map();
-      for (const c of S.statusData.changed || []) changed.set(c.path, c.status);
-      const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
-      const paths = [...new Set([...tracked, ...changed.keys()])];
-      const collectDirs = (node, prefix) => {
-        for (const [name, child] of node.dirs) {
-          const path = prefix ? `${prefix}/${name}` : name;
-          S.collapsedDirs.add(path);
-          collectDirs(child, path);
-        }
-      };
-      collectDirs(buildFileTree(paths), '');
-      renderExplorer();
-    });
-  }
-
-  // Outline: real forge.js says plainly there is no symbol index. Same here.
-  if (outlineHeader && !outlineHeader.dataset.forgeFilled) {
-    outlineHeader.dataset.forgeFilled = '1';
-    const note = el('div', 'vsnote', 'Forge does not index symbols, so there is no outline for the open file.');
-    outlineHeader.insertAdjacentElement('afterend', note);
-  }
-
-  let timelineBody = null;
-  if (timelineHeader && !timelineHeader.dataset.forgeFilled) {
-    timelineHeader.dataset.forgeFilled = '1';
-    timelineBody = el('div');
-    timelineHeader.insertAdjacentElement('afterend', timelineBody);
-  }
-
-  function renderTimeline() {
-    if (!timelineBody) return;
-    if (!S.statusData || !S.statusData.repo) { fill(timelineBody, el('div', 'vsnote', 'No repository — no commit history to show.')); return; }
-    const log = Array.isArray(S.statusData.log) ? S.statusData.log : [];
-    if (!log.length) { fill(timelineBody, el('div', 'vsnote', 'git reports no commits in the sandbox yet.')); return; }
-    fill(timelineBody, ...log.map((c) => {
-      const row = el('div', 'vsfile');
-      add(row, el('span', null, c.summary || '(no message)'), el('span', 'vsmod', c.sha || ''));
-      return row;
-    }));
-  }
+  /* ============================================================ *
+   * THE TREE — git's own file list, never an invented one          *
+   * ============================================================ */
 
   function buildFileTree(paths) {
     const root = { dirs: new Map(), files: [] };
@@ -146,6 +57,30 @@ export function setupExplorer(S) {
     }
     return root;
   }
+
+  /** Every path the tree draws: tracked by git plus whatever `status` sees. */
+  function treePaths() {
+    if (!S.statusData || !S.statusData.repo) return [];
+    const changed = (S.statusData.changed || []).map((c) => c.path);
+    const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
+    return [...new Set([...tracked, ...changed])].sort();
+  }
+  S.treePaths = treePaths;
+
+  /** Every directory in the tree — "Collapse All" adds each to `collapsedDirs`. */
+  function treeDirs() {
+    const out = [];
+    const walk = (node, prefix) => {
+      for (const [name, child] of node.dirs) {
+        const path = prefix ? `${prefix}/${name}` : name;
+        out.push(path);
+        walk(child, path);
+      }
+    };
+    walk(buildFileTree(treePaths()), '');
+    return out;
+  }
+  S.treeDirs = treeDirs;
 
   function subtreeHasChange(node, changedSet) {
     for (const f of node.files) if (changedSet.has(f.path)) return true;
@@ -198,34 +133,32 @@ export function setupExplorer(S) {
     const tree = explorerView ? $('.vstree', explorerView) : null;
     if (!tree) return;
     S.fileRowByPath.clear();
-    if (S.statusErr) { fill(tree, el('div', 'fempty', `The tree could not be read: ${S.statusErr}`)); renderTimeline(); return; }
-    if (!S.statusData) { fill(tree, el('div', 'fempty', 'Reading the sandbox from the daemon…')); renderTimeline(); return; }
+    if (S.statusErr) { fill(tree, el('div', 'fempty', `The tree could not be read: ${S.statusErr}`)); return; }
+    if (!S.statusData) { fill(tree, el('div', 'fempty', 'Reading the repository from the daemon…')); return; }
     if (!S.statusData.repo) {
-      fill(tree, el('div', 'fempty', S.statusData.note || 'The sandbox is not a git repository, so there is no file list here.'));
-      renderTimeline();
+      fill(tree, el('div', 'fempty', S.statusData.note || 'This folder is not a git repository, so there is no file list here.'));
       return;
     }
     const changed = new Map();
     for (const c of S.statusData.changed || []) changed.set(c.path, c.status);
-    const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
-    const paths = [...new Set([...tracked, ...changed.keys()])].sort();
+    const paths = treePaths();
     if (!paths.length) {
-      fill(tree, el('div', 'fempty', 'The sandbox is empty — git lists no tracked or changed files.'));
-      renderTimeline();
+      fill(tree, el('div', 'fempty', 'This repository is empty — git lists no tracked or changed files. Use New File to propose one.'));
       return;
     }
-    const root = buildFileTree(paths);
     const wrap = el('div');
-    renderDirNode(root, '', wrap, changed);
-    const nodes = [...wrap.childNodes];
-    fill(tree, ...nodes);
+    renderDirNode(buildFileTree(paths), '', wrap, changed);
+    fill(tree, ...wrap.childNodes);
     if (S.statusData.trackedCapped) {
+      const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
       tree.appendChild(el('div', 'vsnote', `Showing the first ${tracked.length} of ${S.statusData.trackedTotal} tracked files.`));
     }
-    renderTimeline();
   }
+  S.renderExplorer = renderExplorer;
 
-  // ---- status bar ----
+  /* ============================================================ *
+   * STATUS BAR                                                     *
+   * ============================================================ */
   const statBar = $('.vsstat');
   const statSpans = statBar ? $$('.vsst', statBar) : [];
   const statEls = {
@@ -241,11 +174,15 @@ export function setupExplorer(S) {
     lf: statSpans[10] || null,
     lang: $('.vsst[data-lang]', statBar || document) || null,
     gov: $('.vsst.gov', statBar || document) || null,
+    bell: statSpans.find((s) => /Notifications/.test(s.title || '')) || null,
   };
   // Neutralise the artifact's fabricated "chain ok" claim the instant this
   // binder runs — renderGov() below fills in the real state once /state
   // answers, but nothing manufactured may stand even for one frame.
   if (statEls.gov) setTrailingText(statEls.gov, ' governed — reading chain…');
+  // The bell has no notification centre behind it in this build. A control
+  // that opens nothing is a dead control, so it goes rather than stands.
+  if (statEls.bell) statEls.bell.hidden = true;
   // Real chain state for the "governed" status item — GET /state (the same
   // ledger bind/receipts.js reads): { receipts[], chain:{ok,firstBreakAt} }.
   // Never say "chain ok" without that datum in hand (hard rule); an unread or
@@ -274,11 +211,19 @@ export function setupExplorer(S) {
   if (statEls.spaces) statEls.spaces.hidden = true; // no real indent detection
   if (statEls.exitcode) setTrailingText(statEls.exitcode, 'exit —');
   S.setExitCode = (text) => { if (statEls.exitcode) setTrailingText(statEls.exitcode, text); };
+  // The repository chip at the far left is the same control as the Explorer
+  // header: click it to change the working folder.
+  if (statEls.rem) {
+    statEls.rem.style.cursor = 'pointer';
+    statEls.rem.addEventListener('click', () => { if (S.openProjectMenu) S.openProjectMenu(statEls.rem); });
+  }
 
   function renderStatusBar() {
     if (!S.statusData) return;
+    const p = S.project;
+    const name = p && p.name ? p.name : String(S.statusData.root || 'repository').split(/[\\/]/).filter(Boolean).pop();
     if (!S.statusData.repo) {
-      if (statEls.rem) setTrailingText(statEls.rem, 'sandbox — no repo');
+      if (statEls.rem) setTrailingText(statEls.rem, `${name} — no repo`);
       if (statEls.checkout) setTrailingText(statEls.checkout, '(none)');
       if (statEls.sync) setTrailingText(statEls.sync, '⟳ —');
       if (statEls.lastCommit) setTrailingText(statEls.lastCommit, 'no commits yet');
@@ -286,13 +231,13 @@ export function setupExplorer(S) {
       return;
     }
     if (statEls.rem) {
-      statEls.rem.title = `${S.statusData.root || 'sandbox'} · isolated sandbox worktree`;
-      setTrailingText(statEls.rem, 'sandbox');
+      statEls.rem.title = `${S.statusData.root}${p && p.scratch ? ` · ${p.note}` : ''} — click to change the working folder`;
+      setTrailingText(statEls.rem, p && p.scratch ? `${name} · scratch` : name);
     }
     if (statEls.checkout) setTrailingText(statEls.checkout, S.statusData.branch || '(unknown)');
     const n = Array.isArray(S.statusData.changed) ? S.statusData.changed.length : 0;
     if (statEls.sync) {
-      statEls.sync.title = `${n} uncommitted change${n === 1 ? '' : 's'} in the sandbox working tree`;
+      statEls.sync.title = `${n} uncommitted change${n === 1 ? '' : 's'} in the working tree`;
       setTrailingText(statEls.sync, `⟳ ${n}`);
     }
     if (scmBadge) setTrailingText(scmBadge, String(n));
@@ -310,186 +255,50 @@ export function setupExplorer(S) {
   }
   S.renderFileStatusBits = renderFileStatusBits;
 
+  /* ============================================================ *
+   * THE ONE RE-READ                                                *
+   * ============================================================ */
+  const project = setupExplorerProject(S);
+  const search = setupExplorerSearch(S);
+  const outline = setupExplorerOutline(S);
+
   async function loadStatus() {
-    const r = await getJSON('/forge/status');
+    const [r, p] = await Promise.all([getJSON('/forge/status'), getJSON('/forge/project')]);
     if (!r.ok) { S.statusData = null; S.statusErr = r.error || 'could not be read'; }
     else { S.statusData = r.data; S.statusErr = null; }
+    S.project = p.ok && p.data && p.data.project ? p.data.project : null;
+    project.renderProjectHeader();
     renderExplorer();
     renderStatusBar();
-    renderScm();
+    search.renderScm();
     if (S.statusData && S.statusData.repo && S.currentFile === null) {
-      const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
-      const first = [...tracked].sort()[0];
+      const first = treePaths()[0];
       if (first) void S.openFile(first);
-      else S.renderEditorEmpty('The sandbox has no tracked files.');
+      else S.renderEditorEmpty('This repository has no files yet — use New File in the Explorer to propose one.');
     } else if (S.statusData && !S.statusData.repo) {
-      S.renderEditorEmpty(S.statusData.note || 'The sandbox is not a git repository.');
+      S.renderEditorEmpty(S.statusData.note || 'This folder is not a git repository.');
     }
-    renderQuickIfOpen();
+    search.renderQuickIfOpen();
+    outline.renderTimeline();
   }
   S.loadStatus = loadStatus;
-  S.proposeNewFile = proposeNewFile;
 
-  /* ============================================================ *
-   * QUICK OPEN (Ctrl+P) — real file list                          *
-   * ============================================================ *
-   * ui.js keeps owning the palette's OPEN/CLOSE mechanics (Ctrl+P,
-   * Ctrl+Shift+P, the toolbar button, Escape, click-outside) — those
-   * are pure navigation, left exactly as wired. What ui.js's own
-   * renderQuick() draws inside it is fabricated (a hardcoded FILES
-   * list plus a mock command palette), so a second 'input' listener
-   * on the SAME #quick-in node runs after ui.js's (registered later,
-   * so it fires second) and overwrites #quick-list with the real
-   * tracked/changed file list. A MutationObserver on #quick's
-   * `hidden` attribute repaints it the instant the palette opens too
-   * (from any trigger), before the user has typed anything — so the
-   * mock FILES list is never the thing on screen, even briefly.
-   * The '>' commands / ':' line / '@' symbol modes have no real
-   * backend here (no command catalog, no symbol index) and say so
-   * rather than keep ui.js's fake rows, which called mock openFile/
-   * runTerm. */
-  const quickEl = $('#quick', ide);
-  const quickInEl = $('#quick-in', ide);
-  const quickListEl = $('#quick-list', ide);
-  function renderQuickReal() {
-    if (!quickInEl || !quickListEl) return;
-    const v = quickInEl.value;
-    if (v.startsWith('>') || v.startsWith(':') || v.startsWith('@') || v.startsWith('task ')) {
-      fill(quickListEl, el('div', 'mp-empty', 'This palette only searches real files in this build — commands, go-to-line and symbols are not wired to real data.'));
-      return;
-    }
-    if (S.statusErr) { fill(quickListEl, el('div', 'mp-empty', `The file list could not be read: ${S.statusErr}`)); return; }
-    if (!S.statusData) { fill(quickListEl, el('div', 'mp-empty', 'Reading the sandbox…')); return; }
-    if (!S.statusData.repo) { fill(quickListEl, el('div', 'mp-empty', S.statusData.note || 'The sandbox is not a git repository.')); return; }
-    const changed = new Map();
-    for (const c of S.statusData.changed || []) changed.set(c.path, c.status);
-    const tracked = Array.isArray(S.statusData.tracked) ? S.statusData.tracked : [];
-    const paths = [...new Set([...tracked, ...changed.keys()])].sort();
-    const q = v.trim().toLowerCase();
-    const matches = (q ? paths.filter((p) => p.toLowerCase().includes(q)) : paths).slice(0, 200);
-    if (!matches.length) { fill(quickListEl, el('div', 'mp-empty', q ? 'No matching files.' : 'The sandbox has no tracked files.')); return; }
-    const nodes = matches.map((p, i) => {
-      const [cls, txt] = fileMeta(p.split('/').pop());
-      const b = el('button', 'mp-row');
-      b.type = 'button';
-      if (i === 0) b.setAttribute('aria-checked', 'true');
-      const mn = el('span', 'mn');
-      add(mn, document.createTextNode(p.split('/').pop()), el('span', null, p));
-      add(b, el('span', cls, txt), mn);
-      b.addEventListener('click', () => { if (quickEl) quickEl.hidden = true; void S.openFile(p); });
-      return b;
-    });
-    fill(quickListEl, ...nodes);
-  }
-  function renderQuickIfOpen() { if (quickEl && !quickEl.hidden) renderQuickReal(); }
-  S.renderQuickIfOpen = renderQuickIfOpen;
-  if (quickInEl) quickInEl.addEventListener('input', renderQuickReal);
-  if (quickEl) new MutationObserver(renderQuickIfOpen).observe(quickEl, { attributes: true, attributeFilter: ['hidden'] });
+  // LIVE. An approval landing in Command (the New File capsule the owner just
+  // decided), a receipt sealing, the working folder changing: each reaches the
+  // window as a stream nudge that bind/live.js turns into `zeno:state`. The
+  // tree re-reads on it, debounced, so a file the kernel just wrote appears
+  // without anyone pressing Refresh — and the open buffer is re-read too, so
+  // an approved edit shows up in the editor. (editor-view.js's refreshOpenFile
+  // only re-mounts when the bytes on disk actually differ, and editor.js only
+  // ever overwrites a CLEAN buffer — unsaved edits survive the nudge.)
+  let liveTimer = 0;
+  window.addEventListener('zeno:state', () => {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(() => {
+      void loadStatus();
+      if (S.refreshOpenFile) void S.refreshOpenFile();
+    }, 250);
+  });
 
-  /* ============================================================ *
-   * SEARCH view — real git grep via GET /forge/search              *
-   * ============================================================ *
-   * The artifact ships this view with a fabricated result already
-   * showing (query "INGEST_TOKEN", two matches in ingest.ts/
-   * ingest.spec.ts via <mark>) — exactly the standing-mock case the
-   * honesty rule forbids, so it is cleared unconditionally before
-   * anything else runs, real search or not. Match text is set via
-   * textContent, never innerHTML, since it is daemon-derived (repo
-   * content) — the query is not highlighted inline as the mock did.
-   * There is no real "Replace"; the field is disabled and says so. */
-  const searchView = $('.vsview[data-vsview="search"]', ide);
-  if (searchView) {
-    const searchIns = $$('.vsinput', searchView);
-    const queryIn = searchIns[0] || null;
-    const replaceIn = searchIns[1] || null;
-    const resWrap = $('.vsres', searchView);
-    const noteEl = $('.vsnote', searchView);
-    if (queryIn) { queryIn.value = ''; queryIn.placeholder = 'Search (git grep) — Enter to run'; }
-    if (replaceIn) { replaceIn.value = ''; replaceIn.disabled = true; replaceIn.placeholder = 'Replace is not available — Forge only searches, it does not edit in place'; }
-    if (resWrap) fill(resWrap);
-    if (noteEl) noteEl.textContent = 'Type a query and press Enter to search the sandbox with git grep.';
-    let searchSeq = 0;
-    async function runSearch() {
-      const q = queryIn ? queryIn.value.trim() : '';
-      const seq = ++searchSeq;
-      if (!q) {
-        if (resWrap) fill(resWrap);
-        if (noteEl) noteEl.textContent = 'Type a query and press Enter to search the sandbox with git grep.';
-        return;
-      }
-      if (noteEl) noteEl.textContent = `Searching for "${q}"…`;
-      const r = await getJSON(`/forge/search?q=${encodeURIComponent(q)}`);
-      if (seq !== searchSeq) return; // a newer query superseded this one
-      if (!r.ok) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = `Search failed: ${r.error}`; return; }
-      const d = r.data || {};
-      if (d.repo === false) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = d.note || 'The sandbox is not a git repository.'; return; }
-      const matches = Array.isArray(d.matches) ? d.matches : [];
-      if (!matches.length) { if (resWrap) fill(resWrap); if (noteEl) noteEl.textContent = `No results for "${q}".`; return; }
-      const order = [];
-      const byPath = new Map();
-      for (const m of matches) {
-        if (!byPath.has(m.path)) { byPath.set(m.path, []); order.push(m.path); }
-        byPath.get(m.path).push(m);
-      }
-      const nodes = [];
-      for (const path of order) {
-        const rows = byPath.get(path);
-        const name = path.split('/').pop();
-        const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-        const head = el('div', 'vsresf');
-        add(head, el('span', 'chev', '▾'), document.createTextNode(name), el('em', null, dir ? ` ${dir}` : ''), el('span', null, String(rows.length)));
-        nodes.push(head);
-        for (const m of rows) {
-          const row = el('div', 'vsresl', typeof m.text === 'string' ? m.text : '');
-          const line = Number.isInteger(m.line) ? m.line : null;
-          row.title = line ? `${path}:${line}` : path;
-          row.addEventListener('click', () => {
-            void S.openFile(path).then(() => {
-              if (!line) return;
-              S.revealLineInPrimaryGroup(path, line);
-            });
-          });
-          nodes.push(row);
-        }
-      }
-      if (resWrap) fill(resWrap, ...nodes);
-      const files = typeof d.files === 'number' ? d.files : byPath.size;
-      const total = typeof d.total === 'number' ? d.total : matches.length;
-      if (noteEl) noteEl.textContent = `${total} result${total === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${d.truncated ? ' — showing the first matches' : ''}`;
-    }
-    if (queryIn) queryIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } });
-  }
-
-  /* ============================================================ *
-   * SCM panel (real branch/HEAD/changed files; best-effort)        *
-   * ============================================================ */
-  function renderScm() {
-    const scmView = $('.vsside .vsview[data-vsview="scm"] .vspad');
-    if (!scmView) return;
-    if (!S.statusData) { fill(scmView, el('div', 'fempty', 'Reading the repository…')); return; }
-    if (!S.statusData.repo) { fill(scmView, el('div', 'fempty', S.statusData.note || 'The sandbox is not a git repository.')); return; }
-    const changed = S.statusData.changed || [];
-    const nodes = [];
-    const head = el('div', 'vsfile');
-    add(head, el('b', null, S.statusData.branch || '(unknown)'), el('span', null, S.statusData.head ? ` · HEAD ${S.statusData.head}` : ' · no commits yet'));
-    nodes.push(head);
-    const badgeRow = el('div', 'vssect open', null);
-    add(badgeRow, el('span', 'chev', '▾'), document.createTextNode('Changes '), el('span', 'vsbadge s', String(changed.length)));
-    nodes.push(badgeRow);
-    if (!changed.length) {
-      nodes.push(el('div', 'vsnote', 'No uncommitted changes.'));
-    } else {
-      for (const c of changed) {
-        const [cls, txt] = fileMeta(c.path.split('/').pop());
-        const isNew = c.status === '??' || /^A/.test(c.status);
-        const row = el('div', 'vsfile');
-        add(row, el('span', cls, txt), document.createTextNode(c.path), el('span', isNew ? 'vsmod new' : 'vsmod', statusWord(c.status)));
-        nodes.push(row);
-      }
-    }
-    nodes.push(el('div', 'vsnote', 'A commit here previews as vcs.commit and seals a receipt only after you approve it in Command.'));
-    fill(scmView, ...nodes);
-  }
-
-  return { renderExplorer, renderScm, renderGov, loadStatus };
+  return { renderExplorer, renderScm: search.renderScm, renderGov, loadStatus };
 }

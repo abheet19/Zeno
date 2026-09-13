@@ -5,7 +5,7 @@
  * Everything it needs lives in one directory (default `./.zeno`): the receipt
  * ledger, an optional `policy.json`, and the sandbox the executor is jailed to.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +30,7 @@ import { Vault, nodeNoteStore, nodeClock } from '@abheet19/zeno-vault';
 import { Meetings, nodeMeetingStore } from '@abheet19/zeno-counsel';
 import { nodeGitRunner } from '@abheet19/zeno-kernel';
 import { nodeWorld } from './world.js';
+import { resolveStartupProject } from './routes/config.js';
 
 const PORT = Number(process.env['ZENO_PORT'] ?? 7317);
 // Loopback only by default, deliberately: the daemon is not on the network. The
@@ -172,41 +173,13 @@ function main(): void {
   const releaseWorkspace = acquireWorkspace(dir, PORT);
   if (process.exitCode === 1) return; // another Zeno owns this workspace
 
-  const requestedProject = (process.env['ZENO_PROJECT_DIR'] ?? '').trim();
-  let sandbox = join(dir, 'sandbox');
-  if (requestedProject !== '') {
-    const runner = nodeGitRunner();
-    let selected: string;
-    try { selected = realpathSync.native(resolve(requestedProject)); }
-    catch { throw new Error(`The selected Forge project cannot be read: ${requestedProject}`); }
-    const root = runner.run(['rev-parse', '--show-toplevel'], selected);
-    if (root.status !== 0 || root.stdout.trim() === '') {
-      throw new Error(`The selected Forge folder is not inside an existing Git repository: ${selected}`);
-    }
-    let canonicalRoot: string;
-    try { canonicalRoot = realpathSync.native(resolve(root.stdout.trim())); }
-    catch { throw new Error(`Git reported a repository root that cannot be read: ${root.stdout.trim()}`); }
-    if (process.platform === 'win32' ? canonicalRoot.toLowerCase() !== selected.toLowerCase() : canonicalRoot !== selected) {
-      throw new Error(`Select the repository root itself: ${canonicalRoot}`);
-    }
-    sandbox = canonicalRoot;
-  }
-  // forge init: the sandbox is a git repository so Forge can commit through the
-  // gate. Idempotent — a repo that already exists is left alone.
-  mkdirSync(sandbox, { recursive: true });
-  // Init the sandbox as its OWN repo when it has no .git of its own. Checking
-  // rev-parse would find a PARENT repo (the sandbox lives under the project) and
-  // skip init, leaving Forge pointed at the wrong repository — the git executor
-  // would then refuse on its repo-root check anyway, so make it a real own repo.
-  if (requestedProject === '' && !existsSync(join(sandbox, '.git'))) {
-    const g = nodeGitRunner();
-    g.run(['init'], sandbox);
-    g.run(['config', 'user.email', 'owner@zeno.local'], sandbox);
-    g.run(['config', 'user.name', 'Zeno Owner'], sandbox);
-    // A HEAD must exist for `git worktree add` (Forge) to work, so seed an empty
-    // root commit. It carries nothing — the sandbox's real history starts after.
-    g.run(['commit', '--allow-empty', '-m', 'zeno: sandbox initialised'], sandbox);
-  }
+  // Which repository Forge opens: an explicit ZENO_PROJECT_DIR, else the folder
+  // the owner chose last time (<workspace>/project.json — the window's
+  // "Change working folder" writes it), else the scratch repository. One
+  // resolver, shared with the route, so startup and the window agree on what
+  // a valid project is. See routes/config.ts.
+  const project = resolveStartupProject(nodeGitRunner(), dir, process.env);
+  const sandbox = project.root;
   const publicDir = resolvePublicDir();
 
   const fs = nodeSandboxFs();
@@ -360,7 +333,10 @@ function main(): void {
       out('                and this is plain HTTP — use it only on a network you trust. Unset ZENO_LAN to turn it off.');
     }
     out(`     workspace  ${dir}`);
-    out(`     project    ${sandbox}${requestedProject === '' ? ' (Zeno scratch repository)' : ''}`);
+    out(`     project    ${sandbox}${project.source === 'scratch' ? ' (Zeno scratch repository — choose a folder in Forge to work on your own code)' : project.source === 'environment' ? ' (ZENO_PROJECT_DIR)' : ' (saved choice)'}`);
+    // Said out loud rather than silently falling back: the owner chose a folder
+    // and is getting a different one, and they need to know which and why.
+    if (project.savedProblem !== null) out(`                the saved project ${project.savedProblem.path} could not be opened: ${project.savedProblem.problem}`);
     out(`     policy     ${policy === DEFAULT_POLICY ? 'built-in default' : 'policy.json'} · ${policyHash(policy).slice(0, 12)}`);
     out(`     receipts   ${kernel.receipts().length} on record · chain ${kernel.verifyChain().ok ? 'verified' : 'BROKEN'} · signed (Ed25519)`);
     out(

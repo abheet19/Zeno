@@ -19,7 +19,7 @@
  * forge/state.js (OWNER, currentFile, renderFileStatusBits).
  */
 import { $, $$, el, fill, getJSON, setText } from '../../bind.js';
-import { add, bytesLabel, disableCtl, fileMeta } from './dom.js';
+import { add, bytesLabel, fileMeta } from './dom.js';
 import { plainFallbackNodes } from './editor-highlight.js';
 
 export function createEditorView(E, S, deps) {
@@ -29,18 +29,27 @@ export function createEditorView(E, S, deps) {
   // standing as if they were the sandbox's real open files.
   if (tabBar) $$('.vstab', tabBar).forEach((t) => t.remove());
 
-  // "Go Back"/"Go Forward" imply a navigation history across file opens, and
-  // "More Actions" implies a menu — this binder keeps neither concept (Quick
-  // Open and the tabs themselves are the real navigation), and nothing
-  // anywhere wires them. Disabled with an honest reason rather than left
-  // clickable-and-silent.
-  if (tabBar) {
-    const tabBack = tabBar.querySelector('button[title="Go Back"]');
-    const tabFwd = tabBar.querySelector('button[title="Go Forward"]');
-    const tabMore = tabBar.querySelector('button[title="More Actions"]');
-    for (const b of [tabBack, tabFwd]) disableCtl(b, 'Forge does not keep a navigation history across file opens in this build.');
-    disableCtl(tabMore, 'No editor actions beyond what this toolbar already shows.');
+  // A real navigation history for the primary group: every file opened
+  // there, in order. "Go Back"/"Go Forward" (toolbar, title bar, Go menu)
+  // walk it. `moving` keeps a Back from re-recording the file it returns to.
+  const nav = { list: [], idx: -1, moving: false };
+  function recordNav(path) {
+    if (nav.moving || nav.list[nav.idx] === path) return;
+    nav.list.splice(nav.idx + 1);
+    nav.list.push(path);
+    nav.idx = nav.list.length - 1;
   }
+  async function navTo(delta) {
+    const next = nav.idx + delta;
+    if (next < 0 || next >= nav.list.length) return;
+    nav.idx = next;
+    nav.moving = true;
+    try { await openFile(nav.list[next], false, 0); } finally { nav.moving = false; }
+    if (S.paintNav) S.paintNav();
+  }
+  S.navBack = () => navTo(-1);
+  S.navForward = () => navTo(1);
+  S.navState = () => ({ back: nav.idx > 0, forward: nav.idx < nav.list.length - 1 });
 
   function groupIndexOf(g) { return g === E.groups[0] ? 0 : 1; }
 
@@ -175,11 +184,14 @@ export function createEditorView(E, S, deps) {
     if (g.mon) { g.mon.hidden = false; if (g.editor) g.editor.layout(); }
   }
 
+  /** The repository's own name for the breadcrumb and the command-centre label — never a fixed "sandbox". */
+  const repoName = () => (S.project && S.project.name) || (S.statusData && S.statusData.root ? String(S.statusData.root).split(/[\\/]/).filter(Boolean).pop() : 'repository');
+
   function renderBreadcrumb(path) {
     const bc = $('.vscrumbs');
     if (!bc) return;
     const parts = path.split('/');
-    const nodes = [el('span', null, 'sandbox')];
+    const nodes = [el('span', null, repoName())];
     for (let i = 0; i < parts.length - 1; i++) { nodes.push(el('i', null, '›')); nodes.push(el('span', null, parts[i])); }
     nodes.push(el('i', null, '›'));
     const [cls, txt] = fileMeta(parts[parts.length - 1]);
@@ -188,7 +200,7 @@ export function createEditorView(E, S, deps) {
     nameB.id = 'vs-crumb';
     nodes.push(nameB);
     fill(bc, ...nodes);
-    setText('#tb-cmd', `sandbox — ${path}`);
+    setText('#tb-cmd', `${repoName()} — ${path}`);
   }
 
   function renderEditorEmptyIn(g, message) {
@@ -198,12 +210,53 @@ export function createEditorView(E, S, deps) {
     if (g.trunc) g.trunc.hidden = true;
     if (g === E.groups[0]) {
       const bc = $('.vscrumbs');
-      if (bc) fill(bc, el('span', null, 'sandbox'));
-      setText('#tb-cmd', 'sandbox');
+      if (bc) fill(bc, el('span', null, repoName()));
+      setText('#tb-cmd', repoName());
       S.renderFileStatusBits('', null);
+      if (S.renderOutline) S.renderOutline();
+      if (S.paintNav) S.paintNav();
     }
     deps.paintSaveBar();
   }
+
+  /** Close every tab in every group — the working folder changed, so none of them exists any more. */
+  function closeAllTabs() {
+    for (const g of E.groups) {
+      if (!g) continue;
+      g.tabs = [];
+      g.file = null;
+      g.viewStates.clear();
+      g.mountedPath = null;
+      if (g.editor) g.editor.setModel(null);
+      renderGroupTabs(g);
+      renderEditorEmptyIn(g, 'No file open. Pick one from the Explorer.');
+    }
+    for (const m of E.models.values()) if (m && !m.isDisposed()) m.dispose();
+    E.models.clear();
+    E.dirtyPaths.clear();
+    E.fileCache.clear();
+    nav.list = []; nav.idx = -1;
+    S.currentFile = null;
+    if (S.paintNav) S.paintNav();
+  }
+  S.closeAllTabs = closeAllTabs;
+
+  /** Re-read the primary file from the daemon WITHOUT the "Reading…" flash,
+   *  and re-mount only when the bytes on disk actually differ — this is what
+   *  the live `zeno:state` nudge calls after an approval lands. */
+  async function refreshOpenFile() {
+    const g = E.groups[0];
+    const path = g && g.file;
+    if (!path) return;
+    const r = await getJSON(`/forge/file?path=${encodeURIComponent(path)}`);
+    if (!r.ok || g.file !== path) return;
+    const prev = E.fileCache.get(path);
+    if (prev && prev.data && prev.data.contents === r.data.contents && prev.data.truncated === r.data.truncated) return; // nothing moved
+    E.fileCache.set(path, { data: r.data, error: null });
+    await renderEditorContent(g, path);
+    if (S.renderOutline) S.renderOutline();
+  }
+  S.refreshOpenFile = refreshOpenFile;
 
   function renderEditorEmpty(message) {
     S.currentFile = null;
@@ -294,7 +347,7 @@ export function createEditorView(E, S, deps) {
     if (!path) return;
     const g = E.groups[groupIndex];
     if (!g) return;
-    if (groupIndex === 0) S.currentFile = path;
+    if (groupIndex === 0) { S.currentFile = path; recordNav(path); }
     if (force) E.fileCache.delete(path);
     if (!g.tabs.includes(path)) g.tabs.push(path);
     g.file = path;
@@ -302,6 +355,7 @@ export function createEditorView(E, S, deps) {
     if (groupIndex === 0) {
       renderBreadcrumb(path);
       S.fileRowByPath.forEach((row, p) => row.classList.toggle('on', p === path));
+      if (S.paintNav) S.paintNav();
     }
     if (!E.fileCache.has(path)) {
       showAux(g, [el('span', null, `Reading ${path}…`)]);
@@ -310,12 +364,18 @@ export function createEditorView(E, S, deps) {
       if (g.file !== path) return; // a later open superseded this one
     }
     await renderEditorContent(g, path);
+    if (groupIndex === 0 && g.file === path) {
+      // The sidebar follows the primary file: its symbols and its git history.
+      if (S.renderOutline) S.renderOutline();
+      if (S.renderTimeline) void S.renderTimeline();
+    }
   }
 
   return {
     groupIndexOf,
     renderGroupTabs,
     closeGroupTab,
+    closeAllTabs,
     showAux,
     showEditorHost,
     renderBreadcrumb,

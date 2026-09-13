@@ -6,11 +6,18 @@
  * as typed — there is no server-side or client-side gate that holds a
  * write/push/rm/curl/deploy command for approval before it runs (only file
  * writes from an agent run go through the approval gate). Registers
- * `S.showPanel`, `S.runTerminalCommand` and `S.focusTerminal` so the menu
- * bar and the composer "+" menu can drive the same terminal.
+ * `S.showPanel`, `S.runTerminalCommand`, `S.focusTerminal` and
+ * `S.clearTerminal` so the menu bar and the composer "+" menu can drive the
+ * same terminal.
+ *
+ * The panel's toolbar icons each do the one real thing they can, or are
+ * disabled with the reason: the terminal is ONE one-shot command box (no
+ * profiles, no split, no long-running process to kill), so "Kill" is
+ * relabelled as the clear it really is, and "@" pins the last command's
+ * output as context for the next task.
  */
 import { $, $$, el, fill } from '../../bind.js';
-import { add, postJSON } from './dom.js';
+import { add, disableCtl, postJSON, safeAsk } from './dom.js';
 
 export function setupTerminal(S) {
   const ide = S.ide;
@@ -72,12 +79,75 @@ export function setupTerminal(S) {
     }
     if (termHistory.length > 40) termHistory.splice(0, termHistory.length - 40);
     renderTerminal();
+    paintToolbar();
     void S.loadStatus();
-    if (S.currentFile) void S.openFile(S.currentFile);
+    if (S.refreshOpenFile) void S.refreshOpenFile();
   }
   S.runTerminalCommand = runTerminalCommand;
   S.showPanel = showPanel;
   S.focusTerminal = () => { if (termIn) termIn.focus(); };
+  S.clearTerminal = () => { termHistory.length = 0; renderTerminal(); S.setExitCode('exit —'); paintToolbar(); };
+
+  /* ---- the panel toolbar ------------------------------------------------ */
+  const tabsBar = $('.vsptabs', ide);
+  const lastRun = () => [...termHistory].reverse().find((h) => !h.error) || null;
+  const lastOutputText = () => { const h = lastRun(); return h ? `${h.stdout || ''}${h.stderr || ''}` : ''; };
+  const shellSel = tabsBar ? $('.vstermsel', tabsBar) : null;
+  if (shellSel) {
+    // The artifact said "powershell"; the daemon runs cmd.exe (ComSpec) on
+    // Windows and $SHELL elsewhere. Say what is true instead.
+    const svg = shellSel.querySelector('svg');
+    fill(shellSel, svg, document.createTextNode('system shell'));
+    shellSel.title = 'Each command runs once, in the repository root, with the system shell: cmd.exe (ComSpec) on Windows, $SHELL elsewhere.';
+  }
+  // The five icon buttons before #vsp-max/#vsp-hide, in the artifact's order:
+  // Launch Profile, Add Context (@), Split Terminal, Kill Terminal, More.
+  // Found by POSITION, not title: bind/controls.js also reaches for these by
+  // their original titles (to switch them off), the two binders load in
+  // parallel, and whichever runs second must still find them — so neither
+  // lookup may depend on the other's retitling.
+  const icons = tabsBar ? $$('button.fico:not([id])', tabsBar) : [];
+  const [profileBtn, ctxBtn, splitTermBtn, killBtn, moreBtn] = icons;
+  /** Undo an "inert" switch-off (controls.js's or this file's) so a control that CAN act now does. */
+  function enable(btn, title) {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.removeAttribute('aria-disabled');
+    delete btn.dataset.inert;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    btn.style.pointerEvents = '';
+    btn.title = title;
+  }
+  disableCtl(profileBtn, 'One shell profile only — the daemon runs each command with the system shell; there is no profile picker in this build.');
+  disableCtl(splitTermBtn, 'Forge has one one-shot terminal; there is no split terminal in this build.');
+  function paintToolbar() {
+    const has = lastRun() !== null;
+    if (ctxBtn) {
+      if (has && S.pinContext) enable(ctxBtn, 'Pin the last command and its output as context for the next task.');
+      else disableCtl(ctxBtn, 'Run a command first — this pins its output as context for the next task.');
+    }
+    if (killBtn) {
+      if (termHistory.length) enable(killBtn, 'Clear this terminal. Commands are one-shot, so there is no long-running process to kill.');
+      else disableCtl(killBtn, 'Nothing to clear yet — commands are one-shot, so there is no process to kill either.');
+    }
+    if (moreBtn) {
+      if (has) enable(moreBtn, 'Copy the last command’s output');
+      else disableCtl(moreBtn, 'No command has run yet — nothing to copy.');
+    }
+  }
+  if (ctxBtn) ctxBtn.addEventListener('click', () => {
+    const h = lastRun();
+    if (!h || !S.pinContext) return;
+    S.pinContext({ kind: 'terminal', label: `$ ${h.command}`, text: `$ ${h.command}\n${lastOutputText()}`.slice(0, 4000) });
+  });
+  if (killBtn) killBtn.addEventListener('click', () => S.clearTerminal());
+  if (moreBtn) moreBtn.addEventListener('click', () => {
+    const text = lastOutputText();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => safeAsk(() => window.prompt('Copy the output:', text)));
+    else safeAsk(() => window.prompt('Copy the output:', text));
+  });
+  paintToolbar();
 
   if (termIn) {
     termIn.value = '';

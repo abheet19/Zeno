@@ -88,6 +88,35 @@ export function setupModelPicker(S) {
     for (const p of effortPillEls) setTrailingText(p, `effort: ${session.effort || 'medium'} ▾`);
   }
   S.paintModelPills = paintModelPills;
+  // The Command orb's model nodes pick a model here without opening the popup
+  // (field.js dispatches this after switching to Forge). Same three fields a
+  // picker row sets, so the run that follows uses exactly this model. It is
+  // written to BOTH the active session and the draft, so whichever one the
+  // next repaint reads shows the pick — and remembered on S so a session
+  // created afterwards inherits it too.
+  function applyPickedModel(agentId, model) {
+    if (typeof model !== 'string' || !model) return;
+    S.pickedModel = { agentId: agentId || 'local', model };
+    for (const session of [S.sessions[S.activeIdx], S.draftSession]) {
+      if (!session) continue;
+      session.agentId = agentId || 'local'; session.model = model; session.autoRoute = false;
+    }
+    paintModelPills();
+  }
+  S.applyPickedModel = applyPickedModel;
+  // Exposed on window too: field.js (the Command orb, a different module graph)
+  // calls this directly rather than only firing an event, so the pick cannot be
+  // lost to listener-registration timing. If a picked model was set before this
+  // binder ran, apply it now.
+  window.zenoApplyForgeModel = applyPickedModel;
+  window.addEventListener('zeno:forge-select-model', (e) => {
+    const d = e && e.detail;
+    if (d) applyPickedModel(d.agentId, d.model);
+  });
+  if (window.__zenoPendingForgeModel) {
+    const p = window.__zenoPendingForgeModel;
+    applyPickedModel(p.agentId, p.model);
+  }
   effortPillEls.forEach((p) => {
     p.addEventListener('click', () => {
       const session = S.sessions[S.activeIdx] || S.draftSession;

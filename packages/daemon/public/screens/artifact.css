@@ -340,8 +340,8 @@ button{font:inherit; color:inherit}
 .menu button[disabled]{color:var(--ink-3); cursor:not-allowed} .menu button[disabled]:hover{background:none}
 .menu hr{border:0; border-top:1px solid var(--rule); margin:4px 2px}
 
-.wb{flex:1; min-height:0; display:grid; grid-template-columns:44px 250px minmax(0,1fr) 400px}
-.ide.no-side .wb{grid-template-columns:44px 0 minmax(0,1fr) 400px} .ide.no-side .vsside{display:none}
+.wb{--sessw:400px; flex:1; min-height:0; display:grid; grid-template-columns:44px 250px minmax(0,1fr) var(--sessw)}
+.ide.no-side .wb{grid-template-columns:44px 0 minmax(0,1fr) var(--sessw)} .ide.no-side .vsside{display:none}
 .ide.no-sess .wb{grid-template-columns:44px 250px minmax(0,1fr) 0} .ide.no-sess .sess{display:none}
 .ide.no-side.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0}
 .ide.no-panel .vspanel{display:none}
@@ -509,8 +509,8 @@ button{font:inherit; color:inherit}
 .mpd-cost{display:grid; grid-template-columns:repeat(3,1fr); gap:4px} .mpd-cost div{background:var(--g3); border-radius:7px; padding:7px 9px; font-size:10.5px; color:var(--ink-3)} .mpd-cost b{display:block; color:var(--ink); font-size:12.5px; font-weight:600; font-family:var(--font-mono)} .mpd-cost b em{font-style:normal; color:var(--ink-3); font-weight:400; font-size:10px}
 .mpd-str{display:flex; flex-direction:column; gap:5px} .mpd-str div{display:grid; grid-template-columns:76px 1fr auto; gap:8px; align-items:center; font-size:11px; color:var(--ink-3)} .mpd-str i{height:4px; border-radius:99px; background:var(--g5); overflow:hidden; display:block} .mpd-str i::after{content:""; display:block; height:100%; width:var(--w); background:var(--cyan)} .mpd-str span{font-family:var(--font-mono); font-size:10px}
 .mpd-priv{display:flex; align-items:flex-start; gap:8px; font-size:11.5px; color:var(--ink-2); padding:8px 10px; border-radius:8px; background:var(--g3); line-height:1.45} .mpd-priv svg{width:14px;height:14px;flex:none;margin-top:2px} .mpd-priv.loc svg{color:var(--green)} .mpd-priv.eg svg{color:var(--amber)}
-@media (max-width:1280px){ .wb{grid-template-columns:44px 220px minmax(0,1fr) 360px} .ide.no-sess .wb{grid-template-columns:44px 220px minmax(0,1fr) 0} .tbmenu{display:none} .tbcmd{width:260px} }
-@media (max-width:1040px){ .vsside{display:none} .wb{grid-template-columns:44px 0 minmax(0,1fr) 340px} .ide.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0} .tbcta{display:none} }
+@media (max-width:1280px){ .wb{--sessw:360px; grid-template-columns:44px 220px minmax(0,1fr) var(--sessw)} .ide.no-sess .wb{grid-template-columns:44px 220px minmax(0,1fr) 0} .tbmenu{display:none} .tbcmd{width:260px} }
+@media (max-width:1040px){ .vsside{display:none} .wb{--sessw:340px; grid-template-columns:44px 0 minmax(0,1fr) var(--sessw)} .ide.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0} .tbcta{display:none} }
 /* quick open + toast */
 .quick{position:fixed; inset:0; z-index:75; display:flex; align-items:flex-start; justify-content:center; padding-top:9vh; background:rgba(5,7,9,.35)}
 .quick-card{width:min(640px,92vw); background:var(--g2); border:1px solid var(--gl-edge); border-radius:12px; box-shadow:0 30px 70px -22px #000, inset 0 1px 0 var(--wash-hi); overflow:hidden}

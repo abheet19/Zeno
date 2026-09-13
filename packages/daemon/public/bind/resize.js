@@ -31,15 +31,32 @@ function injectStyle() {
   document.head.appendChild(s);
 }
 
+/* The panel is the LAST TRACK of the .wb grid, so its width is set on the
+   grid (the --sessw custom property every .wb template reads), never on #sess
+   itself: sizing the element left the track fixed and the panel ran past the
+   right edge of the window. The ceiling leaves the activity bar, whatever the
+   side bar currently takes, and at least 320px of editor on screen. */
+const EDITOR_MIN = 320;
 function clampWidth(px) {
-  const max = Math.min(MAX, Math.round(window.innerWidth * 0.6));
+  const wb = document.querySelector('.wb');
+  let room = MAX;
+  // A hidden Forge (Command on screen) measures 0 wide — clamp by the window
+  // then, or a saved width would be crushed to the minimum on every boot.
+  if (wb && wb.clientWidth > 0) {
+    const cols = getComputedStyle(wb).gridTemplateColumns.split(' ').map((c) => parseFloat(c) || 0);
+    const sideW = cols.length >= 4 ? cols[1] : 0;
+    room = wb.clientWidth - 44 - sideW - EDITOR_MIN;
+  }
+  const max = Math.max(MIN, Math.min(MAX, room));
   return Math.max(MIN, Math.min(max, px));
 }
 
 function apply(sess, px) {
   const w = clampWidth(px);
-  sess.style.flex = '0 0 auto';
-  sess.style.width = `${w}px`;
+  const wb = document.querySelector('.wb');
+  if (wb) wb.style.setProperty('--sessw', `${w}px`);
+  sess.style.width = '';
+  sess.dataset.sessw = String(w);
   return w;
 }
 
@@ -102,6 +119,6 @@ export async function bind() {
 
   // A window resize can push the saved width past the new 60% ceiling.
   window.addEventListener('resize', () => {
-    if (sess.style.width) apply(sess, parseInt(sess.style.width, 10) || MIN);
+    if (sess.dataset.sessw) apply(sess, parseInt(sess.dataset.sessw, 10) || MIN);
   });
 }

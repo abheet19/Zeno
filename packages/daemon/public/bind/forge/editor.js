@@ -21,15 +21,21 @@
  *
  * This module owns the model/mount/save/split layer; forge/editor-view.js
  * owns the tab strip, the panes' honest empty/loading/binary messages, and
- * open/close-file bookkeeping — the two call each other constantly, so this
- * file hands editor-view.js the handful of functions it needs as `deps`
- * rather than importing it back (seeforge/editor-view.js's own header for
- * why). `E` is their shared local state: groups, models, dirtyPaths,
- * fileCache, monacoNS/monacoErr, focusedGroup, splitOpen, pane2El.
+ * open/close-file bookkeeping; forge/editor-toolbar.js owns the toolbar
+ * buttons around them. `E` is their shared local state: groups, models,
+ * dirtyPaths, fileCache, monacoNS/monacoErr, focusedGroup, splitOpen, pane2El.
+ *
+ * Registers, for the menu bar / Quick Open / context pins: `S.runEditorCommand`
+ * (any Monaco action by id — undo, find, select all, …), `S.pasteFromClipboard`,
+ * `S.goToLine`, `S.currentFileText`/`S.currentFileLineCount` (the outline's
+ * input), `S.selectionContext` (what "pin the selection" pins),
+ * `S.proposeSaveAll`, and the two editor preferences (`S.toggleWordWrap`,
+ * `S.toggleMinimap`, `S.editorPrefs`).
  */
 import { $, el, fill } from '../../bind.js';
 import { add, postJSON, safeAsk } from './dom.js';
 import { createEditorView } from './editor-view.js';
+import { setupEditorToolbar } from './editor-toolbar.js';
 import {
   DIAGNOSED, ZENO_THEME, languageForPath, loadMonaco, monacoIfLoaded, onThemeChange,
 } from '../../monaco.js';
@@ -50,6 +56,9 @@ export function setupEditor(S) {
   let monacoLoadPromise = null;
   let saving = false;
   let saveErr = null;
+  // Two real editor preferences the View menu toggles. Applied to every
+  // group that exists and to every editor created later.
+  S.editorPrefs = { wordWrap: false, minimap: true };
 
   function ensureMonaco() {
     if (E.monacoNS) return Promise.resolve(E.monacoNS);
@@ -70,6 +79,7 @@ export function setupEditor(S) {
   // identifiers here (before their textual definition) is safe: none of
   // them runs until a file actually opens, well after this call returns.
   const view = createEditorView(E, S, { ensureMonaco, mountRealEditor, paintSaveBar, proposeSave, setSplit });
+  setupEditorToolbar(E, S, view);
 
   /* ---- monaco itself: one model per path, one editor per group ---------- */
 
@@ -98,6 +108,7 @@ export function setupEditor(S) {
     else E.dirtyPaths.add(path);
   }
 
+  let outlineTimer = 0;
   function mountRealEditor(g, path, data) {
     const monacoNS = E.monacoNS;
     if (!g.editor) {
@@ -107,7 +118,8 @@ export function setupEditor(S) {
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
         fontSize: 13,
         lineHeight: 20,
-        minimap: { enabled: true, renderCharacters: false },
+        minimap: { enabled: S.editorPrefs.minimap, renderCharacters: false },
+        wordWrap: S.editorPrefs.wordWrap ? 'on' : 'off',
         folding: true,
         contextmenu: true,
         renderWhitespace: 'selection',
@@ -123,6 +135,9 @@ export function setupEditor(S) {
         updateDirty(p);
         view.renderGroupTabs(g);
         paintSaveBar();
+        // The outline follows the buffer, not the disk — debounced per keystroke.
+        clearTimeout(outlineTimer);
+        outlineTimer = setTimeout(() => { if (S.renderOutline && g === E.groups[0]) S.renderOutline(); }, 400);
       });
     }
     const priorModel = g.editor.getModel();
@@ -134,8 +149,12 @@ export function setupEditor(S) {
       if (vs) g.editor.restoreViewState(vs);
     }
     g.mountedPath = path;
+    // A re-mount after the disk moved (an approved write landing) must settle
+    // the dirty mark from the NEW bytes, not the ones the tab was opened with.
+    updateDirty(path);
+    view.renderGroupTabs(g);
     const ro = !S.OWNER
-      ? 'This window has no owner token, so it can read the sandbox but cannot propose a change to it.'
+      ? 'This window has no owner token, so it can read the repository but cannot propose a change to it.'
       : (data.truncated ? 'Only part of this file was read (it is truncated), so saving would propose it with the rest cut off.' : null);
     g.editor.updateOptions({ readOnly: ro !== null, readOnlyMessage: ro ? { value: ro } : undefined });
   }
@@ -174,17 +193,16 @@ export function setupEditor(S) {
       const saveBtn = el('button', 'laction cy', saving ? 'Proposing…' : 'Propose save');
       saveBtn.type = 'button';
       saveBtn.disabled = saving || !dirty;
-      saveBtn.title = 'Ctrl+S. Sends the buffer to /previews — the same governed gate an agent write crosses. This never writes to the sandbox directly.';
+      saveBtn.title = 'Ctrl+S. Sends the buffer to /previews — the same governed gate an agent write crosses. This never writes to the repository directly.';
       saveBtn.addEventListener('click', () => void proposeSave(g));
       add(vsBlame, document.createTextNode(' '), saveBtn);
     }
     if (saveErr) add(vsBlame, document.createTextNode(` · ${saveErr}`));
   }
 
-  async function proposeSave(g) {
-    if (!g || saving) return;
-    const path = g.file;
-    if (!path || !S.OWNER || !E.monacoNS) return;
+  /** Propose one path's buffer; `g` is the group to re-open it in once a receipt lands. */
+  async function proposeSavePath(path, g) {
+    if (!path || saving || !S.OWNER || !E.monacoNS) return;
     const model = E.models.get(path);
     if (!model) return;
     const rec = E.fileCache.get(path);
@@ -221,11 +239,11 @@ export function setupEditor(S) {
     const secretNote = r.data.secretWarning ? ` ${r.data.secretWarning}` : '';
     if (receipt) {
       // A routine (T0) edit: the kernel committed and receipted it on the
-      // spot. The buffer now matches the sandbox — re-read it and clear dirty.
+      // spot. The buffer now matches the repository — re-read it and clear dirty.
       E.dirtyPaths.delete(path);
       saveErr = r.data.secretWarning ? String(r.data.secretWarning) : null;
       void S.loadStatus();
-      void view.openFile(path, true, view.groupIndexOf(g));
+      void view.openFile(path, true, g ? view.groupIndexOf(g) : 0);
     } else {
       // Anything larger, or touching a sensitive path, is a capsule the
       // daemon is now HOLDING — an approval, never a write. The buffer stays
@@ -234,6 +252,7 @@ export function setupEditor(S) {
     }
     paintSaveBar();
   }
+  async function proposeSave(g) { if (g && g.file) await proposeSavePath(g.file, g); }
 
   /* ---- split control: a second, independent Monaco group ---------------- */
 
@@ -275,10 +294,82 @@ export function setupEditor(S) {
       g.editor.focus();
     }
   };
+  S.goToLine = (line) => { if (S.currentFile) S.revealLineInPrimaryGroup(S.currentFile, Math.max(1, line | 0)); };
   S.proposeSaveFromFocusedGroup = () => {
     const g = E.groups[E.focusedGroup];
     if (g && g.file) void proposeSave(g); else safeAsk(() => window.alert('No file is open to save.'));
   };
+  S.proposeSaveAll = async () => {
+    const dirty = [...E.dirtyPaths];
+    if (!dirty.length) { safeAsk(() => window.alert('No buffer has unsaved edits.')); return; }
+    for (const path of dirty) {
+      const g = E.groups.find((x) => x && x.tabs.includes(path)) || E.groups[0];
+      await proposeSavePath(path, g); // one at a time: each is its own capsule
+    }
+  };
+  S.hasDirtyBuffers = () => E.dirtyPaths.size > 0;
+
+  /** The editor a menu command should act on: the focused group's, if it shows a file. */
+  function focusedEditor() {
+    const g = E.groups[E.focusedGroup] && E.groups[E.focusedGroup].file ? E.groups[E.focusedGroup] : E.groups[0];
+    return g && g.editor && g.file && g.editor.getModel() ? g.editor : null;
+  }
+  S.hasEditorOpen = () => focusedEditor() !== null;
+  S.runEditorCommand = (id, payload) => {
+    const ed = focusedEditor();
+    if (!ed) return false;
+    ed.focus();
+    const action = ed.getAction(id);
+    if (action) void action.run(); else ed.trigger('menu', id, payload === undefined ? null : payload);
+    return true;
+  };
+  // Monaco's own paste action reads the clipboard through execCommand, which a
+  // browser refuses outside a real keystroke; the async clipboard API is the
+  // path a menu click has, and its refusal is said out loud rather than eaten.
+  S.pasteFromClipboard = async () => {
+    const ed = focusedEditor();
+    if (!ed) return false;
+    try {
+      const text = await navigator.clipboard.readText();
+      ed.focus();
+      ed.trigger('menu', 'paste', { text });
+      return true;
+    } catch (err) {
+      safeAsk(() => window.alert(`The browser refused to hand over the clipboard (${(err && err.message) || err}). Use Ctrl+V inside the editor instead.`));
+      return false;
+    }
+  };
+  S.currentFileText = () => {
+    const path = S.currentFile;
+    if (!path) return null;
+    const model = E.models.get(path);
+    if (model && !model.isDisposed() && E.monacoNS) return model.getValue(E.monacoNS.editor.EndOfLinePreference.LF);
+    const rec = E.fileCache.get(path);
+    return rec && rec.data && !rec.data.binary ? (rec.data.contents ?? '') : null;
+  };
+  S.currentFileLineCount = () => {
+    const text = S.currentFileText();
+    return text === null ? null : text.split('\n').length;
+  };
+  /** {path, text, startLine, endLine} for the focused editor's selection (or its current line), else null. */
+  S.selectionContext = () => {
+    const ed = focusedEditor();
+    if (!ed) return null;
+    const g = E.groups.find((x) => x && x.editor === ed);
+    const sel = ed.getSelection();
+    const model = ed.getModel();
+    if (!sel || !model || !g) return null;
+    const empty = sel.isEmpty();
+    const text = empty ? model.getLineContent(sel.startLineNumber) : model.getValueInRange(sel);
+    return { path: g.file, text, startLine: sel.startLineNumber, endLine: empty ? sel.startLineNumber : sel.endLineNumber };
+  };
+  function applyPrefs() {
+    for (const g of E.groups) {
+      if (g && g.editor) g.editor.updateOptions({ wordWrap: S.editorPrefs.wordWrap ? 'on' : 'off', minimap: { enabled: S.editorPrefs.minimap, renderCharacters: false } });
+    }
+  }
+  S.toggleWordWrap = () => { S.editorPrefs.wordWrap = !S.editorPrefs.wordWrap; applyPrefs(); return S.editorPrefs.wordWrap; };
+  S.toggleMinimap = () => { S.editorPrefs.minimap = !S.editorPrefs.minimap; applyPrefs(); return S.editorPrefs.minimap; };
 
   // One kick at init, matching real forge.js: load monaco once, up front,
   // rather than waiting for the first file open to discover whether it works.

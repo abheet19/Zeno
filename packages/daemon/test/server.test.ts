@@ -823,10 +823,10 @@ test('Forge — status shows changes and an owner commit lands through the gate'
 });
 
 test('Forge — owner terminal is explicit, repository-scoped and bounded at the HTTP boundary', async () => {
-  const calls: { command: string; args: readonly string[]; cwd: string }[] = [];
+  const calls: { command: string; args: readonly string[]; cwd: string; env: Readonly<Record<string, string>> | undefined }[] = [];
   const runner: Spawner = {
     run: async (command, args, options) => {
-      calls.push({ command, args, cwd: options.cwd });
+      calls.push({ command, args, cwd: options.cwd, env: options.env });
       return { code: 0, failedToSpawn: false, stdout: 'terminal-ok\n', stderr: '' };
     },
   };
@@ -848,7 +848,12 @@ test('Forge — owner terminal is explicit, repository-scoped and bounded at the
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.cwd, h.sandbox, 'the command runs only in the selected repository');
     const args = calls[0]?.args ?? [];
-    assert.equal(args[args.length - 1], 'git status --short', 'the owner-entered command reaches the platform shell once');
+    // Windows hands the line to cmd.exe through an environment variable it
+    // expands itself (see postForgeTerminal for why an argument is re-quoted
+    // into something cmd cannot read); POSIX shells take it as the last argument.
+    const carried = process.platform === 'win32' ? calls[0]?.env?.['ZENO_TERMINAL_COMMAND'] : args[args.length - 1];
+    assert.equal(carried, 'git status --short', 'the owner-entered command reaches the platform shell once');
+    if (process.platform === 'win32') assert.equal(args[args.length - 1], '%ZENO_TERMINAL_COMMAND%');
   } finally {
     await h.close();
   }

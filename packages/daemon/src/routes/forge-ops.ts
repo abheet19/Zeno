@@ -85,8 +85,16 @@ export async function postForgeTerminal(ctx: ServerCtx, req: IncomingMessage, re
   }
   const runner = ctx.opts.terminalRunner ?? nodeSpawner({ timeoutMs: 30_000, killTreeOnTimeout: true });
   const shell = process.platform === 'win32' ? (process.env['ComSpec'] ?? 'cmd.exe') : (process.env['SHELL'] ?? '/bin/sh');
-  const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-lc', command];
-  const result = await runner.run(shell, args, { cwd: ctx.opts.sandbox, timeoutMs: 30_000 });
+  // Windows: the command line reaches cmd.exe through an environment variable
+  // it expands ITSELF, not as an argument. Passed as an argument, Node re-quotes
+  // it for CreateProcess — an embedded quote becomes \" — and cmd.exe does not
+  // read backslash escapes, so `node "src/app.js"` arrived as `node \"src/app.js\"`
+  // and failed to find the module. %ZENO_TERMINAL_COMMAND% is substituted
+  // verbatim before cmd parses the line, so quotes, spaces and pipes mean
+  // exactly what the owner typed. (POSIX shells take the string as-is.)
+  const win = process.platform === 'win32';
+  const args = win ? ['/d', '/s', '/c', '%ZENO_TERMINAL_COMMAND%'] : ['-lc', command];
+  const result = await runner.run(shell, args, { cwd: ctx.opts.sandbox, timeoutMs: 30_000, ...(win ? { env: { ZENO_TERMINAL_COMMAND: command } } : {}) });
   const cap = (value: string): string => value.length > 250_000 ? `${value.slice(0, 250_000)}\n…[output clipped at 250,000 characters]` : value;
   json(res, 200, {
     ok: !result.failedToSpawn && result.code === 0,

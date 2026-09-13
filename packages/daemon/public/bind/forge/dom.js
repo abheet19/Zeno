@@ -32,6 +32,27 @@ export function statusWord(code) {
   return map[String(code || '').trim()] || `git: ${String(code || '?').trim()}`;
 }
 
+/** One run's status word + pill tone — shared by the Runs tab's run cards
+ *  (bind/forge/session.js's renderRuns) and the Session tab's agent-turn
+ *  header (turnNode), so the two views can never disagree about how a run
+ *  ended.
+ *
+ *  A Forge run NEVER applies anything. Every file it changes becomes an
+ *  approval capsule, and the kernel writes only after the owner clicks in
+ *  Command — so "applied" is the one outcome this card structurally cannot
+ *  report on its own. An earlier build reported it anyway for every
+ *  successful run, in green, directly above its own line reading "1 waiting
+ *  · 0 applied". That is the exact claim this function exists to make
+ *  impossible: "applied" only ever means the kernel auto-committed a T0
+ *  write by itself. */
+export function runMark(r) {
+  return r.cancelled ? { tone: 'wt', word: 'cancelled' }
+    : !r.ok ? { tone: 'rd', word: 'failed' }
+      : r.waiting > 0 ? { tone: 'am', word: `${r.waiting} waiting on you` }
+        : r.applied > 0 ? { tone: 'gr', word: 'applied' }
+          : { tone: 'wt', word: 'no changes' };
+}
+
 /** [className, badge glyph] for a file name, using only classes this
  * stylesheet actually defines colour for (.vsi.ts/.tsx/.md/.json/.git/.txt). */
 export function fileMeta(name) {

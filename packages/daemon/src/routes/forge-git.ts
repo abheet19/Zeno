@@ -1,10 +1,11 @@
 /**
- * Forge's read-only view of the sandbox repository (status, one file, search)
- * and its one write: the governed commit. All four drive git through the same
- * jailed executor the kernel uses.
+ * Forge's read-only view of the sandbox repository (status, one file, search,
+ * a file's history, the sized tree) and its one write: the governed commit.
+ * All of them drive git through the same jailed executor the kernel uses.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { relative, sep } from 'node:path';
+import { statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import {
   gitExecutor,
   gitHead,
@@ -221,6 +222,71 @@ export function serveForgeSearch(ctx: ServerCtx, res: ServerResponse, url: URL):
     total: all.length,
     truncated,
   });
+}
+
+/** How many commits a Timeline shows; the cap is reported so the panel can say "the last N". */
+const LOG_CAP = 30;
+
+/**
+ * One file's history — the Explorer's TIMELINE — or, with no path, the
+ * repository's. READ ONLY, shaped like /forge/file: the path goes through the
+ * same jail, and the same one-shape 403 answers every escape. `--follow`
+ * keeps a renamed file's earlier history; `:(literal)` stops a path that
+ * looks like pathspec magic from being read as an instruction.
+ */
+export function serveForgeLog(ctx: ServerCtx, res: ServerResponse, url: URL): void {
+  const relPath = url.searchParams.get('path');
+  let pathspec: string | null = null;
+  if (relPath !== null && relPath.trim() !== '') {
+    let abs: string;
+    try {
+      abs = jail(ctx.opts.fs, ctx.opts.sandbox, relPath);
+    } catch {
+      return json(res, 403, { error: { code: 'path-escape', message: 'That path leaves the sandbox.', resolve: 'Ask for a file inside the sandbox.' } });
+    }
+    pathspec = relative(ctx.opts.sandbox, abs).split(sep).join('/') || '.';
+  }
+  const run = (args: readonly string[]) => ctx.gitRunner.run(args, ctx.opts.sandbox);
+  if (run(['rev-parse', '--is-inside-work-tree']).status !== 0) {
+    return json(res, 200, { path: pathspec, repo: false, commits: [], truncated: false, note: 'The sandbox is not a git repository yet, so there is no history.' });
+  }
+  const US = String.fromCharCode(0x1f);
+  const args = ['log', `-${LOG_CAP + 1}`, `--pretty=%h${US}%an${US}%aI${US}%s`];
+  if (pathspec !== null) args.push('--follow', '--', `:(literal)${pathspec}`);
+  const r = run(args);
+  // A path git has never seen (untracked, or new) exits 128; that is "no
+  // history yet", not a failure to report as one.
+  const lines = r.status === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : [];
+  const truncated = lines.length > LOG_CAP;
+  const commits = lines.slice(0, LOG_CAP).map((l) => {
+    const [sha, author, date, ...rest] = l.split(US);
+    return { sha, author, date, summary: rest.join(US) };
+  });
+  json(res, 200, { path: pathspec, repo: true, commits, truncated, cap: LOG_CAP });
+}
+
+/**
+ * The tracked-plus-changed file list WITH SIZES, for the repository map.
+ * The same set the Explorer draws (git's own index plus what `status` sees),
+ * so the map can never list a file the tree does not; `stat` fills in the
+ * bytes and a file that cannot be stat'ed says so with null rather than 0.
+ */
+export function serveForgeTree(ctx: ServerCtx, res: ServerResponse): void {
+  const run = (args: readonly string[]) => ctx.gitRunner.run(args, ctx.opts.sandbox);
+  if (run(['rev-parse', '--is-inside-work-tree']).status !== 0) {
+    return json(res, 200, { repo: false, root: ctx.opts.sandbox, files: [], total: 0, capped: false });
+  }
+  const NUL = String.fromCharCode(0);
+  const tracked = run(['ls-files', '-z']).stdout.split(NUL).filter(Boolean);
+  const changed = run(['status', '--porcelain', '-z', '--untracked-files=all']).stdout.split(NUL).filter(Boolean).map((e) => e.slice(3));
+  const all = [...new Set([...tracked, ...changed])].sort();
+  const kept = all.slice(0, TREE_CAP);
+  const files = kept.map((path) => {
+    let bytes: number | null = null;
+    try { bytes = statSync(join(ctx.opts.sandbox, ...path.split('/'))).size; } catch { /* deleted in the working tree, or unreadable */ }
+    return { path, bytes };
+  });
+  json(res, 200, { repo: true, root: ctx.opts.sandbox, files, total: all.length, capped: all.length > TREE_CAP });
 }
 
 /**

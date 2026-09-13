@@ -120,6 +120,12 @@ export function setupActivityBar(S) {
       testRuns.set(id, r.ok ? r.data : { error: r.error });
       renderTests();
     }
+    // The menu bar's Run Tests / Run Task… and Quick Open's `task ` mode use
+    // this same catalog and runner, so a task run always lands in this view.
+    S.loadTests = loadTests;
+    S.listTestScripts = () => (testsData && Array.isArray(testsData.scripts) ? testsData.scripts : (testsErr ? [] : null));
+    S.openTesting = () => { const b = $('.vsact [data-vsview="testing"]', ide); if (b) b.click(); if (!testsData) void loadTests(); };
+    S.runTestScript = async (id) => { S.openTesting(); await runTestScript(id); };
 
     // Clear the fabricated green suite NOW; the real catalog arrives when the
     // view is opened. Nothing invented stands for even one frame.
@@ -129,6 +135,18 @@ export function setupActivityBar(S) {
     const testsActBtn = $('.vsact [data-vsview="testing"]', ide);
     if (testsActBtn) testsActBtn.addEventListener('click', () => { if (!testsData) void loadTests(); });
   }
+
+  // The activity bar's "Accounts" and the title bar's avatar: Zeno is a
+  // single-user, local product — there is no account to sign in to and no
+  // profile behind either. Both had no listener; both now say so.
+  const noAccount = S.OWNER
+    ? 'Zeno is single-user and local — this window holds the owner token, and there is no account to sign in to.'
+    : 'Zeno is single-user and local — there is no account to sign in to. This window is read-only (no owner token).';
+  // By position, not title: bind/controls.js also switches the Accounts icon
+  // off (retitling it), the two binders load in parallel, and whichever runs
+  // second must still find it.
+  disableCtl($('.vsact button:not([data-vsview]):not([data-open-settings])', ide), noAccount);
+  disableCtl($('.tb .tbavatar', ide), noAccount);
 
   // Debug view + Debug menu — grepped this whole daemon: there is no debug
   // route (no /forge/debug, no launch-config concept anywhere in server.ts).
@@ -292,13 +310,23 @@ export function setupActivityBar(S) {
     if (!skillsPill) return;
     setTrailingText(skillsPill, ` ${S.selectedSkillIds.size} skill${S.selectedSkillIds.size === 1 ? '' : 's'} ▾`);
   }
-  function sectHead(text) {
+  function sectHead(text, key) {
     const h = el('div', 'vssect open');
+    if (key) h.dataset.zenoSect = key;
     add(h, el('span', 'chev', '▾'), document.createTextNode(text));
     return h;
   }
   if (zenoView) fill(zenoView, el('div', 'fnote', 'Reading rules, skills, schedule and connectors from the daemon…'));
   renderSkillsPill();
+  // The composer's "Scheduled tasks" item and the menu bar land here: open
+  // the Zeno view and bring the named section into view.
+  S.openZenoSection = (key) => {
+    const b = $('.vsact [data-vsview="zeno"]', ide);
+    if (b) b.click();
+    const h = zenoView ? zenoView.querySelector(`[data-zeno-sect="${key}"]`) : null;
+    if (h) { h.scrollIntoView({ block: 'start' }); h.style.outline = '1px solid var(--cyan)'; setTimeout(() => { h.style.outline = ''; }, 1600); }
+    return !!h;
+  };
   async function loadZenoView() {
     if (!zenoView) return;
     const [skillsRes, schedRes, connRes, mcpRes] = await Promise.all([
@@ -350,7 +378,7 @@ export function setupActivityBar(S) {
     nodes.push(el('div', 'vsnote', 'A skill is text the model reads. It never grants a permission — every effect still goes through the kernel.'));
     renderSkillsPill();
 
-    nodes.push(sectHead('SCHEDULED TASKS'));
+    nodes.push(sectHead('SCHEDULED TASKS', 'schedule'));
     if (!schedRes.ok) {
       nodes.push(el('div', 'vsnote', `Scheduled tasks could not be read: ${schedRes.error}`));
     } else {
