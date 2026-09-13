@@ -1,6 +1,6 @@
 # Zeno study pack — current implementation
 
-> **Implementation snapshot: 2026-09-10.** This guide explains the current Windows working tree. It
+> **Implementation snapshot: 2026-09-14.** This guide explains the current Windows working tree. It
 > does not award acceptance, turn a prototype into shipped behavior or convert a passing unit test
 > into live-device evidence. The canonical ledger still controls acceptance status; see
 > [Acceptance evidence](43-ACCEPTANCE-EVIDENCE.md).
@@ -93,7 +93,7 @@ seal is rendered only from that receipt.
 | Package | Responsibility | Start here |
 |---|---|---|
 | `desktop` | Electron window, single instance, project choice, zoom, meeting presence, speech/Whisper lifecycle | [`main.cjs`](../packages/desktop/main.cjs), [`whisper.cjs`](../packages/desktop/whisper.cjs), [`meeting-presence.cjs`](../packages/desktop/meeting-presence.cjs) |
-| `daemon` | Loopback API/SSE, surface orchestration, Forge routes, held work, memory routes | [`main.ts`](../packages/daemon/src/main.ts), [`server.ts`](../packages/daemon/src/server.ts), [`stream.ts`](../packages/daemon/src/stream.ts) |
+| `daemon` | Loopback API/SSE, surface orchestration, Forge routes, held work, memory routes | [`main.ts`](../packages/daemon/src/main.ts), [`server.ts`](../packages/daemon/src/server.ts) (~420 lines; wires ~27 route modules), [`stream.ts`](../packages/daemon/src/stream.ts) |
 | `kernel` | Risk policy, previews, approval binding, CAS revalidation, executor and signed ledger | [`kernel.ts`](../packages/kernel/src/kernel.ts), [`risk.ts`](../packages/kernel/src/risk.ts), [`ledger.ts`](../packages/kernel/src/ledger.ts) |
 | `forge` | Provider registry, routing, headless runners, worktrees, tool permission bridge, browse/Chrome gates | [`routing.ts`](../packages/forge/src/routing.ts), [`runner.ts`](../packages/forge/src/runner.ts), [`worktree.ts`](../packages/forge/src/worktree.ts), [`permission-gate.ts`](../packages/forge/src/permission-gate.ts) |
 | `assistant` | Ask Zeno snapshot, grounding and inert intent/delegation parsing | [`snapshot.ts`](../packages/assistant/src/snapshot.ts), [`ground.ts`](../packages/assistant/src/ground.ts), [`intent.ts`](../packages/assistant/src/intent.ts) |
@@ -109,9 +109,26 @@ seal is rendered only from that receipt.
 | `mesh` | Pairing, sealed envelopes and convergent protocol core; no mobile client | [`pairing.ts`](../packages/mesh/src/pairing.ts), [`envelope.ts`](../packages/mesh/src/envelope.ts), [`replica.ts`](../packages/mesh/src/replica.ts) |
 | `cli` | Demo, proposal, backlog and ledger-verification commands | [`main.ts`](../packages/cli/src/main.ts), [`demo.ts`](../packages/cli/src/demo.ts), [`verify.ts`](../packages/cli/src/verify.ts) |
 
-The browser surfaces are in [`packages/daemon/public`](../packages/daemon/public/): `app.js` coordinates
-state, `field.js` renders the Standing Field, `forge.js` owns the IDE/agent UI, `voice.js` connects
-speech to the pure voice package, and the Counsel modules render meeting flows.
+The browser surfaces are in [`packages/daemon/public`](../packages/daemon/public/). `server.ts` no
+longer owns the handlers directly: each request route is its own small module under
+[`packages/daemon/src/routes/`](../packages/daemon/src/routes/) (about 27 files — approvals, calls,
+forge-run, memory, work and the rest), plus shared request context/options in
+[`packages/daemon/src/server/`](../packages/daemon/src/server/) (`context.ts`, `options.ts`).
+`server.ts` just wires them together.
+
+There is no monolithic client bundle either. `index.html` loads three files —
+[`theme-boot.js`](../packages/daemon/public/theme-boot.js) (applies the saved theme before first
+paint, so there's no flash of the wrong colors), [`ui.js`](../packages/daemon/public/ui.js) (shared
+DOM helpers/shell chrome) and [`bind.js`](../packages/daemon/public/bind.js) — and `bind.js` dynamically
+imports one small "binder" module per screen/feature from
+[`public/bind/`](../packages/daemon/public/bind/): `home.js`, `approvals.js`, `receipts.js`, the list
+screens under `bind/lists/` (chats, work, vault, projects, plus the shared Yours/Discover chooser),
+Forge's own modules under `bind/forge/` (activitybar, dom, editor, editor-view, explorer, menu,
+modelpicker, session, state, terminal), Counsel's under `bind/counsel/`, plus `devices.js`, the
+settings screens under `bind/settings/`, voice under `bind/voice/`, and `controls.js`, `ask.js`,
+`compare.js`, `forge-progress.js`, `resize.js`, `orchestrator.js`, `call-banner.js`, `live.js`. The
+Standing Field (the spatial map view) is its own tree: `field.js` plus `public/field/*` (attention,
+card, data, engine, interaction, list, readouts, runs, state, topology).
 
 ## End-to-end flows
 
@@ -139,6 +156,26 @@ the answer, the UI must show the result as ungrounded rather than invent a citat
 
 The Standing Field is a spatial index over the same real endpoints. It does not contain demo nodes.
 See **What every Field node means** below.
+
+**Command as orchestrator.** Ask Zeno is not just chat — it can hand a task straight to Forge.
+`bind/ask.js`'s "Run in Forge now" button dispatches a `zeno:command-run` browser event with the task
+text; `bind/forge/session.js` listens for that event and opens a real Forge session for it (the same
+session a manual "New session" click would open, not a preview). Once that run is going,
+`bind/orchestrator.js` renders every currently-live run into Home's "Running" rail, reading the same
+`/forge/run-progress` SSE feed Forge's own progress line uses (SSE = Server-Sent Events, a one-way
+HTTP stream the browser keeps open so the server can push updates without being asked again). So a run
+started from Ask Zeno, from a manual Forge session, or restored on reload, all show up in the same
+Home rail — Command is watching every run, not just the one the owner is currently looking at.
+
+**One shared stream, not three.** `bind/forge-progress.js` (Forge's own progress line),
+`bind/orchestrator.js` (Home's Running rail) and `field/runs.js` (the Standing Field's live-run nodes,
+see below) all need the same `/forge/run-progress` events. Each used to open its own `EventSource` to
+that URL. A browser allows only about six live HTTP connections per origin, and three duplicate
+`/forge/run-progress` connections plus `bind/live.js`'s `/stream` connection already used four of
+those six — so opening a second Zeno window (for example, popping Settings out) could be left with no
+sockets free, and any fetch-on-boot code in that window would just hang. `public/run-progress-stream.js`
+now opens exactly one `EventSource`, shared by all three readers; each just subscribes to it. Nothing
+about what's shown changed — only that it now costs one socket instead of three.
 
 ### 3. Forge: task to reviewed repository change
 
@@ -198,6 +235,11 @@ Forge can display up to eight separate Agent sessions, each with its own chat, r
 That UI separation is not proof of unlimited parallel execution; record the daemon/provider's current
 concurrency result during testing. The Agent view is chat-focused. Editor view adds the repository,
 code pane, resizable session panel and bottom drawer.
+
+Which of the two views opens first is remembered per device: the owner's explicit Agent/Editor choice
+is saved to `localStorage` under the key `zeno-forge-view` (`bind/forge/session.js`) and always wins
+over either default on the next visit. Independently of that switch, `Ctrl+Alt+B` toggles the
+secondary side bar — the session panel — open or closed at any time.
 
 ### 4. Voice to Command and Forge
 
@@ -278,8 +320,24 @@ authorize an effect.
 
 ### 7. MCP, isolated browsing and the owner Chrome bridge
 
-The model-facing Zeno MCP server exposes bounded read/propose capabilities and no approval capability.
-Forge reports the bundled, run-scoped capability set; ambient external MCP servers are not attached.
+MCP (Model Context Protocol — a standard way for a model to call a small set of named tools) is used
+here strictly inward-facing: the model-facing Zeno MCP server exposes bounded read/propose
+capabilities and no approval capability. Forge reports the bundled, run-scoped capability set; there
+is no ambient external MCP host running in the background and no generic connector marketplace that
+adds arbitrary third-party servers to a run.
+
+That is a narrower claim than "Zeno knows nothing about other MCP servers." On Integrations and
+Customize, a Claude-Code-style Yours/Discover chooser (`bind/lists/discover.js`, rendered by
+`bind/lists/shared.js`'s toggle) lets the owner browse a small, curated list of well-known MCP server
+*templates* — filesystem, Figma and a handful of others — each showing only its name, transport and
+the **names** of the environment variables its upstream docs say it needs (for example
+`FIGMA_ACCESS_TOKEN`); Zeno never fills in, requests, stores, or even sees a value for one. Clicking
+"+ Add" pre-fills the same add-server form `bind/lists/mcp.js` already draws; saving it is that form's
+own `POST /forge/mcp/servers`, which only **records a configuration**. Discover does not install,
+run, spawn, or connect to anything by itself — a recorded server still has to actually be reachable
+before a run can use it. The same screen also lists the fixed set of bundled connectors and the
+daemon-start switches that turn each on (there is no "+ Add" for those — the set is fixed), plus
+read-only catalogs of rule-file conventions and global skills.
 
 Isolated browsing uses a fresh Chromium profile with no owner cookies, extensions or signed-in state.
 Operations cross the same permission boundary. The separate Chrome bridge can reach the owner's
@@ -303,6 +361,7 @@ configured, and each operation still requires approval. It is off by default.
 | Meeting | Saved Counsel record exists | Local transcript-derived record with counts and timestamp. |
 | Local models | `/forge/agents` reports installed Ollama models | Loopback runtime. Its edge is local, never egress. |
 | Model | One of the first reported installed local models | Locally installed and selectable in Forge. Hosted model selections are shown in Forge run details, not as Field model nodes. |
+| Live run | `/forge/run-progress` SSE reports an agent run in progress | A pulsing node (`field/runs.js`) for that one running agent, showing agent, model, phase and percent complete. It is a third reader of the same shared run-progress stream Forge's progress line and Command's orchestrator rail use — not a separate poll. Dropped once the run reaches a terminal state. |
 
 Attention colors are semantic: cyan is active, amber needs the owner, red is blocked/error, green is
 verified and grey is waiting. Reduced-motion mode removes pulse without removing labels. The 2D/list
@@ -324,7 +383,7 @@ quiet.
 | Agents | Local Ollama, Claude Code and Codex provider registry; model/effort picker; auto/manual routing | Provider availability depends on installed CLIs/runtime; local model output is best-effort |
 | Sessions | Up to eight independent UI agent sessions | Visible sessions do not promise unconstrained parallel provider execution |
 | Context | Lens preview, per-session memory toggle, selected repo skills, hash-bound context | Only root `ZENO.md`; bounded Vault recall; stale context is refused |
-| MCP/connectors | Bundled, strict, run-scoped Zeno MCP facts | No ambient external MCP host or generic connector marketplace |
+| MCP/connectors | Bundled, strict, run-scoped Zeno MCP facts; Discover chooser records third-party MCP server templates (env-var names only) and lists fixed bundled-connector switches | No ambient external MCP host, no auto-run/auto-install — Discover only records a config for a form the owner still saves and a server that still has to be reachable |
 
 ## Model, privacy and cost choices
 
@@ -357,12 +416,12 @@ hosted disclosure before treating a run as evidence.
 | Process isolation | Agent runs edit a disposable worktree rather than the selected repository | [`packages/forge/src/worktree.ts`](../packages/forge/src/worktree.ts), [`packages/forge/src/runner-node.ts`](../packages/forge/src/runner-node.ts) |
 | Fail-closed parsing | Unknown/malformed model edits, tools, paths and provider output are rejected | [`packages/forge/src/tools.ts`](../packages/forge/src/tools.ts), [`packages/forge/src/permission.ts`](../packages/forge/src/permission.ts) |
 | Context hashing | Lens and execution use the same reviewed task/memory/skills input; changed input invalidates preview | [`packages/daemon/public/forge-context-model.js`](../packages/daemon/public/forge-context-model.js), [`packages/daemon/src/memory-context.ts`](../packages/daemon/src/memory-context.ts) |
-| Event notification + canonical reread | SSE signals freshness while endpoints remain the source of truth | [`packages/daemon/src/stream.ts`](../packages/daemon/src/stream.ts), [`packages/daemon/public/app.js`](../packages/daemon/public/app.js) |
-| Bounded resources | Length, output, timeout, file and page caps prevent unbounded agent/browser/process behavior | [`packages/daemon/src/server.ts`](../packages/daemon/src/server.ts), [`packages/desktop/whisper.cjs`](../packages/desktop/whisper.cjs) |
+| Event notification + canonical reread | SSE (Server-Sent Events — a one-way HTTP stream the browser keeps open so the daemon can push notices without being polled) signals freshness while endpoints remain the source of truth | [`packages/daemon/src/stream.ts`](../packages/daemon/src/stream.ts), [`packages/daemon/public/run-progress-stream.js`](../packages/daemon/public/run-progress-stream.js) |
+| Bounded resources | Length, output, timeout, file and page caps prevent unbounded agent/browser/process behavior | [`packages/daemon/src/routes/forge-run.ts`](../packages/daemon/src/routes/forge-run.ts), [`packages/desktop/whisper.cjs`](../packages/desktop/whisper.cjs) |
 | Dependency inversion | Node-specific filesystem/process code wraps portable core logic | `*-node*.ts` adapters beside core modules in kernel, vault, forge and intake |
 | Local-first readable storage | Markdown/frontmatter keeps memory inspectable and editable without Zeno | [`packages/vault/src/note.ts`](../packages/vault/src/note.ts), [`packages/vault/src/vault-node-fs.ts`](../packages/vault/src/vault-node-fs.ts) |
 | Grounded generation | Assistant and Counsel answers carry source references or admit missing grounding | [`packages/assistant/src/ground.ts`](../packages/assistant/src/ground.ts), [`packages/counsel/src/ask.ts`](../packages/counsel/src/ask.ts) |
-| Progressive disclosure | Product UI exposes common actions first and preserves explicit unavailable/degraded states | [`packages/daemon/public/forge.js`](../packages/daemon/public/forge.js), [`packages/daemon/public/field.js`](../packages/daemon/public/field.js) |
+| Progressive disclosure | Product UI exposes common actions first and preserves explicit unavailable/degraded states | [`packages/daemon/public/bind/forge.js`](../packages/daemon/public/bind/forge.js), [`packages/daemon/public/field.js`](../packages/daemon/public/field.js) |
 
 For the cryptographic and policy reasoning, continue with the two LLD documents rather than duplicating
 their proof obligations here.
@@ -380,6 +439,11 @@ npm run build
 Then follow [the hands-on test guide](35-HOW-TO-TEST.md). It covers lifecycle, every Command/Field
 control, Forge local/hosted/chat/edit/context/cancel flows, terminal/tests, both speech paths, Counsel,
 Vault, MCP/browser bridges, receipts and clean installation.
+
+Current end-to-end result (as of this snapshot): 18 flows pass, 0 fail, 3 honestly BLOCKED rather than
+faked — Counsel and voice both need a real microphone/audio device that this environment does not
+have, and the work-devices flow needs a second paired client to exercise Mesh sync. A BLOCKED flow is
+reported as untested, never counted as passed.
 
 `npm run build:app` creates Windows portable and NSIS artifacts under `dist-app/`. A local build does
 not prove a clean install, signing, updater, Whisper provisioning or public deployment. The current
