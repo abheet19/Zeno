@@ -157,9 +157,14 @@ function paragraph(text) {
 function answerBody(payload) {
   const nodes = [];
   const answer = typeof payload.answer === 'string' ? payload.answer.trim() : '';
-  nodes.push(paragraph(answer || 'The daemon returned no answer text.'));
+  // An instruction the grounded answerer could not answer but CAN hand to
+  // Forge is not "no answer text" — say what it is, then show the offer.
+  const offersTask = !!(payload.delegated && typeof payload.delegated.task === 'string' && payload.delegated.task.trim());
+  nodes.push(paragraph(answer || (offersTask
+    ? 'That reads as a task rather than a question about your Zeno, so nothing here can answer it — but Forge can do it.'
+    : 'The daemon returned no answer text.')));
 
-  if (payload.ungrounded) {
+  if (payload.ungrounded && !offersTask) {
     const w = el('div', 'fnote', 'Not grounded in your local state — treat this as unverified.');
     w.style.color = 'var(--amber)';
     nodes.push(w);
@@ -205,6 +210,22 @@ function answerBody(payload) {
       const go = el('button', 'btn p sm', d.needsConfirm ? 'Start in Forge' : 'Open in Forge');
       go.addEventListener('click', () => seedForgeComposer(d.task));
       a.append(go);
+
+      // "Run in Forge now" — Command IS the orchestrator: this opens a NEW
+      // Forge session and starts the task immediately, the same as the owner
+      // typing it into Forge's own composer and pressing Send. Governance is
+      // untouched: bind/forge/session.js's sendTask() still decides local vs
+      // hosted, and a hosted route still stops and shows its own confirm
+      // turn — this button never sets hostedConfirmed itself, it only saves
+      // the owner from retyping the task after switching products.
+      const run = el('button', 'btn p sm', 'Run in Forge now');
+      run.addEventListener('click', () => {
+        const forgeBtn = document.querySelector('.seg [data-product="forge"]');
+        if (forgeBtn) forgeBtn.click();
+        window.dispatchEvent(new CustomEvent('zeno:command-run', { detail: { task: d.task } }));
+      });
+      a.append(run);
+
       nodes.push(a);
     }
   }

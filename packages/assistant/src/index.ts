@@ -60,6 +60,8 @@ export {
 
 export { cleanGroundedReply, groundReply, type Grounding, type GroundingFailure } from './ground.js';
 
+export { conversationalReply } from './conversational.js';
+
 export {
   parseIntent,
   fallbackDelegation,

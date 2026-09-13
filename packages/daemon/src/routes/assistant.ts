@@ -18,7 +18,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   buildAssistantPrompt,
   buildSnapshot,
+  CANNOT_ANSWER,
   cleanGroundedReply,
+  conversationalReply,
   describeTruncation,
   fallbackDelegation,
   groundReply,
@@ -64,6 +66,17 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   const prompt = buildAssistantPrompt(question, snapshot);
   const note = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
 
+  // A greeting, a thank-you, or "what can you do?" has no fact to ground, so
+  // the grounded model can only refuse it — and a chat that answers "hey"
+  // with "I cannot answer that from your Zeno." reads as broken. These are
+  // answered here, deterministically and entirely from the same snapshot the
+  // model would have seen: every number below is the owner's real local
+  // state, so the reply is grounded by construction and no model is asked.
+  const greeting = conversationalReply(question, snapshot);
+  if (greeting !== null) {
+    return json(res, 200, { answer: greeting, cited: [], ungrounded: null, proposal: null, delegated: null, note });
+  }
+
   let answer: string;
   await ensureOllama(ctx); // asking a question is the instruction to start the answerer
   try {
@@ -87,10 +100,21 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   if (!grounding.ok) {
     // Do NOT render it as an answer. Say which id was invented — that specific
     // sentence is what earns the owner's trust in every other answer.
+    //
+    // But an INSTRUCTION ("check the dsa folder") must not dead-end here. The
+    // small model's usual reply to one is a hedge plus the refusal ("The facts
+    // do not show… I cannot answer…"), which fails grounding as an uncited
+    // claim — and returning before the delegation fallback meant every such
+    // request ended in "no answer text". The owner's own words decide the
+    // delegation (never the flagged prose), and it is still only an offer.
+    const fallback = fallbackDelegation(question, '');
+    const delegatedOffer = fallback !== null && fallback.kind === 'delegate'
+      ? await resolveDelegation(ctx, fallback.task, role)
+      : null;
     return json(res, 200, {
       answer: null, flagged: answer, cited: grounding.cited,
       ungrounded: { unknownIds: grounding.unknownIds, claimsWithoutCitation: grounding.claimsWithoutCitation },
-      proposal: null, delegated: null, note,
+      proposal: null, delegated: delegatedOffer, note,
     });
   }
 
@@ -120,6 +144,12 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     }
   } else if (intent !== null && intent.kind === 'delegate') {
     delegated = await resolveDelegation(ctx, intent.task, role);
+  }
+  // The bare refusal is honest but reads as a dead end. When nothing was
+  // delegated either, say what CAN be answered instead — a guide, not a shrug.
+  // It makes no factual claim, so it needs no citation to stay grounded.
+  if (answer.trim() === CANNOT_ANSWER && intent === null) {
+    answer = 'I only answer from your local state — I don’t guess. Ask me what’s waiting on you, what’s in the sandbox, what ran today, or what you’ve saved to memory. Or describe a task and I’ll run it in Forge.';
   }
   json(res, 200, { answer, cited: grounding.cited, ungrounded: null, proposal, delegated, note });
 }

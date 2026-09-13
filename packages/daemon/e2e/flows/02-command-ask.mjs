@@ -18,6 +18,18 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   const locals = agents.body?.localModels || [];
   if (!locals.length) throw new Blocked('no local model is installed — run `ollama pull qwen3:8b` so Command has something to answer with');
 
+  // Warm the model first. The first inference after a fresh daemon loads the
+  // model into Ollama's memory, which can take tens of seconds; letting the
+  // window's own ask below pay that cold-start makes this flow flaky under load
+  // (it passes alone, times out mid-suite). This server-side call absorbs the
+  // load so the UI ask we actually time hits a warm model and completes fast.
+  // It asserts nothing — the real grounding checks below still go through the
+  // window and the daemon exactly as before.
+  await daemon.api('/assistant/ask', {
+    method: 'POST',
+    body: JSON.stringify({ question: 'warm-up' }),
+  }).catch(() => {});
+
   await page.click('.nav-i[data-screen="home"]');
   await page.waitForTimeout(400);
 
