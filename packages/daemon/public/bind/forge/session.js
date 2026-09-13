@@ -8,6 +8,12 @@
  * `S.agentsData` (for `localModelChoice`), `S.selectedSkillIds`,
  * `S.loadStatus`/`S.currentFile`/`S.openFile` (to refresh the editor/
  * explorer after a run may have changed files on disk).
+ *
+ * Also exposes `window.zenoOpenForgeRun(runId)`, so Command's orchestrator
+ * panel (bind/orchestrator.js) and the Standing Field's run node
+ * (field/card.js) can jump straight to the session that started a given run —
+ * one control plane over Forge, not just a nudge to "go look" — instead of
+ * only switching the product tab and leaving the owner to find it themselves.
  */
 import { $, $$, el, fill } from '../../bind.js';
 import {
@@ -27,6 +33,27 @@ export function setupSession(S) {
   setupSessionViews(S);
   setupPlanFirst(S);
   setupAgentMode(S);
+
+  // runId -> the session that started it, so a click on Command's own
+  // "Running" row (bind/orchestrator.js) or the Standing Field's run node
+  // (field/card.js) can open the ACTUAL session that run belongs to, not just
+  // switch to Forge and leave the owner to find it. Set in runResolved()
+  // below, right before the POST that gives the daemon that same runId.
+  const runIndex = new Map();
+  function openByRunId(runId) {
+    const session = runIndex.get(runId);
+    if (!session) return false;
+    const idx = S.sessions.indexOf(session);
+    if (idx < 0) return false;
+    setForgeView('agent');
+    S.openSession(idx);
+    return true;
+  }
+  // Exposed on window for the same reason modelpicker.js exposes
+  // zenoApplyForgeModel: Command's orchestrator panel and the Standing Field
+  // are a different module graph entirely, so a direct call here is robust to
+  // load order in a way an import never could be (session.js is Forge-only).
+  window.zenoOpenForgeRun = openByRunId;
 
   /* ---- Agent / Editor view switch (top-left of the title bar) -----------
      A Codex-style segmented control (index.html's #forge-viewseg, reusing
@@ -409,6 +436,11 @@ export function setupSession(S) {
 
   async function runResolved(session, task, route, hostedConfirmed, plan = null) {
     const runId = `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    // Recorded BEFORE the run even starts, so a run-progress event that lands
+    // while the fetch below is still in flight can already be traced back to
+    // this session by openByRunId() above.
+    session.runId = runId;
+    runIndex.set(runId, session);
     const body = { task, memoryEnabled: session.memoryEnabled !== false, skillIds: [...S.selectedSkillIds], agentId: route.agentId, runId };
     if (route.model) body.model = route.model;
     if (route.effort) body.effort = route.effort;

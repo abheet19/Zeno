@@ -62,6 +62,9 @@ function skillCatalog(ctx: ServerCtx): { readonly sources: readonly Record<strin
     { dir: join(home, '.agents', 'skills'), provenance: 'global Agent Skills', selectable: false },
     { dir: join(home, '.codex', 'skills'), provenance: 'global Codex skills', selectable: false },
     { dir: join(home, '.cursor', 'skills'), provenance: 'global Cursor skills', selectable: false },
+    // Cursor's own `skills.sh` sync writes to ~/.cursor/skills-cursor (not
+    // ~/.cursor/skills), so installed skills.sh skills were invisible. Scan it too.
+    { dir: join(home, '.cursor', 'skills-cursor'), provenance: 'global Cursor skills (skills.sh)', selectable: false },
   ];
   const seen = new Set<string>();
   const sources: Record<string, unknown>[] = [];

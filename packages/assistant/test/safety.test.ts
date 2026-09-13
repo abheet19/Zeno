@@ -110,6 +110,10 @@ test('every source file is present and readable — the scan below is not vacuou
   const names = sources().map((s) => s.name).sort();
   assert.deepEqual(names, [
     'actionable-request.ts',
+    'browse-need.ts',
+    'conversational.ts',
+    'fact-ids.ts',
+    'general-prompt.ts',
     'ground.ts',
     'index.ts',
     'intent-lines.ts',

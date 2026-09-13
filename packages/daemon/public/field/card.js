@@ -85,7 +85,11 @@ export function renderNodeCard() {
     // card adds only what the daemon's event does not carry directly — how
     // long it has been going — and the one thing worth doing about it: go look.
     const r = n.run || {};
-    act = '<button type="button" class="btn sm p" data-go="forge">Open Forge</button>';
+    // data-run rides along so field.js's click handler can hand the runId to
+    // window.zenoOpenForgeRun (session.js) and land on the actual session this
+    // run belongs to, not just the Forge product tab — see field.js's data-go
+    // handling for the other half of this.
+    act = `<button type="button" class="btn sm p" data-go="forge" data-run="${esc(r.runId || '')}">Open Forge</button>`;
     note = `<div class="ncnote">Elapsed <b>${esc(fmtElapsed(r.startedAt))}</b>. Live from the daemon's own <code>/forge/run-progress</code> stream — nothing here is guessed.</div>`;
   } else if (n.k === 'src') {
     // A work source (local backlog, GitHub) is where tickets come from; its

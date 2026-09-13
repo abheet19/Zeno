@@ -15,6 +15,21 @@
  * actually leaves this machine. THE LOCAL MODEL RUNTIME IS NOT ONE. Ollama
  * answers on 127.0.0.1:11434, so it is drawn with an ordinary edge; only a
  * genuinely off-machine source — GitHub, a hosted agent — earns the ⚡.
+ *
+ * QUIET, ON PURPOSE. The owner's own words on the busy version of this field:
+ * "why is it showing so many nodes, nothing is running and I didn't complete
+ * anything." A source nobody ever configured is not a relationship — it is a
+ * blank the daemon happens to report — so it earns no node at all now, never
+ * just a dim one (see the `configured` check below). And the purely archival
+ * categories (the backlog, the receipt trail, Vault notes, past meetings) draw
+ * their full, familiar count only while something is actually live: a run in
+ * flight, an approval waiting, or uncommitted work sitting in the workspace.
+ * The moment none of those is true — `quiet` below — each of those categories
+ * folds down to a taste of itself (see QUIET_CAP) rather than its usual six.
+ * Nothing here is ever invented and nothing that IS live is ever hidden: the
+ * three surfaces, this device, the workspace repo, every pending approval and
+ * every live run still draw exactly as they always have. Only the wallpaper
+ * recedes.
  */
 
 import { pendingRepoEdge } from '../field-model.js';
@@ -89,12 +104,21 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   //     A source that is CONFIGURED but did not fully answer is drawn as srcq:
   //     a source you can cite but cannot rely on. An edge to a source that
   //     genuinely leaves this machine is an EGRESS edge — dashed amber, ⚡.
+  //     A source that was NEVER configured earns no node at all — sourceAtt()
+  //     already called this one calm ("a source you never asked is not a
+  //     problem"); a permanent grey node for a blank nobody filled in is the
+  //     "so many nodes" the owner was pointing at, not a relationship worth
+  //     drawing. `i` still indexes the full array (not just the drawn ones),
+  //     so section 7's `'src' + si` lookups stay correct either way — an edge
+  //     to a source with no node simply gets dropped by the engine's own
+  //     filter, exactly as an edge to any other absent id already is.
   const sources = (work && Array.isArray(work.sources)) ? work.sources : [];
   sources.forEach((s, i) => {
     const id = 'src' + i;
     const configured = s.state !== 'not-configured';
+    if (!configured) return;
     const shaky = s.state === 'failed' || s.state === 'partial';
-    const leaves = configured && s.name !== 'local';
+    const leaves = s.name !== 'local';
     nodes.push({
       id, k: shaky ? 'srcq' : 'src', l: clip(s.name || `source ${i + 1}`, 18),
       att: sourceAtt(s),
@@ -130,9 +154,19 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
     if (repoEdge) edges.push(repoEdge);
   });
 
+  // A QUIET system: nothing running, nothing waiting on you, nothing sitting
+  // uncommitted in the workspace. The backlog/receipts/Vault/meetings sections
+  // below are the field's wallpaper — real, but not what anyone opened Command
+  // to see RIGHT NOW — so while the system is quiet they draw a taste of
+  // themselves (QUIET_CAP) instead of their usual full handful. The moment any
+  // of the three conditions below turns false the caps widen back out on the
+  // very next refresh; nothing is ever hidden that is actually live.
+  const quiet = runs.length === 0 && pending.length === 0 && changed === 0;
+  const QUIET_CAP = 2;
+
   // 7 · the live backlog — real work items, each hung off the source it came from.
   const items = (work && Array.isArray(work.items)) ? work.items : [];
-  items.slice(0, 6).forEach((it, i) => {
+  items.slice(0, quiet ? QUIET_CAP : 6).forEach((it, i) => {
     const id = 'wi' + i;
     const title = it.title || it.id || 'item';
     const age = minutesSince(it.updatedAt);
@@ -147,7 +181,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
 
   // 8 · the trail — the last few receipts Zeno actually wrote, verified or not.
   const receipts = (state && Array.isArray(state.receipts)) ? state.receipts : [];
-  receipts.slice(-4).forEach((r, i) => {
+  receipts.slice(quiet ? -QUIET_CAP : -4).forEach((r, i) => {
     const id = 'rc' + i;
     const ok = (r.outcome || r.state) === 'verified';
     const lab = r.summary || r.targetRef || r.actionHash || 'receipt';
@@ -172,7 +206,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
       d: `Governed local memory — ${notes.length} note${notes.length === 1 ? '' : 's'} the daemon returned on this read, each a file on this disk, redacted for secrets before it was written.`,
     });
     edges.push(['core', 'vault']);
-    notes.slice(0, 6).forEach((n, i) => {
+    notes.slice(0, quiet ? QUIET_CAP : 6).forEach((n, i) => {
       const id = 'mem' + i;
       const age = minutesSince(n.updatedAt || n.createdAt);
       const tags = Array.isArray(n.tags) ? n.tags : [];
@@ -187,7 +221,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   // 10 · past meetings — hung off Counsel, which is the surface that owns them.
   //      No hub is invented: the Counsel node already exists above.
   const mtgs = (meetings && Array.isArray(meetings.meetings)) ? meetings.meetings : [];
-  mtgs.slice(0, 5).forEach((m, i) => {
+  mtgs.slice(0, quiet ? QUIET_CAP : 5).forEach((m, i) => {
     const id = 'mt' + i;
     const age = minutesSince(m.endedAt || m.startedAt);
     const c = (m && typeof m.counts === 'object' && m.counts) || {};

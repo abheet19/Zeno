@@ -79,6 +79,23 @@ export interface MemoryFact {
   readonly body: string;
 }
 
+/**
+ * One record recalled from an EXTERNAL, owner-connected account — e.g. the
+ * owner's own NeoSapien personal memory, reached over its MCP. This is NOT
+ * Zeno's own Vault: it did not originate on this machine, nobody here can
+ * verify it, and — same rule `renderMemoryContext` already keeps for a note an
+ * agent wrote into the Vault — it is a RECORD to read, never an instruction to
+ * obey. Kept as its own section (not folded into `memory`) so the prompt, the
+ * citation the owner sees, and the answer itself can all say which is which.
+ */
+export interface ExternalFact {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  /** Which connected account produced it, e.g. "NeoSapien". Never blank. */
+  readonly source: string;
+}
+
 /** One device in the mesh. */
 export interface DeviceFact {
   readonly name: string;
@@ -93,7 +110,7 @@ export interface DeviceFact {
  * timestamp the prompt then states as fact. Every clip in this module has a key
  * to be announced under, with no exceptions — that is what "never silent" costs.
  */
-export type SnapshotSection = 'pending' | 'receipts' | 'work' | 'repo' | 'memory' | 'devices' | 'at';
+export type SnapshotSection = 'pending' | 'receipts' | 'work' | 'repo' | 'memory' | 'devices' | 'external' | 'at';
 
 /** One section that did not fit whole. Rendered into the prompt verbatim. */
 export interface Truncation {
@@ -116,6 +133,9 @@ export interface Snapshot {
   readonly repo: RepoFact | null;
   readonly memory: readonly MemoryFact[];
   readonly devices: readonly DeviceFact[];
+  /** Records from a connected external account (e.g. NeoSapien). Empty when
+   *  none was consulted, whether because none is connected or none was asked. */
+  readonly external: readonly ExternalFact[];
   /** Empty when the whole state fitted. Never silent. */
   readonly truncated: readonly Truncation[];
 }
@@ -137,6 +157,7 @@ export interface SnapshotParts {
   readonly repo?: RepoFact | null;
   readonly memory?: readonly MemoryFact[];
   readonly devices?: readonly DeviceFact[];
+  readonly external?: readonly ExternalFact[];
 }
 
 /**
@@ -149,6 +170,8 @@ export const DEFAULT_BUDGET = {
   work: 20,
   memory: 12,
   devices: 8,
+  /** Records recalled from a connected external account (e.g. NeoSapien). */
+  external: 6,
   /** Changed files listed for the repo. */
   changed: 25,
   /** Per-string cap for one-line fields (summaries, titles, ids, branches). */
@@ -169,6 +192,7 @@ function resolveBudget(b: Budget): FullBudget {
     work: b.work ?? DEFAULT_BUDGET.work,
     memory: b.memory ?? DEFAULT_BUDGET.memory,
     devices: b.devices ?? DEFAULT_BUDGET.devices,
+    external: b.external ?? DEFAULT_BUDGET.external,
     changed: b.changed ?? DEFAULT_BUDGET.changed,
     line: b.line ?? DEFAULT_BUDGET.line,
     body: b.body ?? DEFAULT_BUDGET.body,
@@ -305,6 +329,19 @@ export function buildSnapshot(parts: SnapshotParts, budget: Budget = {}): Snapsh
     notices,
   );
 
+  const external = clipList(
+    parts.external ?? [],
+    b.external,
+    'external',
+    (e, t) => ({
+      id: clip(e.id, b.line, t),
+      title: clip(e.title, b.line, t),
+      body: clip(e.body, b.body, t),
+      source: clip(e.source, b.line, t),
+    }),
+    notices,
+  );
+
   // The timestamp is clipped under a tally that is READ, not discarded. It will
   // realistically never fire — the daemon hands in an ISO-8601 instant — but a
   // throwaway tally here is a clip that happens and is never announced, and the
@@ -321,6 +358,7 @@ export function buildSnapshot(parts: SnapshotParts, budget: Budget = {}): Snapsh
     repo: clipRepo(parts.repo ?? null, b, notices),
     memory,
     devices,
+    external,
     truncated: notices,
   };
 }
@@ -330,123 +368,7 @@ export function emptySnapshot(at: string): Snapshot {
   return buildSnapshot({ at });
 }
 
-// ── fact ids ─────────────────────────────────────────────────────────────────
-//
-// The id assignment lives HERE, with the data, and not in the renderer.
-//
-// Two modules have to agree on it: `prompt.ts` labels the facts, and `ground.ts`
-// checks what the model cited against that same set. If the renderer owned the
-// ids, the checker would be validating an answer against a list it rebuilt
-// independently — and the day the two drift, real citations start reading as
-// fabrications, or, far worse, fabricated ones start reading as real.
-
-/** One labelled fact, exactly as the model will see it. */
-export interface Fact {
-  readonly id: string;
-  readonly text: string;
-}
-
-/** A titled run of facts. Sections keep the prompt readable for a small model. */
-export interface FactSection {
-  readonly title: string;
-  readonly facts: readonly Fact[];
-}
-
-function pendingText(p: PendingFact): string {
-  return `${p.summary} — tier ${p.tier}, waiting ${p.ageMin} min, capsule ${p.id}`;
-}
-
-function receiptText(r: ReceiptFact): string {
-  return `${r.at} — ${r.outcome} — ${r.summary} — receipt ${r.id}`;
-}
-
-function workText(w: WorkFact): string {
-  const labels = w.labels.length > 0 ? `, labels: ${w.labels.join(', ')}` : '';
-  return `${w.title} — state ${w.state}${labels}, item ${w.id}`;
-}
-
-/**
- * The repo line, told against the ORIGINAL changed-file count.
- *
- * `r.changed` has already been clipped, so counting it would report "25 changed"
- * for a working tree with a hundred dirty files — a wrong number, stated as a
- * fact, with an id the model can cite and the grounding check will accept. The
- * count comes from the truncation notice, which still remembers the total.
- */
-function repoText(r: RepoFact, clipped: Truncation | undefined): string {
-  const total = clipped?.total ?? r.changed.length;
-  const changed =
-    total === 0
-      ? 'no uncommitted changes'
-      : r.changed.length < total
-        ? `${total} changed, ${r.changed.length} shown: ${r.changed.join(', ')}`
-        : `${total} changed: ${r.changed.join(', ')}`;
-  return `branch ${r.branch} at ${r.head} — ${changed}`;
-}
-
-function memoryText(m: MemoryFact): string {
-  return `${m.title}: ${m.body}`;
-}
-
-function deviceText(d: DeviceFact): string {
-  return `${d.name} — ${d.paired ? 'paired' : 'not paired'}`;
-}
-
-function section<T>(
-  title: string,
-  prefix: string,
-  items: readonly T[],
-  text: (item: T) => string,
-  whenEmpty: string,
-  clipped: Truncation | undefined,
-): FactSection {
-  if (items.length === 0) {
-    // EMPTY and CLIPPED TO NOTHING are different facts, and only one of them is
-    // "nothing is waiting on your approval". A section whose entries all fell
-    // off the budget still renders a zero-fact — the model needs something to
-    // cite either way — but the zero-fact must not assert the absence, or the
-    // assistant answers "nothing is waiting on you [p0]" over a queue holding a
-    // T4, and `groundReply` calls that answer perfectly grounded because the
-    // fact it cites really does exist and really does say that.
-    const gone = clipped === undefined ? 0 : clipped.total - clipped.kept;
-    const text0 =
-      gone > 0
-        ? `${gone} were dropped to fit and NONE are shown here — this section was clipped to nothing, ` +
-          'so it is not evidence that there are none'
-        : whenEmpty;
-    return { title, facts: [{ id: `${prefix}0`, text: text0 }] };
-  }
-  return { title, facts: items.map((item, i) => ({ id: `${prefix}${i + 1}`, text: text(item) })) };
-}
-
-/**
- * Lay the snapshot out as ids and text.
- *
- * An EMPTY section still produces one fact — `p0`, `r0`, `w0`… — saying that it
- * is empty. Absence is a real answer to a real question: "what is waiting on
- * me?" over an empty queue is answered by "nothing". Giving that absence an id
- * means the answer can CITE it. Without the zero-fact, the model's only grounded
- * move would be to refuse, which would make the assistant useless on exactly the
- * mornings the owner most wants to hear that they are clear.
- */
-export function factsOf(s: Snapshot): readonly FactSection[] {
-  const cut = new Map<SnapshotSection, Truncation>();
-  for (const t of s.truncated) cut.set(t.section, t);
-  const repoCut = cut.get('repo');
-
-  return [
-    section('PENDING APPROVALS — waiting on the owner', 'p', s.pending, pendingText, 'nothing is waiting on your approval', cut.get('pending')),
-    section('RECEIPTS — what already happened, from the signed chain', 'r', s.receipts, receiptText, 'no receipts in this snapshot', cut.get('receipts')),
-    section('WORK ITEMS — the backlog', 'w', s.work, workText, 'the backlog is empty', cut.get('work')),
-    section('SANDBOX REPO', 'g', s.repo === null ? [] : [s.repo], (r) => repoText(r, repoCut), 'no sandbox repo state was captured', repoCut),
-    section('GOVERNED MEMORY — notes the owner kept', 'm', s.memory, memoryText, 'no governed memory notes', cut.get('memory')),
-    section('DEVICES — the mesh', 'd', s.devices, deviceText, 'no devices are known', cut.get('devices')),
-  ];
-}
-
-/** Every id the model may legitimately cite. The grounding check judges against this. */
-export function factIds(s: Snapshot): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const sec of factsOf(s)) for (const f of sec.facts) ids.add(f.id);
-  return ids;
-}
+// Laying the snapshot out as labelled, citable facts — `Fact`, `FactSection`,
+// `factsOf`, `factIds` — lives in `fact-ids.ts`, split out purely to keep this
+// file under this codebase's own per-file line limit. See that file's header
+// for why the id assignment belongs with the data rather than the renderer.

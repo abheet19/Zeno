@@ -18,6 +18,13 @@
  * A read-only page (no owner token) gets no stream and renders nothing, same
  * as forge-progress.js.
  *
+ * Each row's "Open" used to only switch to the Forge product tab, leaving the
+ * owner to find the right session themselves among however many were open —
+ * a nudge, not real control. It now also calls `window.zenoOpenForgeRun(runId)`
+ * (session.js registers it) to focus the ACTUAL session that run belongs to,
+ * when this window knows one; a run this window never started through the
+ * composer still falls back to the tab switch, exactly as before.
+ *
  * DOM ownership: bind/home.js repaints the "Running" `.hs-sec` every time it
  * (re)binds — on boot and again on every `state`/`preview`/`receipt`/`chain`
  * stream event (see bind/live.js's REBIND table) — via `fill(sec, header,
@@ -127,13 +134,19 @@ function restoreSum(sec) {
   sumStash.delete(header);
 }
 
-function openForge() {
-  // Best-effort, exactly as bind/ask.js's own "Run in Forge now" does: switch
-  // products by clicking the real segment button. Which session gets focus is
-  // left to Forge itself — there is no cross-module handle to a specific
-  // in-window session to resolve further than "the Forge product is open".
+function openForge(runId) {
+  // Switch products by clicking the real segment button — exactly as
+  // bind/ask.js's own "Run in Forge now" does.
   const btn = document.querySelector('.seg [data-product="forge"]');
   if (btn) btn.click();
+  // Then, when Forge's own session.js has told us which in-window session this
+  // runId belongs to (window.zenoOpenForgeRun — see that file's header), focus
+  // THAT session rather than leaving the owner to find it among however many
+  // are open. A run this window never started through the composer (a bare
+  // POST /forge/run, or one from a session this window has since forgotten)
+  // has no such session, and the fallback above — Forge is at least on
+  // screen — is exactly what this control did before.
+  if (runId && typeof window.zenoOpenForgeRun === 'function') window.zenoOpenForgeRun(runId);
 }
 
 async function cancelRun(runId, btn) {
@@ -191,7 +204,7 @@ function rowFor(runId, r) {
   openBtn.type = 'button';
   openBtn.className = 'laction';
   openBtn.textContent = 'Open';
-  openBtn.addEventListener('click', () => openForge());
+  openBtn.addEventListener('click', () => openForge(runId));
   actions.appendChild(openBtn);
 
   if (!r.terminal) {

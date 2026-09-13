@@ -16,7 +16,15 @@
  *   `parseIntent`            reads a SUGGESTION out of that answer — either one
  *                            file to write, or one job to hand to a coding
  *                            agent. Both are text; neither is an act.
+ *   `buildGeneralPrompt`     the OTHER prompt — no facts, no citation rule —
+ *                            used only once the grounded one has already
+ *                            failed, so an ordinary question still gets a
+ *                            real answer instead of the same refusal.
+ *   `needsLiveLookup`        a yes/no: does this question name something
+ *                            current or external that neither the snapshot
+ *                            nor a frozen model could ever honestly answer.
  *
+
  * The daemon owns the parts this package deliberately does not: reading the
  * pending set, calling Ollama, and — separately, and only by the owner's hand —
  * putting a proposal through classify → preview → approve → commit. Law L6 is
@@ -29,13 +37,10 @@
 export {
   buildSnapshot,
   emptySnapshot,
-  factsOf,
-  factIds,
   DEFAULT_BUDGET,
   type Budget,
   type DeviceFact,
-  type Fact,
-  type FactSection,
+  type ExternalFact,
   type MemoryFact,
   type PendingFact,
   type ReceiptFact,
@@ -47,6 +52,8 @@ export {
   type Truncation,
   type WorkFact,
 } from './snapshot.js';
+
+export { factsOf, factIds, type Fact, type FactSection } from './fact-ids.js';
 
 export {
   buildAssistantPrompt,
@@ -61,6 +68,10 @@ export {
 export { cleanGroundedReply, groundReply, type Grounding, type GroundingFailure } from './ground.js';
 
 export { conversationalReply } from './conversational.js';
+
+export { buildGeneralPrompt } from './general-prompt.js';
+
+export { needsLiveLookup } from './browse-need.js';
 
 export {
   parseIntent,

@@ -25,8 +25,17 @@
  * --rule, --gl-edge, --wash*, --font-mono, --font-display — no literals.
  */
 
-/* ---------- root: 280px sidebar + main pane ---------- */
-.cn{ display:grid; grid-template-columns:280px 1fr; height:100%; min-height:0; }
+/* ---------- root: 280px sidebar + main pane ----------
+   grid-template-rows was left implicit (auto), and an auto-sized row does not
+   reliably stretch to the grid container's own height the way a flexible one
+   does — so .cnside and .cnmain, both grid items here, sized to their OWN
+   content instead of to .cn's real, definite height. That is the reported
+   bug: the sidebar (and the main pane beside it) fell short of the window,
+   clipped part way down, on a real daemon read even though .cn itself had
+   height:100% all along. An explicit minmax(0,1fr) row — exactly what the
+   narrow layout below already uses for its own second row — makes the one
+   row BE the container's full height, so both panes stretch to fill it. */
+.cn{ display:grid; grid-template-columns:280px 1fr; grid-template-rows:minmax(0,1fr); height:100%; min-height:0; }
 @media (max-width:820px){ .cn{ grid-template-columns:1fr; grid-template-rows:auto 1fr; } }
 
 .cnside{

@@ -171,6 +171,17 @@ function answerBody(payload) {
     nodes.push(w);
   }
 
+  // `general: true` is a DIFFERENT answer from a grounded one — the daemon
+  // tried the grounded, cited path first and only fell through to this one
+  // once it genuinely found nothing to cite. It carries no citations by
+  // construction, so it gets its own honest label rather than reading like a
+  // grounded answer that simply cited nothing.
+  if (payload.general) {
+    const w = el('div', 'fnote', 'General knowledge — not grounded in your Zeno state.');
+    w.style.color = 'var(--amber)';
+    nodes.push(w);
+  }
+
   const cited = Array.isArray(payload.cited) ? payload.cited : [];
   if (cited.length) {
     const list = el('div', 'fnote');

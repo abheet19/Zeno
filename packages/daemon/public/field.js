@@ -94,6 +94,11 @@ export function init(section) {
         if (typeof window.zenoApplyForgeModel === 'function') window.zenoApplyForgeModel('local', model);
         else window.dispatchEvent(new CustomEvent('zeno:forge-select-model', { detail }));
       }
+      // A live-run node also focuses the actual session that run belongs to
+      // (session.js registers window.zenoOpenForgeRun) — Command's orchestrator
+      // panel does the same thing for its own "Open" button; see that file.
+      const runId = go.getAttribute('data-run');
+      if (runId && typeof window.zenoOpenForgeRun === 'function') window.zenoOpenForgeRun(runId);
       return;
     }
     const jump = t.closest('[data-jump]');

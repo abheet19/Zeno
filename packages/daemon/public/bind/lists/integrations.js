@@ -28,9 +28,10 @@
  * including "nothing configured". See bind/lists.js for the endpoint list.
  */
 
-import { getJSON, fill, token, screenEl } from '../../bind.js';
+import { getJSON, el, fill, token, screenEl } from '../../bind.js';
 import {
   plural, disableBtn, lcardOuter, pillEl, noteEl, headingEl, viewToggleEl, connectorFacts,
+  postJSON, textareaEl, formBox, statusEl,
 } from './shared.js';
 import { createMcpManager } from './mcp.js';
 import { connectorDiscoverNode } from './discover.js';
@@ -70,6 +71,70 @@ function connectorCard(c) {
   const card = lcardOuter(f.name, f.meta, pillEl(f.pillText, f.pillCls));
   if (f.permissions) card.appendChild(noteEl(f.permissions));
   return card;
+}
+
+/* ---- autonomous intake — POST /intake/gather --------------------------- *
+ *
+ * The owner: point Zeno at a task ("fix the flaky login test, owner/repo#482")
+ * and let it gather what a human would gather by hand — the GitHub issue or
+ * Jira ticket it names, the owner's own connected NeoSapien memory, and which
+ * local repository on this machine it is probably about — instead of typing
+ * each of those in separately. Read-only: the request changes nothing, and
+ * this card only ever shows what the daemon found, or honestly says it could
+ * not (Jira and NeoSapien both need a credential this daemon does not
+ * fabricate; a repo scan reports the roots it actually managed to read). */
+const intake = { task: '', busy: false, result: null, error: null };
+
+function intakeReferenceLine(refs) {
+  const parts = [];
+  if (refs && refs.github) parts.push(`GitHub ${refs.github.owner}/${refs.github.repo}#${refs.github.number}`);
+  if (refs && refs.jira) parts.push(`Jira ${refs.jira.key}`);
+  return parts.length ? `Found in the task: ${parts.join(', ')}.` : 'No GitHub issue or Jira ticket reference was found in the task text.';
+}
+function intakeSourceLine(label, res, describeOk) {
+  if (!res) return `${label}: not referenced in the task.`;
+  return res.ok ? `${label}: ${describeOk(res)}` : `${label}: ${res.message || res.reason || 'unavailable'}`;
+}
+function intakeResultNode(result) {
+  const lines = [
+    intakeReferenceLine(result.references),
+    intakeSourceLine('GitHub', result.github, (g) => `"${g.title || '(no title)'}" — ${g.state}${g.url ? ' — ' + g.url : ''}`),
+    intakeSourceLine('Jira', result.jira, (j) => `"${j.issue.summary}" — ${j.issue.status} — ${j.issue.url}`),
+    intakeSourceLine('NeoSapien', result.neosapien, (n) => `${n.hits.length} relevant ${plural(n.hits.length, 'memory', 'memories')} found`),
+  ];
+  const repos = (result.repos && result.repos.candidates) || [];
+  const top = repos.filter((r) => r.score > 0).slice(0, 5);
+  lines.push(top.length
+    ? `Likely local repo: ${top.map((r) => `${r.name} (${r.path})`).join(', ')}`
+    : ((result.repos && result.repos.note) || 'No local repository matched the task.'));
+
+  const box = lcardOuter('Gathered context', lines[0], null);
+  lines.slice(1).forEach((line) => box.appendChild(noteEl(line)));
+  return box;
+}
+function intakeFormNode(hasOwner, rerender) {
+  const box = formBox('lcard');
+  box.appendChild(el('div', 'lk', 'Gather context for a task'));
+  box.appendChild(noteEl('Paste the task the way you would say it. A GitHub issue (owner/repo#123) or Jira ticket '
+    + '(ABC-123) reference is read automatically. Read-only — nothing here starts a run.'));
+  box.appendChild(textareaEl('e.g. "Fix the flaky login test, owner/repo#482"', intake.task, (v) => { intake.task = v; }, 4));
+  const go = el('button', 'btn sm p', intake.busy ? 'Gathering…' : 'Gather context');
+  go.type = 'button';
+  if (!hasOwner) disableBtn(go, 'This window has no owner token, so it cannot gather context.');
+  else if (intake.busy) disableBtn(go, 'Already gathering — this finishes in a few seconds.');
+  else {
+    go.addEventListener('click', async () => {
+      if (!intake.task.trim()) { intake.error = 'Give it a task to gather context for.'; rerender(); return; }
+      intake.busy = true; intake.error = null; rerender();
+      const r = await postJSON('/intake/gather', { task: intake.task.trim() });
+      intake.busy = false;
+      if (r.ok) { intake.result = r.data; intake.error = null; } else { intake.error = r.error; }
+      rerender();
+    });
+  }
+  box.appendChild(go);
+  if (intake.error) box.appendChild(statusEl(intake.error));
+  return box;
 }
 
 const integrationsMcp = createMcpManager('lcard');
@@ -145,6 +210,13 @@ function render() {
 
   nodes.push(headingEl('MCP servers'));
   integrationsMcp.nodes(hasOwner).forEach((n) => nodes.push(n));
+
+  nodes.push(headingEl('autonomous intake'));
+  nodes.push(noteEl('Reads a GitHub issue or Jira ticket reference out of a task, checks your connected NeoSapien '
+    + 'memory, and looks for the local repository it probably means — before you send it to Forge. Read-only: '
+    + 'nothing here starts anything.'));
+  nodes.push(intakeFormNode(hasOwner, render));
+  if (intake.result) nodes.push(intakeResultNode(intake.result));
 
   fill(container, ...nodes);
 }

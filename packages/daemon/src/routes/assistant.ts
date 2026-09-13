@@ -1,12 +1,36 @@
 /**
- * Ask Zeno — the assistant, answering about the owner's OWN Zeno.
+ * Ask Zeno — the assistant, answering about the owner's OWN Zeno, and now a
+ * real conversational agent besides.
  *
- * Grounded, not generative: it is shown a clipped snapshot of real local state
- * and must cite the fact ids it used. `groundReply` then checks every citation
- * against that snapshot, so an invented id or an uncited factual claim is
- * reported as a FAILURE and the prose is handed back flagged rather than
- * rendered as an answer. A confident lie about your own machine is worse than
- * a refusal, so the refusal is the default.
+ * THE GROUNDED CORE IS UNCHANGED. It is shown a clipped snapshot of real local
+ * state and must cite the fact ids it used. `groundReply` then checks every
+ * citation against that snapshot, so an invented id or an uncited factual
+ * claim is reported as a FAILURE and the prose is handed back flagged rather
+ * than rendered as an answer. A confident lie about your own machine is worse
+ * than a refusal, so the refusal is the default for THIS kind of question.
+ *
+ * WHAT IS NEW is what happens once the grounded model has genuinely failed —
+ * no fact to cite, and the question was never actionable in the first place —
+ * because that used to be a dead end: "I cannot answer that from your Zeno."
+ * for a completely ordinary question that had nothing to do with Zeno. Three
+ * things now happen, in order, none of them weakening the grounded core:
+ *
+ *   1. The snapshot's own MEMORY section is no longer just "whatever notes are
+ *      newest" — it is the Vault's own keyword recall run against the actual
+ *      question, so "what did we decide about X" has a real, cited note to
+ *      answer from instead of hoping X happened to be recent.
+ *   2. A second, external memory — the owner's own connected NeoSapien account
+ *      (see `./neosapien.js`) — is folded in as its own EXTERNAL MEMORY
+ *      section, clearly separate from Zeno's own governed Vault.
+ *   3. If NEITHER of those, nor the local state, nor an actionable request
+ *      (the existing Forge delegation path) answers it, the question may
+ *      still be an ordinary one with a real answer — just not about this
+ *      Zeno. `askGeneral` tries a SEPARATE, clearly-labelled general reply
+ *      rather than end on the same refusal for every non-Zeno question. And
+ *      if the question instead names something CURRENT or external no local
+ *      model's frozen weights could ever honestly know, it is offered to
+ *      Forge — which owns the real isolated browser and every governed MCP
+ *      bridge — instead of guessing.
  *
  * It may PROPOSE a file write, which becomes an ordinary approval capsule the
  * owner approves by hand. It may also DELEGATE a job to a coding agent, which
@@ -17,6 +41,7 @@ import { hostname } from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   buildAssistantPrompt,
+  buildGeneralPrompt,
   buildSnapshot,
   CANNOT_ANSWER,
   cleanGroundedReply,
@@ -24,6 +49,7 @@ import {
   describeTruncation,
   fallbackDelegation,
   groundReply,
+  needsLiveLookup,
   parseIntent,
 } from '@abheet19/zeno-assistant';
 import type { Role } from '../tokens.js';
@@ -33,6 +59,58 @@ import { ensureOllama } from './ollama-lifecycle.js';
 import { withoutReasoning } from './forge-local-model.js';
 import { proposeFileWrite } from './approvals.js';
 import { resolveDelegation, type Delegated } from './delegate.js';
+import { searchNeosapienMemories } from './neosapien.js';
+
+/**
+ * The recalled-first, recent-second Vault memory Ask Zeno is shown.
+ *
+ * The bug this fixes: the snapshot used to pass only the 12 MOST RECENT notes,
+ * with the question never consulted at all — so "what did we decide about the
+ * release checklist" answered from whatever happened to be newest, and a real,
+ * relevant note written weeks ago had no way to be cited. `vault.recall` is the
+ * Vault's own keyword scorer (see `@abheet19/zeno-vault`'s `vault.ts`); running
+ * it against the OWNER's actual question is what makes a memory question
+ * answerable at all. Recency still matters — it is why the recalled notes are
+ * merged ahead of the plain recent ones rather than replacing them — so a
+ * question with no keyword match still sees what the owner saved most recently.
+ */
+function recalledMemory(ctx: ServerCtx, question: string): readonly { id: string; title: string; body: string }[] {
+  const vault = ctx.opts.vault;
+  if (!vault) return [];
+  const recalled = question.trim() === '' ? [] : vault.recall(question, 8).map((h) => h.note);
+  const recent = vault.all().slice(0, 12);
+  const seen = new Set<string>();
+  const merged: { id: string; title: string; body: string }[] = [];
+  for (const note of [...recalled, ...recent]) {
+    if (seen.has(note.id)) continue;
+    seen.add(note.id);
+    merged.push({ id: note.id, title: note.title, body: note.body });
+    if (merged.length >= 12) break;
+  }
+  return merged;
+}
+
+/**
+ * The SEPARATE, ungrounded general-knowledge reply — tried only after the
+ * grounded model, the memory it was shown, and the Forge delegation path have
+ * all already failed to answer. `null` on any failure (Ollama unreachable, an
+ * empty reply) so the caller falls through to the honest final refusal rather
+ * than rendering nothing as something.
+ */
+async function askGeneral(ctx: ServerCtx, question: string): Promise<string | null> {
+  try {
+    const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3:8b', prompt: buildGeneralPrompt(question), stream: false, think: false }),
+    });
+    if (!r.ok) return null;
+    const text = withoutReasoning(((await r.json()) as { response?: string }).response ?? '').trim();
+    return text === '' ? null : text;
+  } catch {
+    return null;
+  }
+}
 
 export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
   const body = await readJson(req);
@@ -53,14 +131,24 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     }
   } catch { /* no repo is a fact, not an error */ }
 
+  // NeoSapien is queried unconditionally: cheap (an immediate, no-network
+  // "not-configured" answer) on every machine that has not set the token, and
+  // this is the only point in the request where the snapshot can still be
+  // assembled with what it finds. Its own honesty is kept separate from
+  // Zeno's local state either way — see `neosapien.ts` and `ExternalFact`.
+  const neosapien = await searchNeosapienMemories(question);
+
   const snapshot = buildSnapshot({
     at: new Date().toISOString(),
     pending: [...ctx.held.values()].map((h) => ({ id: h.preview.actionHash.slice(0, 8), summary: h.preview.summary, tier: h.preview.tier, ageMin: 0 })),
     receipts: ctx.opts.kernel.receipts().slice(-20).map((r) => ({ id: r.id, outcome: r.outcome, summary: r.summary ?? '', at: r.at })),
     work: (work?.items ?? []).map((i: { id: string; title: string; labels?: readonly string[]; state?: string }) => ({ id: i.id, title: i.title, labels: [...(i.labels ?? [])], state: i.state ?? 'open' })),
     repo,
-    memory: (ctx.opts.vault?.all() ?? []).slice(0, 12).map((n) => ({ id: n.id, title: n.title, body: n.body })),
+    memory: recalledMemory(ctx, question),
     devices: [{ name: hostname(), paired: true }],
+    external: neosapien.ok
+      ? neosapien.hits.map((h) => ({ id: h.id, title: h.title, body: h.body, source: 'NeoSapien' }))
+      : [],
   });
 
   const prompt = buildAssistantPrompt(question, snapshot);
@@ -108,13 +196,59 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     // request ended in "no answer text". The owner's own words decide the
     // delegation (never the flagged prose), and it is still only an offer.
     const fallback = fallbackDelegation(question, '');
-    const delegatedOffer = fallback !== null && fallback.kind === 'delegate'
-      ? await resolveDelegation(ctx, fallback.task, role)
-      : null;
+    if (fallback !== null && fallback.kind === 'delegate') {
+      const delegatedOffer = await resolveDelegation(ctx, fallback.task, role);
+      return json(res, 200, {
+        answer: null, flagged: answer, cited: grounding.cited,
+        ungrounded: { unknownIds: grounding.unknownIds, claimsWithoutCitation: grounding.claimsWithoutCitation },
+        proposal: null, delegated: delegatedOffer, note,
+      });
+    }
+
+    // BROADENING THE MIDDLE, part one: a question that names something
+    // CURRENT or plainly external — "what's the latest…", a bare URL — has no
+    // honest answer here at all. Not a fact this snapshot could ever hold, and
+    // not something a local model's frozen weights can know either; guessing
+    // and labelling it "general" would still be a guess dressed as an answer.
+    // The honest move is the same one an actionable request already gets:
+    // hand it to Forge, which owns the real isolated browser and every
+    // governed MCP bridge, and say so plainly. Still only an OFFER — the same
+    // `resolveDelegation` seam, the same owner click before a hosted rung ever
+    // starts.
+    if (needsLiveLookup(question)) {
+      const delegatedOffer = await resolveDelegation(
+        ctx,
+        `Research and answer, using web browsing or an MCP tool as needed: ${question.trim()}`,
+        role,
+      );
+      return json(res, 200, {
+        answer: 'That needs something current or external — nothing in your local state answers it, and my own '
+          + 'knowledge may be stale or wrong for it. Forge can look it up.',
+        cited: [], ungrounded: null, proposal: null, delegated: delegatedOffer, note,
+      });
+    }
+
+    // BROADENING THE MIDDLE, part two: neither a fact to cite nor an
+    // instruction to delegate — but that does not mean the question has no
+    // real answer, only that it is not a question ABOUT this Zeno. This is a
+    // SEPARATE reply, from a separate prompt (`buildGeneralPrompt`) that never
+    // sees the snapshot and is never checked by `groundReply`, and the caller
+    // is told plainly which kind of answer it is (`general: true`) — grounded
+    // and general are never allowed to look the same on screen.
+    const general = await askGeneral(ctx, question);
+    if (general !== null) {
+      // `note` stays exactly what it means everywhere else in this response —
+      // truncation, and nothing else. The UI labels a general answer from the
+      // `general` flag alone (bind/ask.js), so the two are never duplicated.
+      return json(res, 200, {
+        answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note,
+      });
+    }
+
     return json(res, 200, {
       answer: null, flagged: answer, cited: grounding.cited,
       ungrounded: { unknownIds: grounding.unknownIds, claimsWithoutCitation: grounding.claimsWithoutCitation },
-      proposal: null, delegated: delegatedOffer, note,
+      proposal: null, delegated: null, note,
     });
   }
 

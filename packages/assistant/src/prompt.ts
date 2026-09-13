@@ -16,7 +16,8 @@
  * Pure: a string in, a string out. No model call lives here — the daemon owns
  * the call to Ollama.
  */
-import { factsOf, type Snapshot, type Truncation } from './snapshot.js';
+import { factsOf } from './fact-ids.js';
+import type { Snapshot, Truncation } from './snapshot.js';
 
 /** The exact sentence the model is told to use when the snapshot cannot answer. */
 export const CANNOT_ANSWER = 'I cannot answer that from your Zeno.';

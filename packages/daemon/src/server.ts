@@ -92,6 +92,7 @@ import {
 } from './routes/forge-gate.js';
 import { postDelegate } from './routes/delegate.js';
 import { postAssistantAsk } from './routes/assistant.js';
+import { postIntakeGather } from './routes/intake.js';
 import {
   deleteMeeting,
   postCounselAsk,
@@ -426,6 +427,12 @@ export function createServer(opts: DaemonOptions): Server {
     // actually starts, and a hosted agent starts from neither.
     if (req.method === 'POST' && path === '/delegate') return await postDelegate(ctx, req, res, role);
     if (req.method === 'POST' && path === '/assistant/ask') return await postAssistantAsk(ctx, req, res, role);
+    // Autonomous intake: read-only research over a task's own words (a
+    // referenced GitHub issue or Jira ticket, connected NeoSapien memory, and
+    // which local repository it is probably about). Legible to either role —
+    // gathering context is not an effect, the same reasoning `/work` already
+    // rests on — and it starts nothing; see routes/intake.ts.
+    if (req.method === 'POST' && path === '/intake/gather') return await postIntakeGather(ctx, req, res);
     if (req.method === 'POST' && path === '/counsel/summarize') return await postCounselSummarize(req, res);
     if (req.method === 'GET' && path === '/counsel/meetings') return serveMeetings(ctx, res);
     if (req.method === 'POST' && path === '/counsel/meetings') return await postMeeting(ctx, req, res, role);

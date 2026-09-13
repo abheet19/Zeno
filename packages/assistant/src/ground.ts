@@ -27,9 +27,10 @@
  *
  * Pure. Text and a snapshot in, a verdict out.
  */
+import { factIds } from './fact-ids.js';
 import { looksLikeIntentLine } from './intent.js';
 import { CANNOT_ANSWER } from './prompt.js';
-import { factIds, type Snapshot } from './snapshot.js';
+import type { Snapshot } from './snapshot.js';
 
 /**
  * Why an answer failed, in one word the UI can render.

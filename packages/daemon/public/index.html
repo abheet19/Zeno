@@ -867,8 +867,15 @@ button{font:inherit; color:inherit}
 /* ---------- COUNSEL ---------- */
 /* Fill the whole area under the 54px top bar (.app's first grid row). With only
    height:100% the grid took its CONTENT's height, so the Meetings sidebar and its
-   right border stopped short of the bottom of the window. */
-.cn{display:grid; grid-template-columns:280px 1fr; height:100%; min-height:calc(100vh - 54px)}
+   right border stopped short of the bottom of the window. min-height fixed how
+   tall .cn ITSELF stands, but left grid-template-rows implicit (auto) — and an
+   auto row sizes to its ITEMS' own content, it does not hand that height back
+   down to them. So .cnside and .cnmain (the grid items) kept falling short of
+   .cn's now-correct bottom, the same clipped sidebar one layer deeper. An
+   explicit minmax(0,1fr) row makes the one row BE .cn's full height, so both
+   panes actually stretch to fill it — confirmed with a real daemon read:
+   .cnside used to bottom out at 804px on a 1000px window, 195px short. */
+.cn{display:grid; grid-template-columns:280px 1fr; grid-template-rows:minmax(0,1fr); height:100%; min-height:calc(100vh - 54px)}
 .cnside{border-right:1px solid var(--gl-edge); padding:16px 14px; display:flex; flex-direction:column; gap:4px; overflow:auto; background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.01))}
 .recdot{width:8px;height:8px;border-radius:50%;background:var(--g1);display:inline-block}
 .recdot.big{width:11px;height:11px;background:var(--red);box-shadow:0 0 10px 2px var(--red);animation:recp 1.2s ease-in-out infinite} @keyframes recp{50%{opacity:.35}}
@@ -877,6 +884,18 @@ button{font:inherit; color:inherit}
 .cnrow b{font-size:13px; font-weight:500; color:var(--ink)} .cnrow span{font-family:var(--font-mono); font-size:10px; color:var(--ink-3)}
 .cnfoot{font-size:11.5px; color:var(--ink-3); line-height:1.5; padding:12px 10px 0; border-top:1px solid var(--rule)} .cnfoot b{display:block; color:var(--ink-2); font-weight:500; margin-bottom:3px}
 .cnmain{overflow:auto; min-height:0; position:relative}
+/* bind/counsel.js appends its screen-reader announcer (role="status", the
+   real Vault-note count etc. gets read to assistive tech) straight onto .cn
+   itself, and this class never made it into this inline sheet — so the <p>
+   carried no styling at all. An unstyled <p> is a normal block box, which
+   made it a THIRD grid item in .cn's two-column, one-row grid: it wrapped to
+   a second implicit row, and .cnside/.cnmain (sized to fill what was left of
+   .cn's height, not .cn's full height) came up a stray paragraph's worth
+   short of the window every time — the clipped-sidebar bug, one layer down
+   from where min-height:calc(...) above already fixed .cn's OWN height.
+   Visually hidden, off the visual canvas, and — now that it is actually
+   position:absolute — out of grid placement entirely, exactly as intended. */
+.cn-sr{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
 .cnview{display:none; min-height:100%; flex-direction:column} .cnview.on{display:flex}
 .cnhero{margin:auto; max-width:640px; text-align:center; padding:40px 24px; display:flex; flex-direction:column; align-items:center; gap:14px}
 .cnorb{width:76px;height:76px;border-radius:50%;background:radial-gradient(circle at 40% 36%,rgba(255,255,255,.5),transparent 44%),radial-gradient(circle at 60% 64%,var(--green),transparent 62%),radial-gradient(circle,#1c5a44,#0b2419 80%);box-shadow:0 0 40px -6px var(--green)}
