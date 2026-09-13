@@ -222,20 +222,31 @@ test('the desktop opens its primary window maximized without kiosk mode', () => 
   assert.doesNotMatch(source, /\bkiosk\s*:\s*true\b|\.setKiosk\(true\)/);
 });
 
-test('Forge opens Skills as a searchable catalog while Lens stays the exact-context inspector', () => {
-  const source = readFileSync(join(__dirname, '..', '..', 'daemon', 'public', 'forge.js'), 'utf8');
-  // The composer's Skills CTA was renamed from `addContext` to `attach` (an
-  // icon button in the restyled composer row), but it must still be the
-  // Skills-catalog action, not a shortcut into the Lens/inspector tab.
-  const skillsCta = source.match(/const attach = btn\('cbtn attach'[^\n]+/);
-  assert.ok(skillsCta, 'the run composer must expose its Skills action');
-  assert.match(skillsCta[0], /openSkillsCatalog/);
-  assert.doesNotMatch(skillsCta[0], /S\.insp|lens/);
-  assert.match(source, /rules\(\) \{ return rulesSkillsPanel\(\); \}/);
-  assert.match(source, /lens\(\) \{ return lensPanel\(\); \}/);
-  assert.match(source, /Search rules, skills and sources/);
-  assert.match(source, /catalog\.skillSources/);
-  assert.match(source, /Repository skills can be selected for a run\. Global skills are catalogued read-only/);
+test('Forge lets the owner pick real skills for a run, and Lens stays a separate context inspector', () => {
+  // packages/daemon/public/forge.js — the pre-rebuild renderer this test used
+  // to read — is dead code (the app loads bind/forge.js) and has been deleted.
+  // bind/forge.js re-expresses the same underlying guarantee ("Skills you pick
+  // are the real selection sent with a run, and Lens is a separate exact-context
+  // view") against the design artifact's markup, but not as a searchable-catalog
+  // modal opened from the composer's Skills CTA — the artifact's own ZENO
+  // sidebar panel already lists rules/skills/schedule/connectors, so this binder
+  // wires ticking a skill THERE into the real `selectedSkillIds` a run sends,
+  // rather than duplicating a second catalog UI. That is a real, deliberate
+  // simplification of the pre-rebuild design (confirmed: no searchable Skills
+  // catalog markup or `openSkillsCatalog`-style modal exists anywhere under
+  // packages/daemon/public/bind) — asserted here as what actually ships, not
+  // reworded to sound like the old modal still exists.
+  const source = readFileSync(join(__dirname, '..', '..', 'daemon', 'public', 'bind', 'forge.js'), 'utf8');
+  assert.match(source, /const selectedSkillIds = new Set\(\)/,
+    'ticking a skill in the ZENO sidebar is the real selection, not a fixed mock count');
+  assert.match(source, /selectedSkillIds\.size/,
+    'the composer\'s "N skills" pill reads the real selection size');
+  assert.match(source, /skillIds: \[\.\.\.selectedSkillIds\]/,
+    'a run is sent with exactly the skills the owner ticked');
+  assert.match(source, /function renderLens\(session\)/,
+    'Lens remains its own function, separate from the skills selector');
+  assert.doesNotMatch(source, /openSkillsCatalog/,
+    'the old searchable-catalog modal was not silently resurrected under a new name');
 });
 
 test('the packaged app includes every local module required by the desktop entry point', () => {

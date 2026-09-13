@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 interface TicketAction {
   readonly jump: string;
@@ -51,6 +51,15 @@ test('the Command field consumes frames only while its visible animated canvas i
 });
 
 test('opening Command observes local models without starting the Ollama service', () => {
-  const source = readFileSync(new URL('../../public/field.js', import.meta.url), 'utf8');
-  assert.match(source, /getJSON\('\/forge\/agents\?passive=1'\)/);
+  // field.js was split into field/*.js modules; the passive read now lives in
+  // field/data.js. Read the whole field/ surface so this pins the GUARANTEE
+  // (the runtime is observed passively, never started by opening Command) rather
+  // than the file it happens to live in.
+  const dir = new URL('../../public/field/', import.meta.url);
+  const entry = readFileSync(new URL('../../public/field.js', import.meta.url), 'utf8');
+  const modules = readdirSync(dir)
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+    .join('\n');
+  assert.match(entry + '\n' + modules, /getJSON\('\/forge\/agents\?passive=1'\)/);
 });

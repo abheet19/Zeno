@@ -586,6 +586,15 @@ function stopPtt() {
  * worth keeping from a microphone someone else just claimed. */
 function abortPttNow() {
   pttHeld = false;
+  /* An abort must DISCARD whatever was captured — the whole point of aborting
+     (a blur, a takeover by another surface, pagehide, the Type button) is that
+     the owner does NOT want this phrase to act. `abort()` below fires the
+     recogniser's own onend, which reads pttFinalText and dispatches it, so a
+     command captured a moment before the abort would still run. Clearing the
+     pending transcript first is what makes the abort actually mean "cancel".
+     This is the safety guarantee: voice never acts on what you stopped. */
+  pttFinalText = '';
+  pttInterim = '';
   if (!pttRecognition || !pttListening) return waitForSpeechIdle();
   return new Promise((resolve) => {
     const prevOnEnd = pttRecognition.onend;

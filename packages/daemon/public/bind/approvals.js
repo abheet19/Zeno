@@ -319,6 +319,31 @@ function capsuleFor(preview, onSettled) {
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         const e = (data && data.error) || {};
+        /* A "spent"/"not-previewed"/"unknown-action" refusal is not a failure the
+           owner did anything wrong to cause — it means this proposal went stale
+           (the file changed underneath it, or the daemon restarted) and the kernel
+           will not approve a stale action against the wrong base. That is the
+           safety working. But leaving the card showing "Refused" reads as broken.
+           Turn it into a clear, resolvable state: explain it, and replace the
+           actions with a Dismiss that clears the stale card. */
+        const stale = /spent|not-previewed|unknown-action|drift|base/i.test(`${e.code} ${e.message}`);
+        if (stale) {
+          allowBtn.textContent = 'Stale — cannot approve';
+          pill.textContent = 'This proposal went stale — the file changed after it was proposed, so approving it is unsafe. Re-propose it to get a fresh one.';
+          const acts = allowBtn.parentElement;
+          if (acts) {
+            const dismiss = el('button', 'btn g sm', 'Dismiss stale item');
+            dismiss.type = 'button';
+            dismiss.addEventListener('click', () => {
+              const card = dismiss.closest('.caps');
+              if (card) card.remove();
+              window.dispatchEvent(new CustomEvent('zeno:state'));
+            });
+            denyBtn.remove();
+            acts.append(dismiss);
+          }
+          return;
+        }
         allowBtn.textContent = 'Refused — nothing applied';
         pill.textContent = `refused by the daemon · ${e.code || res.status}${e.message ? ' — ' + e.message : ''}`;
         return;

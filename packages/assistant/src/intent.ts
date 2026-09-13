@@ -35,7 +35,7 @@
  * Pure: a string in, structure or nothing out. Touches no filesystem, and never
  * checks whether the path exists — that is the kernel's business at preview.
  */
-import { DELEGATE_PREFIX, PROPOSE_PREFIX } from './prompt.js';
+import { CANNOT_ANSWER, DELEGATE_PREFIX, PROPOSE_PREFIX } from './prompt.js';
 
 /**
  * A suggestion that a file be written. The owner approves it by hand or it never
@@ -100,6 +100,25 @@ const MAX_SUMMARY = 200;
  * send an agent off to build something nobody asked for.
  */
 const MAX_TASK = 500;
+
+/**
+ * Clean up raw task text the same way regardless of where it came from — a
+ * `DELEGATE:` line the model wrote, or the owner's own question read back by
+ * `fallbackDelegation`. Scrubbed for the same two reasons twice over: this
+ * string is shown to the owner BEFORE any run starts (a reordering character
+ * would let it read as a different job than the one that runs) and it is
+ * printed to a terminal by the CLI (an ANSI escape would rewrite the line
+ * above it). Each invisible or reordering character becomes a SPACE — never
+ * removed outright — so nothing closes up into a word nobody wrote.
+ */
+function sanitizeTask(raw: string): string {
+  return raw
+    .replace(INVISIBLE_ALL, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
+}
 
 /**
  * Windows device names. `CON`, `NUL`, `COM1` and friends are not files: opening
@@ -337,18 +356,7 @@ export function parseIntent(answer: string): Intent | null {
   if (delegations.length === 1) {
     const d = delegations[0];
     if (d === undefined) return null;
-    // Scrubbed the same way a summary is, and for the same reason twice over:
-    // this string is shown to the owner BEFORE the run starts (a reordering
-    // character would let it read as a different job than the one that runs) and
-    // it is printed to a terminal by the CLI (an ANSI escape would rewrite the
-    // line above it). Each becomes a SPACE so nothing closes up into a word the
-    // model never wrote.
-    const task = (d[1] ?? '')
-      .replace(INVISIBLE_ALL, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/^["'`]+|["'`]+$/g, '')
-      .trim();
+    const task = sanitizeTask(d[1] ?? '');
     // Nothing to build, or more instruction than one line should carry — see
     // MAX_TASK. Refusing costs a round trip; a half task costs the wrong work.
     if (task === '' || task.length > MAX_TASK) return null;
@@ -385,4 +393,149 @@ export function parseIntent(answer: string): Intent | null {
   const summary = said === '' ? `Write ${relPath}` : said.slice(0, MAX_SUMMARY);
 
   return { kind: 'propose-write', relPath, summary };
+}
+
+// ── the deterministic fallback ───────────────────────────────────────────────
+//
+// `parseIntent` trusts the model to write a `DELEGATE:` line. It usually does
+// not: a small local model asked to "add a retry with backoff" is far more
+// likely to find nothing in the FACTS to cite and obey rule 5 — reply with the
+// bare refusal — than to remember rule 8 and end with the one line this
+// package looks for. The result, without this fallback, is that every
+// actionable request the owner types dead-ends on "I cannot answer that from
+// your Zeno.", which is a fact about the model's obedience, not about what the
+// owner asked for.
+//
+// This is NOT a second way to read intent out of the model's prose — it never
+// looks at what the model said beyond whether it said anything. It looks at
+// what the OWNER said. If the question itself reads as an instruction — a
+// leading verb like "add" or "fix" — and the model came back with nothing
+// (the refusal, or empty), the safe, honest move is to offer the owner's own
+// words to Forge, not to pretend a question was answered when it was not.
+//
+// Same law as everywhere else in this file: this produces a `delegate`
+// INTENT, one member of the same two-member union `parseIntent` returns,
+// `null` is always the safe default, and a delegation is still only ever an
+// OFFER — `resolveDelegation` decides what, if anything, may start, and a
+// hosted agent still waits on the owner's click.
+
+/**
+ * The imperative verbs that open a coding or repo task, as the owner listed
+ * them plus their ordinary synonyms. Not a grammar — a fixed, inspectable
+ * list, so a change to what counts as "actionable" is a diff to this array
+ * instead of a rule nobody can point at.
+ *
+ * Deliberately excludes verbs that open a QUESTION about existing state
+ * ("show", "explain", "describe", "tell") even though some of them sound
+ * action-like — those already have a real grounded answer path, and folding
+ * them in here would offer a delegation instead of the answer the owner
+ * actually asked for.
+ */
+const IMPERATIVE_VERBS = new Set([
+  'add', 'create', 'make', 'build', 'implement', 'write', 'fix', 'refactor',
+  'rename', 'update', 'remove', 'delete', 'run', 'test', 'open', 'check',
+  'list', 'scaffold', 'wire', 'install', 'generate', 'setup', 'configure',
+  'debug', 'optimize', 'migrate', 'port', 'upgrade', 'downgrade', 'document',
+  'integrate', 'hook', 'enable', 'disable', 'deploy', 'merge', 'revert',
+  'bump', 'extract', 'split', 'move', 'rewrite', 'replace', 'review', 'audit',
+  'automate', 'improve', 'extend', 'simplify', 'clean', 'cleanup', 'patch',
+  'convert', 'handle', 'support',
+]);
+
+/**
+ * Conversational scaffolding that sits in front of the real instruction —
+ * politeness, a framing subject, a request-to-request. Stripped iteratively
+ * so "Hey, could you please just add a retry…" reduces to "add a retry…"
+ * before the leading verb is read. Each alternative requires at least one
+ * trailing separator, so a bare "Hey" or "Ok" on its own is left alone — it
+ * fails the verb check on its own merits instead of being silently deleted.
+ */
+const LEADING_FILLER = new RegExp(
+  '^(?:' +
+    [
+      'please', 'hey', 'hi', 'hello', 'ok', 'okay', 'so', 'now', 'just',
+      'actually', 'quickly', 'kindly', 'go ahead and', 'help me',
+      'can you', 'could you', 'would you', 'will you', 'do you mind',
+      'i need you to', 'i want you to', "i'd like you to", 'i would like you to',
+      'i need to', 'i want to', "i'd like to", 'i would like to',
+      "let's", 'lets', 'we should', 'we need to', 'you should',
+    ].join('|') +
+    ')[\\s,:;.!-]+',
+  'i',
+);
+
+/** Strip leading filler repeatedly — "hey, can you please add…" takes three passes. */
+function stripLeadingFiller(question: string): string {
+  let q = question.trim().replace(/^["'`]+|["'`]+$/g, '').trim();
+  for (let i = 0; i < 6 && q !== ''; i++) {
+    const next = q.replace(LEADING_FILLER, '').trim();
+    if (next === q) break;
+    q = next;
+  }
+  return q;
+}
+
+/**
+ * Does this question read as an instruction rather than a question?
+ *
+ * Deliberately narrow: only the LEADING word, after filler is stripped,
+ * decides it. "What should I add to the ingest client?" starts with "what",
+ * not "add", and stays a question — reading any occurrence of an imperative
+ * verb anywhere in the sentence would catch that kind of question too, which
+ * is exactly the false positive this function exists to avoid. A statement
+ * with no leading verb at all ("the ingest client needs a retry") is left
+ * alone for the same reason `parseIntent` leaves an unlabelled sentence
+ * alone: guessing wrong here is not free, and null costs nothing.
+ */
+function isActionableRequest(question: string): boolean {
+  const q = stripLeadingFiller(question);
+  if (q === '') return false;
+  const m = /^([A-Za-z][A-Za-z'-]*)/.exec(q);
+  if (m === null) return false;
+  const lead = m[1];
+  if (lead === undefined) return false;
+  return IMPERATIVE_VERBS.has(lead.toLowerCase());
+}
+
+/**
+ * Was the model's answer USELESS — the bare refusal, or nothing at all?
+ *
+ * A real, grounded answer (even to a question that happens to start with a
+ * word like "list" — "List the receipts waiting" is a legitimate grounded
+ * question, not a coding task) is left exactly alone: this fallback only
+ * fires when the model gave the owner nothing to act on.
+ */
+function answerWasUseless(answer: string): boolean {
+  const flat = answer.trim();
+  return flat === '' || flat === CANNOT_ANSWER;
+}
+
+/**
+ * The deterministic fallback: when the model said nothing usable AND the
+ * owner's own question reads as an instruction, offer the owner's words to
+ * Forge as a `delegate` intent instead of leaving the request dead-ended on
+ * the refusal.
+ *
+ * Pure, like everything else here — two strings in, structure or `null` out.
+ * Called from the daemon only when `parseIntent(answer)` already
+ * returned `null`, and only ever PRODUCES the same `delegate` shape
+ * `parseIntent` can produce, so every downstream consumer — `resolveDelegation`,
+ * the approval gate, the "needs confirm" rule for a hosted agent — sees the
+ * identical shape and cannot tell which path produced it. That sameness is
+ * the point: this is not a second, weaker kind of delegation, it is the same
+ * one, reached a different way.
+ *
+ * The task carried is the OWNER's sentence, not the model's — sanitised the
+ * same way a model-written task is (`sanitizeTask`), and refused outright
+ * rather than clipped if it is empty or longer than one instruction should be
+ * (`MAX_TASK`), for the same reason: half an instruction is a different
+ * instruction, and refusing costs one round trip while truncating would send
+ * an agent off to build the wrong thing.
+ */
+export function fallbackDelegation(question: string, answer: string): Intent | null {
+  if (!answerWasUseless(answer)) return null;
+  if (!isActionableRequest(question)) return null;
+  const task = sanitizeTask(question);
+  if (task === '' || task.length > MAX_TASK) return null;
+  return { kind: 'delegate', task };
 }

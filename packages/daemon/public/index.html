@@ -51,6 +51,11 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
+/* A disabled workbench control must LOOK disabled. .fico and .plus-item carry no
+   :disabled dimming of their own (unlike .btn), so a control honestly turned off
+   used to look identical to a live one. This dims every one of them. */
+.fico:disabled, .plus-item:disabled, .fico[aria-disabled="true"], .plus-item[aria-disabled="true"]{opacity:.45; cursor:not-allowed}
+
 /* The live Forge run progress line — real orchestration phase, percent, token
    count, and the Cancel control the window never used to have. Sits under the
    session title, hidden until a run is actually in flight. */

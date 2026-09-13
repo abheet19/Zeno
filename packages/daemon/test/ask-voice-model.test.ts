@@ -104,55 +104,56 @@ test('capture labels are explicit and never imply speaker identity', () => {
   assert.equal(captureOwnerLabel(''), 'another voice surface');
 });
 
-test('Ask voice wiring cannot approve and hosted work remains click-confirmed', () => {
-  const source = readFileSync(new URL('../../public/ask.js', import.meta.url), 'utf8');
+test('Ask never approves, and hosted work stays click-confirmed in Forge', () => {
+  // packages/daemon/public/ask.js — the pre-rebuild renderer's Ask surface —
+  // also drove a mic (SpeechRecognition/speechSynthesis, `zenoCapture = 'ask'`,
+  // a `requestedBy: 'Ask Zeno voice conversation'` handoff): a spoken question
+  // to Zeno, answered aloud. The shipped renderer's bind/ask.js does not: Ask's
+  // composer is typed-only now (there is no SpeechRecognition/speechSynthesis
+  // anywhere under packages/daemon/public/bind/), and voice lives only in
+  // Command's push-to-talk grammar (bind/voice.js) and Counsel's meeting
+  // capture (bind/counsel.js). That is a real, confirmed narrowing of what
+  // ships — not something this repointing can paper over — so only the
+  // guarantees bind/ask.js actually still carries are asserted below: it makes
+  // the real network call, it never reaches for /approvals, and hosted work is
+  // never silently started — the owner is always sent to Forge to confirm it.
+  const source = readFileSync(new URL('../../public/bind/ask.js', import.meta.url), 'utf8');
   assert.match(source, /fetch\('\/assistant\/ask'/);
   assert.doesNotMatch(source, /fetch\('\/approvals/);
-  assert.match(source, /run\.addEventListener\('click', \(\) => void confirmHosted/);
-  assert.match(source, /event\.detail\?\.requestedBy === 'Ask Zeno voice conversation'/);
-  assert.ok(
-    source.indexOf("document.body.dataset.zenoCapture = 'ask'") <
-      source.indexOf("window.dispatchEvent(new CustomEvent('zeno:release-command-voice'"),
-    'Ask reserves the microphone before asynchronous Command teardown',
-  );
-  assert.match(source, /SpeechRecognition/);
-  assert.match(source, /speechSynthesis/);
-  assert.match(source, /dataset\.zenoCapture = 'ask'/);
-  assert.match(source, /Voice cannot approve/);
-  assert.match(source, /Zeno does not identify who is speaking/);
-  assert.match(source, /any clear speech near the microphone can become a turn/);
+  assert.match(source, /has NOT started/);
+  assert.match(source, /voice and chat cannot start hosted work/);
+  assert.match(source, /waiting for your approval/);
 });
 
 test('Command voice yields to every external microphone owner', () => {
-  const source = readFileSync(new URL('../../public/voice.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../public/bind/voice.js', import.meta.url), 'utf8');
   assert.match(source, /function externalCaptureOwner\(\)/);
-  assert.match(source, /owner !== '' && owner !== 'command'/);
-  assert.match(source, /if \(externalCaptureOwner\(\)\)/);
+  assert.match(source, /return owner && owner !== CAPTURE_OWNER \? owner : null;/);
+  assert.match(source, /const owner = externalCaptureOwner\(\);/);
   assert.match(source, /requestedBy/);
 });
 
 test('Command voice adds a spoken task only after the Work API proves the stored item', () => {
-  const source = readFileSync(new URL('../../public/voice.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /Add-task wiring is a later slice/);
-  assert.match(source, /case 'add_task':\s+void addTask\(intent\)/);
-  assert.match(source, /async function addTask\(intent\)[\s\S]*fetch\('\/work'/);
+  const source = readFileSync(new URL('../../public/bind/voice.js', import.meta.url), 'utf8');
+  assert.match(source, /case 'add_task':\s+await addTask\(intent\)/);
+  assert.match(source, /async function addTask\(intent\)[\s\S]*postJSON\('\/work', \{ title \}\)/);
   assert.match(source, /headers: authHeaders\(\{ 'content-type': 'application\/json' \}\)/);
-  assert.match(source, /String\(item\?\.title \|\| ''\) !== title/);
+  assert.match(source, /String\(\(item && item\.title\) \|\| ''\) !== title/);
   assert.match(source, /new CustomEvent\('zeno:state'/);
 });
 
 test('Counsel only answers from saved meetings after active capture ends', () => {
-  const source = readFileSync(new URL('../../public/counsel.js', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../public/bind/counsel.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /askPrivately/);
   assert.match(source, /Live Q&A is off while this meeting is active/);
-  assert.match(source, /S\.archive !== 'ok' \|\| CALL !== null/);
+  assert.match(source, /archiveState !== 'ok' \|\| !!CALL/);
   // The BOUNDARY is "no answering while a call is live". Assert the guarantee,
   // not the tag name: the Ask control became a textarea when Counsel was ported
   // to the design, and pinning `input.` made a safety test fail for a cosmetic
   // reason. Two guards are required, because a disabled control can be re-enabled
   // from devtools but a refusal inside the send path cannot be talked around.
-  assert.match(source, /\.disabled = S\.asking \|\| S\.archive !== 'ok' \|\| CALL !== null/);
-  assert.match(source, /if \(!question \|\| S\.asking \|\| S\.archive !== 'ok' \|\| CALL !== null\) return;/);
+  assert.match(source, /const disabled = asking \|\| archiveState !== 'ok' \|\| !!CALL;/);
+  assert.match(source, /if \(!question \|\| asking \|\| archiveState !== 'ok' \|\| CALL\) return;/);
   assert.match(source, /requestedBy: 'Counsel'/);
   assert.match(source, /End and save the transcript first/);
 });

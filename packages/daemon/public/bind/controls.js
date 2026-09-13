@@ -41,7 +41,38 @@ function focusComposer(sel, seed) {
   return true;
 }
 
+/** Visibly disable a control the app cannot honour, stating the reason. Unlike
+ *  retire(), this keeps the control in place (removing a toolbar icon would
+ *  shift the layout) but makes it plainly inert — the CTA sweep and the owner
+ *  both read it as "off", not "broken". */
+function disableInert(node, why) {
+  if (!node || node.dataset.inert) return;
+  node.dataset.inert = '1';
+  node.disabled = true;
+  node.setAttribute('aria-disabled', 'true');
+  node.title = why;
+  node.style.cssText += ';opacity:.4;cursor:not-allowed;pointer-events:none';
+}
+
 export async function bind() {
+  /* ---- Forge terminal toolbar + Accounts: no backing, so honestly off ----
+     These design-mock icons have no daemon capability behind them: the Forge
+     terminal is a single stateless `POST /forge/terminal` (run one command, get
+     its output) — there is no persistent shell process to split, kill, or give a
+     launch profile, and no accounts system. Rather than let them look clickable
+     and do nothing (exactly what the owner reported), each is visibly disabled
+     with the reason. Context is added from the composer's "+" menu, which is
+     wired; the terminal "@" is redundant and off here. */
+  const INERT = [
+    ['[title="Launch Profile"]', 'The terminal runs one command at a time — there are no shell profiles to choose.'],
+    ['[title="Add Context (@)"]', 'Add context from the composer’s + menu, not the terminal.'],
+    ['[title="Split Terminal"]', 'Zeno’s terminal runs one command at a time; there is no second pane to split into.'],
+    ['[title="Kill Terminal"]', 'Nothing to kill — each command runs and returns; no shell stays alive.'],
+    ['.vsptabs [title="More"]', 'No further terminal actions in this build.'],
+    ['.vsact [title="Accounts"], [title="Accounts"]', 'Zeno is single-user and local; there are no accounts to manage.'],
+  ];
+  for (const [sel, why] of INERT) for (const n of $$(sel)) disableInert(n, why);
+
   /* ---- Home: "Start a Forge task" -------------------------------------
      The artifact only prefilled its own mock composer. Forge is where a task
      actually runs, so send the owner there and put the cursor in the real

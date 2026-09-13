@@ -70,11 +70,16 @@ test('bounded review remains explicit and blocks approval before the action', ()
   assert.ok(reviewField > 0 && reviewField < payloadField && payloadField < footer,
     'the bound diff is in the capsule body before the exact payload and approval footer');
 
-  const app = readFileSync(new URL('../../public/app.js', import.meta.url), 'utf8');
-  const forge = readFileSync(new URL('../../public/forge.js', import.meta.url), 'utf8');
-  assert.match(app, /opts\.review = preview\.review/);
-  assert.match(forge, /review: p\.review/);
-  assert.match(forge, /\(\[\^\\r\\n\]\*\?\\S\)/, 'emitted file paths may contain spaces');
+  // Command's approvals screen (packages/daemon/public/bind/approvals.js) is the
+  // one place the shipped renderer still turns a held action's `review` into a
+  // diff — Forge no longer renders its own inline capsule at all; it shows a
+  // summary count and hands the owner to Command → Approvals to review it
+  // there (one bounded-review path instead of two that could disagree).
+  const approvals = readFileSync(new URL('../../public/bind/approvals.js', import.meta.url), 'utf8');
+  assert.match(approvals, /fileReviewModel\(review, preview\.payload\)/,
+    'the before/after diff is bound through capsule.js\'s own fileReviewModel, not re-derived');
+  assert.match(approvals, /Approval stays blocked until a narrower change exposes the complete diff/,
+    'a bounded review renders as an explicit, still-blocking warning rather than a silently truncated diff');
 });
 
 test('the same action hash refreshes its capsule when the observed file review drifts', () => {
@@ -89,11 +94,14 @@ test('the same action hash refreshes its capsule when the observed file review d
   assert.equal(pendingCapsuleNeedsRefresh(ready, drifted), true, 'ready to drifted must replace the visible approval capsule');
   assert.equal(pendingCapsuleNeedsRefresh(ready, { ...drifted, actionHash: 'other-action' }), false, 'different actions reconcile separately');
 
-  const app = readFileSync(new URL('../../public/app.js', import.meta.url), 'utf8');
-  const forge = readFileSync(new URL('../../public/forge.js', import.meta.url), 'utf8');
-  assert.match(app, /pendingCapsuleNeedsRefresh\(existing\.preview, preview\)/);
-  assert.match(app, /existing\.detail\.replaceChildren\(node\)/, 'an open Command capsule is replaced in place');
-  assert.match(forge, /pendingCapsuleNeedsRefresh\(previous, p\)/);
-  assert.match(forge, /gatePreviews\.set\(hash, p\)/, 'Forge retains the preview used by the visible node');
-  assert.match(forge, /oldNode\?\.destroy\?\.\(\)/, 'Forge destroys the stale node before repainting');
+  // bind/approvals.js does not diff an open capsule against the next preview at
+  // all — every settle (Allow/Deny, or a live-update tick) re-reads /state and
+  // rebuilds every capsule from what it actually reads, so a drifted review can
+  // never be left showing stale. That is a different (simpler) way of reaching
+  // the same guarantee pendingCapsuleNeedsRefresh exists for, not a caller of it.
+  const approvals = readFileSync(new URL('../../public/bind/approvals.js', import.meta.url), 'utf8');
+  assert.match(approvals, /Re-read the real queue rather than guessing what changed locally/,
+    'a settled action re-reads the real queue instead of patching a stale capsule in place');
+  assert.match(approvals, /fill\(pbody, \.\.\.nodes\)/,
+    'every visible capsule is rebuilt from the freshly read queue, so a drifted review cannot be shown stale');
 });

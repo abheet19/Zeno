@@ -19,6 +19,125 @@
 
 import { $, $$, el, fill, authHeaders } from '../bind.js';
 
+/* ---- navigation: "open receipts", "go to Forge" — pure, client-side ------- *
+ *
+ * The owner should be able to say where they want to go, not just what they
+ * want answered. This is deliberately NOT run through /assistant/ask: pure
+ * navigation is not an effect — it clicks a real, already-wired nav control —
+ * so it needs no model, no grounding, and no approval. What makes it safe is
+ * the same thing that makes it narrow: it recognises one clean shape ("open
+ * <target>", "go to <target>", "show <target>", …) and, when the target does
+ * not name one of Command's own screens or one of Zeno's three products
+ * exactly, it recognises NOTHING — the message is sent to the assistant like
+ * any other question instead of being guessed at.
+ */
+
+/** The screens Command's own rail exposes, each `.nav-i[data-screen="…"]`. */
+const SCREEN_ALIASES = {
+  home: 'home',
+  chats: 'chats', chat: 'chats',
+  approvals: 'approvals', approval: 'approvals',
+  receipts: 'receipts', receipt: 'receipts',
+  work: 'work', tasks: 'work', task: 'work',
+  vault: 'vault', memory: 'vault', memories: 'vault',
+  devices: 'devices', device: 'devices',
+  integrations: 'integrations', integration: 'integrations',
+  projects: 'projects', project: 'projects',
+  customize: 'customize', customise: 'customize',
+  customization: 'customize', customisation: 'customize', settings: 'customize',
+};
+
+/** The three products, each switched by `.seg [data-product="…"]`. */
+const PRODUCT_ALIASES = { command: 'command', forge: 'forge', counsel: 'counsel' };
+
+const NAV_LABEL = {
+  home: 'Home', chats: 'Chats', approvals: 'Approvals', receipts: 'Receipts', work: 'Work',
+  vault: 'Vault', devices: 'Devices', integrations: 'Integrations', projects: 'Projects', customize: 'Customize',
+  command: 'Command', forge: 'Forge', counsel: 'Counsel',
+};
+
+/** One clean shape: an opening verb, an optional "the", then the target. */
+const NAV_RE = new RegExp(
+  '^(?:please\\s+)?(?:go(?:\\s+ahead)?\\s+to|navigate\\s+to|take\\s+me\\s+to|' +
+    'switch\\s+to|jump\\s+to|open|show)\\s+(?:the\\s+)?(.+?)\\s*[.!?]*$',
+  'i',
+);
+/** A trailing generic word costs nothing — "the approvals screen" still means approvals. */
+const NAV_GENERIC_TAIL = new Set(['screen', 'tab', 'page', 'view', 'product', 'section']);
+
+/**
+ * Read a navigation target out of the owner's own words, or `null`.
+ *
+ * Deliberately narrow, the same way `fallbackDelegation` is narrow: only ONE
+ * shape is recognised, and only when what follows the verb is — after a
+ * trailing generic word or two is dropped — exactly the name of a screen or
+ * a product. "Show me what changed in the sandbox" starts with a nav verb
+ * too, but "me what changed in the sandbox" names nothing this function
+ * knows, so it returns `null` and the question goes to the assistant like
+ * any other — guessing wrong here would silently swallow a real question.
+ */
+function parseNavCommand(question) {
+  const m = NAV_RE.exec(question.trim());
+  if (m === null) return null;
+  const words = (m[1] ?? '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+  while (words.length > 1 && NAV_GENERIC_TAIL.has(words[words.length - 1])) words.pop();
+  if (words.length === 0) return null;
+  const phrase = words.join(' ');
+  if (Object.prototype.hasOwnProperty.call(PRODUCT_ALIASES, phrase)) {
+    const name = PRODUCT_ALIASES[phrase];
+    return { kind: 'product', name, label: NAV_LABEL[name] };
+  }
+  if (Object.prototype.hasOwnProperty.call(SCREEN_ALIASES, phrase)) {
+    const name = SCREEN_ALIASES[phrase];
+    return { kind: 'screen', name, label: NAV_LABEL[name] };
+  }
+  return null;
+}
+
+/**
+ * Actually navigate: click the SAME controls the owner's own mouse would —
+ * never a synthetic route of this module's own. A screen lives inside the
+ * Command product, so getting to one first clicks Command (a harmless no-op
+ * when already there) and then the screen's own rail button; ui.js's existing
+ * listeners do the rest, exactly as they do for a real click.
+ */
+function performNav(nav) {
+  if (nav.kind === 'product') {
+    const btn = document.querySelector(`.seg [data-product="${nav.name}"]`);
+    if (btn) { btn.click(); return true; }
+    return false;
+  }
+  const cmd = document.querySelector('.seg [data-product="command"]');
+  if (cmd) cmd.click();
+  const screenBtn = document.querySelector(`.nav-i[data-screen="${nav.name}"]`);
+  if (screenBtn) { screenBtn.click(); return true; }
+  return false;
+}
+
+/**
+ * Seed Forge's OWN composer with a delegated task and switch to it. This
+ * never runs anything: it fills a textarea and focuses it, the same as
+ * clicking one of the starter chips ui.js already ships, and the owner is
+ * the one who presses Forge's own Send. Forge shows two composers depending
+ * on whether a session is already open — the empty-state hero (`#ag-ta`) or
+ * the session composer (`#s-ta`) — so both are checked live, at click time,
+ * rather than assumed from whatever was true when this module loaded.
+ */
+function seedForgeComposer(task) {
+  const forgeBtn = document.querySelector('.seg [data-product="forge"]');
+  if (forgeBtn) forgeBtn.click();
+
+  const empty = document.querySelector('#s-empty');
+  const heroIsShowing = !empty || !empty.hidden;
+  const preferred = heroIsShowing ? document.querySelector('#ag-ta') : document.querySelector('#s-ta');
+  const target = preferred || document.querySelector('#s-ta') || document.querySelector('#ag-ta');
+  if (!target) return false;
+  target.value = task;
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+  target.focus();
+  return true;
+}
+
 /* ---- turn rendering, in the artifact's own components --------------------- */
 
 function turn(who, build) {
@@ -77,6 +196,17 @@ function answerBody(payload) {
       ? `This would run on ${d.agentId || 'a hosted agent'} and has NOT started. Start it from Forge — voice and chat cannot start hosted work.`
       : `Delegated to ${d.agentId || 'an agent'}.`;
     nodes.push(box);
+
+    // Still just an OFFER: this only navigates to Forge and pre-fills its
+    // composer with the task. It never calls Forge's own Send — the owner
+    // does that by hand, in Forge, the same as any other governed run.
+    if (typeof d.task === 'string' && d.task.trim()) {
+      const a = el('div', 'dva-a');
+      const go = el('button', 'btn p sm', d.needsConfirm ? 'Start in Forge' : 'Open in Forge');
+      go.addEventListener('click', () => seedForgeComposer(d.task));
+      a.append(go);
+      nodes.push(a);
+    }
   }
   return nodes;
 }
@@ -118,6 +248,23 @@ function wire({ ta, send, turns, thread, onFirstTurn }) {
     turns.append(turn('you', (b) => b.append(paragraph(question))));
     ta.value = '';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Pure navigation never reaches the network: clicking a nav control is not
+    // an effect, so it needs no model and no approval. Anything not a CLEAN
+    // "open <target>" shape falls through to the real question below —
+    // ambiguous is not this function's job to resolve.
+    const nav = parseNavCommand(question);
+    if (nav) {
+      const opened = performNav(nav);
+      turns.append(turn('z', (b) => b.append(el(
+        'div', 'fnote',
+        opened ? `Opened ${nav.label}.` : `Could not find ${nav.label} in this window.`,
+      ))));
+      turns.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      busy = false;
+      if (send) send.disabled = false;
+      return;
+    }
 
     // Honest progress: "asking" is a state we are actually in, not a fake trace.
     const pending = turn('z', (b) => b.append(el('div', 'fnote', 'Asking Zeno — reading your local state…')));

@@ -62,6 +62,7 @@ export { cleanGroundedReply, groundReply, type Grounding, type GroundingFailure 
 
 export {
   parseIntent,
+  fallbackDelegation,
   normalizeRelPath,
   INTENT_KINDS,
   type Intent,

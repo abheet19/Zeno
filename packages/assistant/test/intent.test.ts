@@ -8,7 +8,14 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeRelPath, parseIntent, type DelegateIntent, type ProposeWriteIntent } from '../src/index.js';
+import {
+  normalizeRelPath,
+  parseIntent,
+  fallbackDelegation,
+  CANNOT_ANSWER,
+  type DelegateIntent,
+  type ProposeWriteIntent,
+} from '../src/index.js';
 
 /**
  * Narrow a parsed intent to the propose-write member.
@@ -360,4 +367,117 @@ test('prose that merely begins with the word delegate is not a delegation', () =
   // "PROPOSE: writeup …" from being read as a proposal.
   assert.equal(parseIntent('Delegating this would need an agent you have not configured [g1].'), null);
   assert.equal(parseIntent('DELEGATED: build a parser'), null);
+});
+
+// ── the deterministic fallback ───────────────────────────────────────────────
+//
+// `fallbackDelegation` is only ever called by the daemon AFTER `parseIntent`
+// has already returned `null` for the model's answer — it never competes with
+// a `DELEGATE:` or `PROPOSE:` line the model actually wrote. Every test here
+// asks the same question as the rest of this file: does this default to
+// NOTHING whenever the input is anything but a clear imperative that the model
+// failed to help with?
+
+test('the owner\'s worked example: an actionable request the model could not ground', () => {
+  const i = fallbackDelegation('Add a retry with backoff to the ingest client', CANNOT_ANSWER);
+  assert.deepEqual(i, { kind: 'delegate', task: 'Add a retry with backoff to the ingest client' });
+});
+
+test('an empty answer is just as useless as the refusal', () => {
+  const i = fallbackDelegation('Fix the flaky login test', '');
+  assert.deepEqual(i, { kind: 'delegate', task: 'Fix the flaky login test' });
+});
+
+test('a plain question yields null — it is not an instruction', () => {
+  assert.equal(fallbackDelegation('what is in my sandbox', CANNOT_ANSWER), null);
+  assert.equal(fallbackDelegation('What is in my sandbox?', ''), null);
+});
+
+test('a greeting yields null', () => {
+  for (const g of ['hi', 'hello', 'hey there', 'good morning', 'thanks']) {
+    assert.equal(fallbackDelegation(g, CANNOT_ANSWER), null, g);
+  }
+});
+
+test('a real grounded answer is left alone, even to a question with a leading verb from the list', () => {
+  // "list" is one of the owner's own trigger verbs, but the model DID answer —
+  // overriding a real answer with a delegation offer would be strictly worse
+  // than leaving it as an answer.
+  const i = fallbackDelegation('List the receipts waiting on me', 'Two receipts are waiting [r1, r2].');
+  assert.equal(i, null);
+});
+
+test('a non-empty, non-refusal answer suppresses the fallback even for "add"', () => {
+  const i = fallbackDelegation('Add up the pending approvals', 'There are 3 pending [p1, p2, p3].');
+  assert.equal(i, null);
+});
+
+test('leading verbs from the owner\'s own list are all recognised', () => {
+  const verbs = [
+    'add', 'create', 'make', 'build', 'implement', 'write', 'fix', 'refactor',
+    'rename', 'update', 'remove', 'delete', 'run', 'test', 'open', 'check',
+    'list', 'scaffold', 'wire', 'install',
+  ];
+  for (const v of verbs) {
+    const q = `${v} something in the repo`;
+    const i = fallbackDelegation(q, CANNOT_ANSWER);
+    assert.deepEqual(i, { kind: 'delegate', task: q }, q);
+  }
+});
+
+test('polite and conversational framing is stripped before the verb is read', () => {
+  for (const q of [
+    'Please add a retry to the ingest client',
+    'Could you fix the login bug',
+    'Can you please refactor the ingest client',
+    "Hey, can you add a retry with backoff",
+    "I want you to build a slugify utility",
+    "Let's scaffold a new endpoint",
+    'go ahead and wire up the retry logic',
+  ]) {
+    const i = fallbackDelegation(q, CANNOT_ANSWER);
+    assert.equal(i?.kind, 'delegate', q);
+    // The TASK carried is the owner's original sentence, not the stripped one —
+    // fidelity to what they actually said matters once an agent reads it.
+    assert.equal((i as DelegateIntent).task, q, q);
+  }
+});
+
+test('a statement with no leading verb at all is left alone', () => {
+  assert.equal(fallbackDelegation('the ingest client needs a retry with backoff', CANNOT_ANSWER), null);
+});
+
+test('a bare filler word alone is not silently deleted into an empty, actionable string', () => {
+  for (const q of ['hey', 'ok', 'please', 'so']) {
+    assert.equal(fallbackDelegation(q, CANNOT_ANSWER), null, q);
+  }
+});
+
+test('an empty question yields null', () => {
+  assert.equal(fallbackDelegation('', CANNOT_ANSWER), null);
+  assert.equal(fallbackDelegation('   ', ''), null);
+});
+
+test('an over-long actionable question is refused, never clipped', () => {
+  const long = `add ${'x'.repeat(600)}`;
+  assert.equal(fallbackDelegation(long, CANNOT_ANSWER), null);
+  const short = `add ${'x'.repeat(400)}`;
+  assert.notEqual(fallbackDelegation(short, CANNOT_ANSWER), null);
+});
+
+test('invisible and reordering characters in the question are scrubbed from the task', () => {
+  const ZWSP = String.fromCharCode(0x200b);
+  const i = fallbackDelegation(`add a${ZWSP}retry with backoff`, CANNOT_ANSWER);
+  assert.equal(i?.kind, 'delegate');
+  assert.equal((i as DelegateIntent).task, 'add a retry with backoff');
+});
+
+test('the fallback never produces anything but kind and task', () => {
+  const i = fallbackDelegation('add a retry with backoff', CANNOT_ANSWER);
+  assert.deepEqual(Object.keys(i ?? {}).sort(), ['kind', 'task']);
+});
+
+test('a whitespace-only answer counts as useless, same as empty', () => {
+  const i = fallbackDelegation('fix the ingest client', '   \n  ');
+  assert.deepEqual(i, { kind: 'delegate', task: 'fix the ingest client' });
 });
