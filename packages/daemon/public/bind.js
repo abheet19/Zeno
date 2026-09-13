@@ -194,12 +194,17 @@ async function bindRailBadges() {
     badge('chats', Array.isArray(arr) ? arr.length : null);
   } catch { /* storage blocked: the badge simply stays blank */ }
 
-  /* Forge chrome carries the same claim in four more places, all hardcoded by
-     the artifact: the cyan "1 approval waiting" call-to-action, the activity
-     bar's source-control and Zeno badges, and the session panel's Actions tab.
-     Telling the owner something is held when nothing is held is the exact lie
-     this kernel exists to prevent, so each is written from the real count or
-     hidden outright. */
+  /* Forge chrome carries the same claim in two more places, both hardcoded by
+     the artifact: the cyan "1 approval waiting" call-to-action and the
+     activity bar's Zeno badge. Telling the owner something is held when
+     nothing is held is the exact lie this kernel exists to prevent, so each
+     is written from the real count or hidden outright.
+
+     The session panel's Actions tab badge is NOT one of these — it names one
+     session's own proposed changes, not the global held queue (a session with
+     zero proposals must show no badge even while other sessions, or older
+     runs, have things held), so bind/forge/session-views.js's renderActions
+     paints it from that session's own state instead. */
   const pending = state.ok && Array.isArray(state.data?.pending) ? state.data.pending.length : null;
 
   const cta = document.querySelector('.tbcta');
@@ -214,43 +219,6 @@ async function bindRailBadges() {
     const n = Number.isFinite(pending) ? pending : 0;
     zenoBadge.textContent = n > 0 ? String(n) : '';
     zenoBadge.hidden = n === 0;
-  }
-
-  const actions = document.querySelector('#s-tabs [data-stab="actions"] .fct');
-  if (actions) {
-    const n = Number.isFinite(pending) ? pending : 0;
-    actions.textContent = n > 0 ? String(n) : '';
-    actions.hidden = n === 0;
-  }
-
-  /* The top-bar model chip. The artifact hardcodes "qwen3:8b · local"; this
-     window may well be routed to something else, and a chip that names the wrong
-     model is worse than no chip. Name the model actually in force. */
-  const chip = document.querySelector('.topright .chip, [data-model-pill="chip"]');
-  if (chip) {
-    const label = chip.querySelector('[data-mount="top-model"]') || chip.lastChild;
-    const ag = await getJSON('/forge/agents');
-    let text = null;
-    if (ag.ok) {
-      const locals = Array.isArray(ag.data?.localModels) ? ag.data.localModels : [];
-      const def = ag.data?.defaultModel || ag.data?.model;
-      // Name what will actually run. With more than one local model installed the
-      // daemon routes per policy rather than pinning one, so say THAT — a count
-      // ("3 local models") names nothing the owner can act on, and naming a single
-      // model would claim a choice the router has not made.
-      if (def) text = `${def} · local`;
-      else if (locals.length === 1) text = `${locals[0]} · local`;
-      else if (locals.length > 1) text = 'Auto route · local first';
-      else text = 'no local model';
-    }
-    if (label && text) {
-      if (label.nodeType === 3) label.textContent = text;
-      else label.textContent = text;
-      chip.title = 'The model this window uses. Click to choose another.';
-    } else if (!ag.ok) {
-      if (label) label.textContent = 'model unread';
-      chip.title = ag.error || 'The runtime could not be read.';
-    }
   }
 
   /* Force the Standing Field to measure itself. field.js sizes its canvas from

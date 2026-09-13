@@ -55,7 +55,7 @@ export function setupExplorerProject(S) {
     if (p && p.scratch) say(p.note);
     else if (p && p.savedProblem) say(`Your saved project ${p.savedProblem.path} could not be opened: ${p.savedProblem.problem}`);
     else if (noteEl && /scratch repository|could not be opened/.test(noteEl.textContent)) say('');
-    // The session panel's two "▣ sandbox" pills are static markup; they name
+    // The session panel's two "▣ workspace" pills are static markup; they name
     // the repository the run will touch, so they follow the real project.
     for (const pill of $$('.ag-foot .pill, .sessfoot .pill', ide)) {
       if (/^▣/.test(pill.textContent.trim())) pill.textContent = `▣ ${name || 'repository'}`;

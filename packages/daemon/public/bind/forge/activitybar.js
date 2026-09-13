@@ -28,20 +28,20 @@ export function setupActivityBar(S) {
    * The artifact ships this view already reporting a GREEN SUITE:
    * a tick beside "tests/ingest.spec.ts", a named passing test, and
    * "142 passed · exited 0 · 3.1s". Nothing ran. That file is not in
-   * the sandbox and never was. A fabricated PASS is the worst thing
+   * the workspace and never was. A fabricated PASS is the worst thing
    * this window can draw — it is the one claim an owner acts on
    * without checking — so the fixture is cleared unconditionally the
    * instant this binder runs, before any fetch can succeed or fail.
    *
    * What replaces it is GET /forge/tests: the package.json scripts the
-   * daemon actually discovered in the sandbox, and only the ones it is
+   * daemon actually discovered in the workspace, and only the ones it is
    * willing to run. A run goes through POST /forge/tests/run (owner
    * only, one at a time, no command or arguments from the browser) and
    * what is drawn afterwards is that answer's own exit code, duration
    * and output. Nothing on this panel is summarised into a verdict
    * here; "142 passed" can only ever be words the run itself printed.
    *
-   * Read lazily — the catalog is a directory walk of the sandbox, so it
+   * Read lazily — the catalog is a directory walk of the workspace, so it
    * happens when the view is opened or refreshed, not on every boot.
    */
   const testingView = $('.vsside .vsview[data-vsview="testing"]', ide);
@@ -58,13 +58,13 @@ export function setupActivityBar(S) {
 
     function renderTests() {
       if (!testPad) return;
-      if (!testsRead) { fill(testPad, el('div', 'fempty', 'Open this view to read the sandbox’s package scripts.')); return; }
+      if (!testsRead) { fill(testPad, el('div', 'fempty', 'Open this view to read the workspace’s package scripts.')); return; }
       if (testsErr) { fill(testPad, el('div', 'fempty', `The script catalog could not be read: ${testsErr}`)); return; }
-      if (!testsData) { fill(testPad, el('div', 'fempty', 'Reading the sandbox’s package scripts…')); return; }
+      if (!testsData) { fill(testPad, el('div', 'fempty', 'Reading the workspace’s package scripts…')); return; }
       const scripts = Array.isArray(testsData.scripts) ? testsData.scripts : [];
       if (!scripts.length) {
         fill(testPad,
-          el('div', 'fempty', 'No package.json in this sandbox declares a test, check, typecheck or lint script, so Forge has nothing here to run.'),
+          el('div', 'fempty', 'No package.json in this workspace declares a test, check, typecheck or lint script, so Forge has nothing here to run.'),
           el('div', 'vsnote', testsData.note || ''));
         return;
       }

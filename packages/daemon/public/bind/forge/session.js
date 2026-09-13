@@ -16,6 +16,7 @@ import {
 import { setupPlanFirst } from './plan.js';
 import { setupSessionViews } from './session-views.js';
 import { setupAgentMode } from './agent-mode.js';
+import { setupComposerCommands } from './composer-commands.js';
 
 export function setupSession(S) {
   const ide = S.ide;
@@ -270,10 +271,18 @@ export function setupSession(S) {
   const agSend = cloneReplace($('#ag-send'));
   const agTa = cloneReplace($('#ag-ta'));
 
+  // The "/" command menu for both composers — split out to composer-commands.js
+  // for the per-file line budget. Each `handleKeydown` must run before this
+  // file's own Enter-to-send, so the menu gets first refusal on every key.
+  const { sCmd, agCmd } = setupComposerCommands(S, { sTa, agTa, startNewSession });
+
   if (sTa) {
     sTa.disabled = !S.OWNER;
     sTa.addEventListener('input', () => { sTa.style.height = 'auto'; sTa.style.height = `${Math.min(sTa.scrollHeight, 160)}px`; });
-    sTa.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFromComposer(); } });
+    sTa.addEventListener('keydown', (e) => {
+      if (sCmd && sCmd.handleKeydown(e)) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFromComposer(); }
+    });
   }
   function submitFromComposer() {
     if (!sTa) return;
@@ -288,7 +297,10 @@ export function setupSession(S) {
   if (agTa) {
     agTa.disabled = !S.OWNER;
     agTa.addEventListener('input', () => { agTa.style.height = 'auto'; agTa.style.height = `${Math.min(agTa.scrollHeight, 200)}px`; });
-    agTa.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFromHero(); } });
+    agTa.addEventListener('keydown', (e) => {
+      if (agCmd && agCmd.handleKeydown(e)) return;
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitFromHero(); }
+    });
   }
   function submitFromHero() {
     if (!agTa) return;

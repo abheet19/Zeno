@@ -40,7 +40,7 @@ export function init(section) {
   const mount = root.querySelector('[data-mount="field"]');
   if (!mount) return;
   mount.innerHTML =
-    '<canvas id="field" role="img" aria-label="The Standing Field: an interactive map of Zeno\'s core, its three surfaces, this machine, the sandbox repository, work sources, pending approvals, recent receipts, the notes in your Vault, your recorded meetings, and the models installed on this machine\'s local runtime. Drag to rotate, click a node to inspect. A full list equivalent is behind the List button."></canvas>';
+    '<canvas id="field" role="img" aria-label="The Standing Field: an interactive map of Zeno\'s core, its three surfaces, this machine, the workspace repository, work sources, pending approvals, recent receipts, the notes in your Vault, your recorded meetings, and the models installed on this machine\'s local runtime. Drag to rotate, click a node to inspect. A full list equivalent is behind the List button."></canvas>';
   F.c = mount.querySelector('#field');
   const listEl = root.querySelector('[data-mount="field-list"]');
   wire(F.c);

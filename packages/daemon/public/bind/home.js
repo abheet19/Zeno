@@ -132,14 +132,14 @@ function bindNeedsYou(st, sec) {
   fill(sec, header, ...body);
 }
 
-/* ---- "Running": the real sandbox state from /forge/status ---------------- */
+/* ---- "Running": the real workspace state from /forge/status -------------- */
 function runningCard(forge, changed) {
-  const branch = clip(forge.branch || 'sandbox', 20);
+  const branch = clip(forge.branch || '(unknown)', 20);
   const head = forge.head ? ` @ ${String(forge.head).slice(0, 7)}` : '';
   const card = el('div', 'lcard');
-  const lk = el('div', 'lk'); lk.append(svgIcon(SVG_FORGE), txt(`Forge sandbox · ${branch}`));
+  const lk = el('div', 'lk'); lk.append(svgIcon(SVG_FORGE), txt(`Forge workspace · ${branch}`));
   const lm = el('div', 'lm', `${changed} uncommitted change${changed === 1 ? '' : 's'}${head}`);
-  const pill = el('span', 'pill cy'); pill.append(el('span', 'd'), txt('in the sandbox'));
+  const pill = el('span', 'pill cy'); pill.append(el('span', 'd'), txt('in the workspace'));
   const btn = el('button', 'laction', 'Open Forge'); btn.setAttribute('data-product-go', 'forge');
   const lr = el('div', 'lr'); lr.append(pill, btn);
   card.append(lk, lm, lr);
@@ -155,20 +155,20 @@ function bindRunning(forgeRes, sec) {
   const changed = hasRepo && Array.isArray(data.changed) ? data.changed.length : 0;
   // "Running" counts AGENT RUNS, which bind/orchestrator.js reads live from
   // the daemon's run-progress stream and writes into this header itself. This
-  // read only knows the sandbox's repo state, and uncommitted changes are not
+  // read only knows the workspace's repo state, and uncommitted changes are not
   // a running process — counting them here put "RUNNING · 1" over a machine
   // where nothing ran. So this header says 0 until the orchestrator sees a
-  // real run; the sandbox card below is kept, labelled as what it is.
+  // real run; the workspace card below is kept, labelled as what it is.
   setSum(header, !ok ? null : 0);
   let body;
-  if (!ok) body = [el('div', 'hnote', 'The sandbox could not be read.')];
-  else if (!hasRepo) body = [el('div', 'hnote', 'No agent is running. No sandbox repository yet.')];
+  if (!ok) body = [el('div', 'hnote', 'The workspace could not be read.')];
+  else if (!hasRepo) body = [el('div', 'hnote', 'No agent is running. No workspace repository yet.')];
   else if (changed > 0) body = [el('div', 'hnote', 'No agent is running.'), runningCard(data, changed)];
-  else body = [el('div', 'hnote', 'No agent is running. The sandbox is clean.')];
+  else body = [el('div', 'hnote', 'No agent is running. The workspace is clean.')];
   fill(sec, header, ...body);
 }
 
-/* ---- "Today": verified / in the sandbox / backlog / memories / left this
+/* ---- "Today": verified / in the workspace / backlog / memories / left this
    machine — each an honest count, or an em dash when that read failed. ---- */
 function bindToday(st, workRes, forgeRes, memRes, sec) {
   if (!sec) return;

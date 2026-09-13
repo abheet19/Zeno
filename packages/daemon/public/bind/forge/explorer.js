@@ -96,7 +96,10 @@ export function setupExplorer(S) {
       const row = el('div', collapsed ? 'vsdir' : 'vsdir open');
       row.dataset.dir = '1';
       const dotc = el('span', subtreeHasChange(child, changed) ? 'vsdotc new' : 'vsdotc');
-      add(row, el('span', 'chev', collapsed ? '▸' : '▾'), el('span', 'vsfo', '▣'), document.createTextNode(name), dotc);
+      // .vslabel is what may shrink and ellipsize (see index.html's .vslabel
+      // rule) — a bare text node here would instead widen the row past the
+      // panel and reopen the horizontal-scrollbar bug this fixes.
+      add(row, el('span', 'chev', collapsed ? '▸' : '▾'), el('span', 'vsfo', '▣'), el('span', 'vslabel', name), dotc);
       row.title = path;
       const kids = el('div', 'vskids');
       kids.hidden = collapsed;
@@ -113,7 +116,7 @@ export function setupExplorer(S) {
       const row = el('div', 'vsfile');
       row.dataset.file = file.path;
       const badge = el('span', cls, txt);
-      add(row, badge, document.createTextNode(file.name));
+      add(row, badge, el('span', 'vslabel', file.name));
       if (code) {
         const isNew = code === '??' || /^A/.test(code);
         const label = code === '??' ? 'U' : (code.replace(/[^A-Za-z]/g, '')[0] || 'M');

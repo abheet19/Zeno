@@ -63,7 +63,20 @@ export function setupSessionViews(S) {
     }));
   };
 
+  /** The Actions tab's own badge: THIS session's proposed changes, never the
+   *  global held queue — bind.js used to paint it from /state's whole pending
+   *  count, so a session with nothing proposed yet still wore a stale "1"
+   *  left over from a completely different run. 0 proposals means no badge. */
+  function paintActionsBadge(session) {
+    const badge = $('#s-tabs [data-stab="actions"] .fct');
+    if (!badge) return;
+    const n = (session && Array.isArray(session.lastProposed)) ? session.lastProposed.length : 0;
+    badge.textContent = n > 0 ? String(n) : '';
+    badge.hidden = n === 0;
+  }
+
   S.renderActions = function renderActions(session) {
+    paintActionsBadge(session);
     const view = $('.sessview[data-stab="actions"]');
     if (!view) return;
     const proposed = session.lastProposed || [];

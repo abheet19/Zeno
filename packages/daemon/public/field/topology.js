@@ -64,7 +64,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
 
   // 2 · the three products — real surfaces this daemon actually serves.
   nodes.push({ id: 'command', k: 'agent', l: 'Command', nav: 'command', d: 'The approval surface. Every consequential effect stops here for your yes, with its payload, tier and hash binding shown in full.' });
-  nodes.push({ id: 'forge', k: 'agent', l: 'Forge', nav: 'forge', d: 'The governed coding surface over the sandbox repo. It can propose a change; it cannot approve its own output.' });
+  nodes.push({ id: 'forge', k: 'agent', l: 'Forge', nav: 'forge', d: 'The governed coding surface over the workspace repo. It can propose a change; it cannot approve its own output.' });
   nodes.push({ id: 'counsel', k: 'agent', l: 'Counsel', nav: 'counsel', d: 'The consent-first meeting surface. The desktop uses local Whisper when installed; browser fallback may send microphone audio to the browser speech provider. Saved transcript text stays on this machine and detected secrets are redacted first.' });
   edges.push(['core', 'command'], ['core', 'forge'], ['core', 'counsel']);
 
@@ -72,14 +72,14 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   nodes.push({ id: 'dev', k: 'dev', l: 'This PC', d: 'The Windows host this daemon runs on. Trust is per-device and earned: this is the only device on the mesh.' });
   edges.push(['core', 'dev']);
 
-  // 4 · the sandbox repo, if the daemon reports one.
+  // 4 · the workspace repo, if the daemon reports one.
   const changed = (forge && Array.isArray(forge.changed)) ? forge.changed.length : 0;
   if (forge && forge.repo) {
-    const branch = forge.branch || 'sandbox';
+    const branch = forge.branch || '(unknown)';
     nodes.push({
       id: 'repo', k: 'repo', l: clip(branch, 17),
       att: changed > 0 ? 'active' : null,
-      d: `The Forge sandbox repository on ${branch}${forge.head ? ' @ ' + String(forge.head).slice(0, 7) : ''} — ${changed ? `${changed} uncommitted change${changed === 1 ? '' : 's'}` : 'clean'}.`,
+      d: `The Forge workspace repository on ${branch}${forge.head ? ' @ ' + String(forge.head).slice(0, 7) : ''} — ${changed ? `${changed} uncommitted change${changed === 1 ? '' : 's'}` : 'clean'}.`,
     });
     edges.push(['core', 'repo'], ['forge', 'repo']);
     if (changed > 0) { act.push('repo', 'forge'); }
@@ -226,7 +226,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   }
 
   // 12 · live agent runs — the thing Command actually orchestrates, not the
-  //      sandbox's uncommitted-changes proxy in section 4. Each entry comes
+  //      workspace's uncommitted-changes proxy in section 4. Each entry comes
   //      straight from the daemon's own /forge/run-progress stream (see
   //      field/runs.js), so a run that never started, or one this window
   //      never subscribed to (no owner token), draws no node here. A run

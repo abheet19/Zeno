@@ -149,7 +149,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   // delegated either, say what CAN be answered instead — a guide, not a shrug.
   // It makes no factual claim, so it needs no citation to stay grounded.
   if (answer.trim() === CANNOT_ANSWER && intent === null) {
-    answer = 'I only answer from your local state — I don’t guess. Ask me what’s waiting on you, what’s in the sandbox, what ran today, or what you’ve saved to memory. Or describe a task and I’ll run it in Forge.';
+    answer = 'I only answer from your local state — I don’t guess. Ask me what’s waiting on you, what’s in the workspace, what ran today, or what you’ve saved to memory. Or describe a task and I’ll run it in Forge.';
   }
   json(res, 200, { answer, cited: grounding.cited, ungrounded: null, proposal, delegated, note });
 }

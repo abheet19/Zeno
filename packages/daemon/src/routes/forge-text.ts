@@ -1,5 +1,5 @@
 /**
- * Bounded, strict-UTF-8 reads of sandbox/worktree files, and the classifier
+ * Bounded, strict-UTF-8 reads of workspace/worktree files, and the classifier
  * that turns one changed worktree path into a proposal candidate (or an
  * honest reason it cannot become one).
  *
@@ -134,7 +134,7 @@ export function readForgeProposalCandidate(path: string, maxBytes = MAX_FORGE_PR
     return {
       ok: false,
       reason: 'unreadable',
-      note: 'the changed path could not be read as a regular sandbox file; no proposal was created',
+      note: 'the changed path could not be read as a regular workspace file; no proposal was created',
       bytes: null,
     };
   }

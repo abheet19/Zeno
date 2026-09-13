@@ -21,7 +21,7 @@
  *
  * This file is now just the thin entry point: it builds the shared `S` state
  * (see bind/forge/state.js), runs each area's setup in its own module, and
- * runs the boot sequence that reads the sandbox for the first time. Each
+ * runs the boot sequence that reads the workspace for the first time. Each
  * setup*(S) call is synchronous and only registers DOM listeners and, for
  * the handful of behaviours other modules need at runtime, a function on
  * `S` (see state.js's own comment for why that indirection exists instead
@@ -81,7 +81,7 @@ async function bindForge() {
    * "reading" state SYNCHRONOUSLY, so nothing fabricated is ever on screen
    * even for the brief window before the first daemon round-trip resolves.
    */
-  S.renderEditorEmpty('Reading the sandbox from the daemon…');
+  S.renderEditorEmpty('Reading the workspace from the daemon…');
   explorerApi.renderExplorer();
   explorerApi.renderScm();
   sessionApi.showEmptyState();

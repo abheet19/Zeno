@@ -52,7 +52,7 @@ export function renderReadouts(state, work, forge, mem, agents) {
     const parts = [];
     if (needs) parts.push(`<span class="am">${needs}</span> needs you`);
     if (denied) parts.push(`<span class="rd">${denied}</span> refused`);
-    if (changed) parts.push(`<span class="cy">${changed}</span> in the sandbox`);
+    if (changed) parts.push(`<span class="cy">${changed}</span> in the workspace`);
     if (items.length) parts.push(`<span>${items.length}</span> in the backlog`);
     if (verified) parts.push(`<span class="gr">${verified}</span> verified`);
     tally.innerHTML = parts.length ? parts.join('<span class="sep"></span>') : '<span>nothing outstanding</span>';
@@ -81,7 +81,7 @@ export function renderReadouts(state, work, forge, mem, agents) {
   // The four rail items that used to be dead now carry the same kind of count:
   // an array length, or nothing. A source that could not be read contributes no
   // number at all rather than a zero that would claim it answered.
-  // Uncommitted changes are IN the sandbox, not waiting on a yes, so this count
+  // Uncommitted changes are IN the workspace, not waiting on a yes, so this count
   // is never amber: amber on the rail means something wants a decision from you.
   railN('rail-workstation', changed);
   railN('rail-vault', (mem && Array.isArray(mem.notes)) ? mem.notes.length : 0);
@@ -176,25 +176,25 @@ export function renderReadouts(state, work, forge, mem, agents) {
     }
   }
 
-  // "Running" — the sandbox worktree from /forge/status. There is no daemon
+  // "Running" — the workspace worktree from /forge/status. There is no daemon
   // route this window can read for live agent sessions, so this reports the one
-  // genuine in-flight signal it has: the sandbox's uncommitted changes.
+  // genuine in-flight signal it has: the workspace's uncommitted changes.
   setText('running-sum', forgeUnread ? '' : (changed ? '1' : ''));
   const runningBody = document.querySelector('[data-mount="running-body"]');
   if (runningBody) {
     if (forgeUnread) {
-      runningBody.innerHTML = '<div class="hs-empty">The sandbox could not be read.</div>';
+      runningBody.innerHTML = '<div class="hs-empty">The workspace could not be read.</div>';
     } else if (changed > 0) {
-      const branch = esc(clip((forge && forge.branch) || 'sandbox', 20));
+      const branch = esc(clip((forge && forge.branch) || '(unknown)', 20));
       const head = (forge && forge.head) ? ' @ ' + esc(String(forge.head).slice(0, 7)) : '';
       runningBody.innerHTML = '<div class="lcard">'
-        + `<div class="lk">${SVG_FORGE}<span>Forge sandbox · ${branch}</span></div>`
+        + `<div class="lk">${SVG_FORGE}<span>Forge workspace · ${branch}</span></div>`
         + `<div class="lm">${changed} uncommitted change${changed === 1 ? '' : 's'}${head}</div>`
-        + '<div class="lr"><span class="pill cy"><span class="d"></span>in the sandbox</span>'
+        + '<div class="lr"><span class="pill cy"><span class="d"></span>in the workspace</span>'
         + '<button type="button" class="laction" data-go="forge">Open Forge</button></div>'
         + '</div>';
     } else {
-      runningBody.innerHTML = '<div class="hs-empty">No active runs. The sandbox is clean; a Forge run shows here while it works.</div>';
+      runningBody.innerHTML = '<div class="hs-empty">No active runs. The workspace is clean; a Forge run shows here while it works.</div>';
     }
   }
 

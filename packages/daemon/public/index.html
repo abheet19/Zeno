@@ -539,7 +539,7 @@ button{font:inherit; color:inherit}
    exactly the classic layout above, unchanged. */
 .ide.mode-agent .wb{grid-template-columns:44px 0 0 minmax(0,1fr)}
 .ide.mode-agent .vsside, .ide.mode-agent .vsed{display:none}
-/* The status bar is editor chrome — sandbox/branch, Problems/Ports/last-exit,
+/* The status bar is editor chrome — workspace/branch, Problems/Ports/last-exit,
    line/col, encoding. Agent mode hides the editor (.vsed above), so its footer
    has nothing to report and its Problems/Ports/exit readouts would open a panel
    that is not on screen. Hide it with the editor; Command carries the governance
@@ -585,11 +585,13 @@ button{font:inherit; color:inherit}
 .vsbadge{position:absolute; right:5px; bottom:5px; min-width:15px; height:15px; padding:0 4px; border-radius:99px; background:var(--cyan); color:var(--g1); font-family:var(--font-mono); font-size:9px; font-weight:600; display:grid; place-items:center}
 .vsbadge.am{background:var(--amber)} .vsbadge.s{position:static; margin-left:6px; background:var(--g5); color:var(--ink-2)}
 
-/* side bar */
-.vsside{min-height:0; overflow:auto; border-right:1px solid var(--gl-edge); background:var(--g1); display:flex; flex-direction:column}
+/* side bar — a calmer, Cascade-style panel: quiet low-contrast headers, tight
+   spacing, and (below) rows that clip a long name with an ellipsis rather
+   than ever pushing this panel into a sideways scroll. */
+.vsside{min-height:0; overflow-y:auto; overflow-x:hidden; border-right:1px solid var(--gl-edge); background:var(--g1); display:flex; flex-direction:column}
 .vsview{display:none; flex-direction:column; min-height:0} .vsview.on{display:flex}
-.vsvh{display:flex; align-items:center; gap:6px; padding:9px 12px 8px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-2); font-weight:500; flex:none}
-.vssect{display:flex; align-items:center; gap:4px; padding:5px 8px; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; font-weight:600; color:var(--ink-2); cursor:pointer; border-top:1px solid var(--rule); user-select:none}
+.vsvh{display:flex; align-items:center; gap:6px; padding:8px 12px 6px; font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-3); font-weight:500; flex:none}
+.vssect{display:flex; align-items:center; gap:4px; padding:6px 8px; font-family:var(--font-ui); font-size:11px; letter-spacing:0; font-weight:500; color:var(--ink-2); cursor:pointer; border-top:1px solid var(--rule); user-select:none}
 .vssect .chev, .vsdir .chev, .vsresf .chev{width:14px; text-align:center; color:var(--ink-3); font-size:10px}
 .vsvh-a{display:none; gap:1px} .vssect:hover .vsvh-a{display:inline-flex}
 /* Explorer: the working-folder control above the tree (Devin's repo chip). */
@@ -599,11 +601,18 @@ button{font:inherit; color:inherit}
 .vsproj-note{font-size:11px; color:var(--ink-3); padding:0 12px 6px; line-height:1.4}
 .vsoutline{display:flex; flex-direction:column; padding:2px 0 6px} .vsoutline .vsfile{padding-left:14px} .vsoutline .vsfile[data-level="2"]{padding-left:26px} .vsoutline .vsfile[data-level="3"]{padding-left:38px} .vsoutline .vsfile[data-level="4"]{padding-left:50px}
 .vsoutline .vskind{font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); min-width:26px}
-.vstree{display:flex; flex-direction:column; padding:2px 0 8px}
-.vsdir, .vsfile{display:flex; align-items:center; gap:5px; padding:3px 8px 3px 12px; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap; border:0; background:none; text-align:left; width:100%}
-.vskids .vsdir, .vskids .vsfile{padding-left:26px} .vskids .vskids .vsfile{padding-left:40px}
+.vstree{display:flex; flex-direction:column; padding:2px 6px 8px; min-width:0}
+/* overflow:hidden + the .vslabel rule below is the fix for the tree's stray
+   horizontal scrollbar: a long name now clips with an ellipsis inside its own
+   row instead of widening the row past the panel (which used to push .vsside
+   into a sideways scroll — never desired, .vsside is overflow-x:hidden above). */
+.vsdir, .vsfile{display:flex; align-items:center; gap:5px; padding:4px 8px; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap; border:0; background:none; text-align:left; width:100%; min-width:0; overflow:hidden; border-radius:6px}
+.vskids .vsdir, .vskids .vsfile{margin-left:14px; width:calc(100% - 14px)} .vskids .vskids .vsdir, .vskids .vskids .vsfile{margin-left:28px; width:calc(100% - 28px)}
 .vsdir:hover, .vsfile:hover{background:var(--wash); color:var(--ink)}
 .vsfile.on{background:var(--wash-2); color:var(--ink); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cyan) 40%,transparent)}
+/* The row's name: the one part allowed to shrink and ellipsize. Everything
+   else in the row (icon, status dot, mod badge) keeps its own natural size. */
+.vslabel{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .vsfo{color:#7aa0b5; font-size:11px; width:14px; text-align:center}
 .vsi{display:inline-grid; place-items:center; width:16px; height:16px; font-family:var(--font-mono); font-size:8.5px; font-weight:700; border-radius:3px; letter-spacing:0; color:var(--g1); flex:none}
 .vsi.ts, .vsi.tsx{background:#3178c6; color:#fff} .vsi.tsx{background:#2d8fd6} .vsi.md{background:#4a86c8; color:#fff; font-size:7px} .vsi.json{background:#cbcb41; color:#111} .vsi.git{background:#f05133; color:#fff} .vsi.txt{background:var(--g6); color:var(--ink-2)} .vsi.ok{background:none; color:var(--green); font-size:12px} .vsi:not([class*=" "]){background:none; color:var(--ink-3)}
@@ -741,6 +750,16 @@ button{font:inherit; color:inherit}
 .mp-row[data-locked]{opacity:.55} .mp-row[data-locked] .mt{color:var(--amber)}
 .mp-foot{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-top:1px solid var(--rule); font-size:12.5px; color:var(--ink)}
 .mp-foot .sub{font-size:10.5px; color:var(--ink-3); display:block}
+/* "/" command menu — same glass popup material as .mp, floating above the
+   composer it belongs to (Cascade/Windsurf's own command-menu placement). */
+.cmdmenu{position:fixed; z-index:82; background:var(--g2); border:1px solid var(--gl-edge); border-radius:12px; box-shadow:0 30px 70px -22px #000, inset 0 1px 0 var(--wash-hi); overflow:hidden; font-size:12.5px}
+.cmdmenu-list{max-height:220px; overflow-y:auto; padding:5px}
+.cmdmenu-row{display:flex; align-items:center; gap:10px; width:100%; text-align:left; border:0; background:none; color:var(--ink-2); padding:7px 9px; border-radius:8px; cursor:pointer; font:inherit}
+.cmdmenu-row:hover, .cmdmenu-row.on{background:var(--wash-2); color:var(--ink)}
+.cmdmenu-name{font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--cyan); flex:none}
+.cmdmenu-hint{color:var(--ink-3); font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.cmdmenu-empty{padding:9px 10px; color:var(--ink-3); font-size:11.5px}
+
 /* detail card floats beside the list */
 .mpd{position:fixed; z-index:81; width:330px; background:var(--g2); border:1px solid var(--gl-edge); border-radius:14px; box-shadow:0 30px 70px -22px #000, inset 0 1px 0 var(--wash-hi); padding:14px 16px; display:flex; flex-direction:column; gap:10px; font-size:12.5px}
 .mpd-h{display:flex; align-items:center; justify-content:space-between; gap:8px} .mpd-h b{font-size:14px; font-weight:500} .mpd-h .pin{color:var(--ink-3); cursor:pointer}
@@ -983,12 +1002,19 @@ button{font:inherit; color:inherit}
       <button data-product="counsel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg>Counsel</button>
     </nav>
     <div class="topright">
-      <button class="chip" id="model-chip" data-model-pill title="Choose a model"><span class="dot"></span>qwen3:8b · local</button>
       <!-- The Settings gear that used to sit here is gone. It opened the same
            modal as the entry each product already has in its own navigation
            (Command's rail, Forge's status bar, Counsel's rail), so it was a
-           second door to one room in shared chrome, competing with the model
-           chip for the only corner the eye checks for state. -->
+           second door to one room in shared chrome.
+
+           The global model chip that used to sit here is gone too. It named a
+           "default model" that does not exist anywhere in the daemon (see
+           bind/settings/models.js) — it could only ever read /forge/agents in
+           the abstract, never the model an owner actually picked for a given
+           Command chat or Forge session, so picking one there left this chip
+           still saying "Route by policy". Every composer that has a real model
+           choice (Home, Forge) already shows its own pill for exactly that
+           choice; this one was a second, wrong answer to the same question. -->
     </div>
   </header>
 
@@ -1073,7 +1099,7 @@ button{font:inherit; color:inherit}
               <div class="lcard"><div class="lk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Forge · qwen3:8b · local</div><div class="lm">editing src/App.tsx · worktree wt-7f2a</div><div class="lr"><span class="pill cy"><span class="d"></span>0:42</span><span style="display:flex;gap:6px"><button class="laction" data-product-go="forge">Open</button><button class="laction">Cancel</button></span></div></div>
             </section>
             <section class="hs-sec"><div class="hs-h">Today</div>
-              <dl class="hs-stats"><div><dt>verified</dt><dd class="gr">3</dd></div><div><dt>in the sandbox</dt><dd class="cy">2</dd></div><div><dt>backlog</dt><dd>5</dd></div><div><dt>memories</dt><dd>12</dd></div><div><dt>left this machine</dt><dd>0</dd></div></dl>
+              <dl class="hs-stats"><div><dt>verified</dt><dd class="gr">3</dd></div><div><dt>in the workspace</dt><dd class="cy">2</dd></div><div><dt>backlog</dt><dd>5</dd></div><div><dt>memories</dt><dd>12</dd></div><div><dt>left this machine</dt><dd>0</dd></div></dl>
             </section>
             <details class="hs-key" open><summary class="hs-h">Reading the field <span class="sum">colour = state</span></summary>
               <div class="orb-key">
@@ -1267,7 +1293,7 @@ button{font:inherit; color:inherit}
       <nav class="tbmenu"><button>File</button><button>Edit</button><button>Selection</button><button>View</button><button>Go</button><button>Run</button><button>Terminal</button><button>Help</button></nav>
       <span class="fgrow"></span>
       <button class="tbico" title="Go Back">←</button><button class="tbico" title="Go Forward">→</button>
-      <button class="tbcmd" title="Command Center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span id="tb-cmd">sandbox — App.tsx</span><kbd>Ctrl + P</kbd></button>
+      <button class="tbcmd" title="Command Center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span id="tb-cmd">workspace — App.tsx</span><kbd>Ctrl + P</kbd></button>
       <span class="fgrow"></span>
       <button class="tbico" title="Extensions" data-vsgo="extensions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v3M15 3v3M8 6h8a2 2 0 0 1 2 2v3a6 6 0 0 1-12 0V8a2 2 0 0 1 2-2zM12 17v4"/></svg></button>
       <div class="tblayout"><button title="Toggle Panel (Ctrl+J)" data-layout="panel" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15h18"/></svg></button><button title="Toggle Primary Side Bar" data-layout="side" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><button title="Toggle Secondary Side Bar (Ctrl+Alt+B)" data-layout="sess" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button></div>
@@ -1364,7 +1390,7 @@ button{font:inherit; color:inherit}
           <button class="vstab" data-vstab="ingest.spec.ts"><span class="vsi ts">TS</span>ingest.spec.ts<span class="x">×</span></button>
           <span class="fgrow"></span><button class="fico" title="Go Back">‹</button><button class="fico" title="Go Forward">›</button><button class="fico" title="Run Code" data-run-cmd="npm test">▷</button><button class="fico" title="Split Editor Right (Ctrl+\)" id="vs-split"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button><button class="fico" title="More Actions">⋯</button>
         </div>
-        <div class="vscrumbs">sandbox <i>›</i> src <i>›</i> <span class="vsi tsx">TS</span><b id="vs-crumb">App.tsx</b> <i>›</i> <span>App</span></div>
+        <div class="vscrumbs">workspace <i>›</i> src <i>›</i> <span class="vsi tsx">TS</span><b id="vs-crumb">App.tsx</b> <i>›</i> <span>App</span></div>
         <div class="vsblame">Abheet Isher, 2 hours ago | 1 author (Abheet Isher)</div>
         <div class="vsbody">
           <div class="vspane"><pre class="fcode" id="vs-code"><span class="ln">1</span><span class="kw">import</span> { createIngestClient } <span class="kw">from</span> <span class="st">'./ingest'</span>
@@ -1393,12 +1419,12 @@ button{font:inherit; color:inherit}
 [write] tests/ingest.spec.ts (new)
 [tests] npm test · 142 passed · exited 0 · 3.1s</pre></div>
             <div class="vsp" data-vsp="debug"><div class="fempty">No debug session is active.</div></div>
-            <div class="vsp on" data-vsp="terminal"><pre class="fterm" id="vs-term">PS D:\Code\Zeno\.zeno\sandbox&gt; git status --short
+            <div class="vsp on" data-vsp="terminal"><pre class="fterm" id="vs-term">PS D:\Code\Zeno\.zeno\workspace&gt; git status --short
  M src/App.tsx
  M src/ingest.ts
-PS D:\Code\Zeno\.zeno\sandbox&gt; npm test
+PS D:\Code\Zeno\.zeno\workspace&gt; npm test
  ✓ 142 passed  (3.1s)
-PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cursor">▍</span></pre><input id="vs-termin" aria-label="Terminal input" autocomplete="off" spellcheck="false" style="position:absolute;opacity:0;width:1px;height:1px;left:-9999px"></div>
+PS D:\Code\Zeno\.zeno\workspace&gt; <span id="vs-termecho"></span><span class="cursor">▍</span></pre><input id="vs-termin" aria-label="Terminal input" autocomplete="off" spellcheck="false" style="position:absolute;opacity:0;width:1px;height:1px;left:-9999px"></div>
             <div class="vsp" data-vsp="ports"><div class="fchg"><span class="fdot ok"></span>7317 <span class="fm">Zeno daemon · 127.0.0.1</span></div><div class="fchg"><span class="fdot ok"></span>11434 <span class="fm">Ollama · 127.0.0.1</span></div><div class="fchg"><span class="fdot ok"></span>5173 <span class="fm">vite dev · forwarded</span></div></div>
           </div>
         </div>
@@ -1438,7 +1464,7 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
               <!-- The panel already carries this tip once, at its foot (#s-tip).
                    A second copy directly above the composer said the same thing
                    twice on one screen. -->
-              <button class="ag-proj" title="Working folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>sandbox · main ▾</button>
+              <button class="ag-proj" title="Working folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>workspace · main ▾</button>
               <div class="ag-composer">
                 <textarea id="ag-ta" rows="1" placeholder="Describe your task to Zeno"></textarea>
                 <div class="ag-row">
@@ -1449,14 +1475,14 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
                   <button class="ag-ic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button>
                   <button class="ag-send" id="ag-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
                 </div>
-                <div class="ag-foot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ sandbox</span></div>
+                <div class="ag-foot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ workspace</span></div>
               </div>
               <div class="ag-hint">Zeno plans it in an isolated worktree — every effect waits for your approval.</div>
             </div>
           </div>
           <div class="sesshist" id="s-history" hidden>
             <div class="vsvh">History</div>
-            <button class="dvsess" data-sopen="0"><span class="dvdot working"></span><span class="dvst"><b>Rotate the ingest token</b><span>Working · 0:42 · sandbox</span></span></button>
+            <button class="dvsess" data-sopen="0"><span class="dvdot working"></span><span class="dvst"><b>Rotate the ingest token</b><span>Working · 0:42 · workspace</span></span></button>
             <button class="dvsess" data-sopen="1"><span class="dvdot awaiting"></span><span class="dvst"><b>Add ingest tests</b><span>Awaiting your approval</span></span></button>
             <button class="dvsess" data-sopen="2"><span class="dvdot done"></span><span class="dvst"><b>Scaffold the App shell</b><span>Done · sealed 78f2…6ce4</span></span></button>
             <button class="dvsess" data-sopen="3"><span class="dvdot failed"></span><span class="dvst"><b>Bump vitest</b><span>Failed · exited 1 · nothing applied</span></span></button>
@@ -1489,7 +1515,7 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
             <div class="row"><button class="cbtn attach" id="s-attach" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><textarea id="s-ta" rows="1" placeholder="Ask Zeno to change the codebase…"></textarea><button class="cbtn mic" id="s-mic" title="Voice (mic: Forge)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button><button class="cbtn send" id="s-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
             <div class="foot"><button class="pill wt" id="s-kind" title="What this run may do">&lt;/&gt; Code ▾</button><button class="pill cy" id="s-model" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><button class="pill wt" data-effort-pill title="Effort — higher consumes more tokens">effort: medium ▾</button><button class="pill cy" id="s-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button><span class="grow"></span><button class="pill wt" id="s-skills" title="Skills, rules and MCP loaded for this run" data-vsgo="zeno">2 skills · 8 tools ▾</button></div>
           </div>
-          <div class="sessfoot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ sandbox</span><span class="grow"></span><span>Vault memory: on</span></div>
+          <div class="sessfoot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ workspace</span><span class="grow"></span><span>Vault memory: on</span></div>
         </div>
         <!-- Agent mode's quick actions (right column). Each is a real control:
              New session, the quick-open picker, Command's Customize screen, and

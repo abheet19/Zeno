@@ -21,6 +21,30 @@ import { add, postJSON } from './dom.js';
 
 const KEY = 'zeno-plan-first';
 
+/* A greeting/thanks/ack/help message is not a coding task. Sending "hi" here
+ * used to be handed straight to POST /forge/plan, which dutifully produced a
+ * plan for it — a real, absurd multi-step "Respond to the greeting 'hi'"
+ * card. Mirrors the detection packages/assistant/src/conversational.ts uses
+ * for Command's own chat (same four categories, same whole-message match, so
+ * "hi, can you check the dsa folder" still plans — only the bare word does not). */
+const GREETING = /^(?:hey|hi|hello|hiya|yo|sup|howdy|good\s+(?:morning|afternoon|evening|night))(?:\s+zeno)?[\s!.,?]*$/i;
+const THANKS = /^(?:thanks|thank\s+you|thx|ty|cheers|appreciated)(?:\s+zeno)?[\s!.,?]*$/i;
+const ACK = /^(?:ok|okay|got\s+it|nice|great|cool|perfect|sure)[\s!.,?]*$/i;
+const HELP = /^(?:help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|who\s+are\s+you|what\s+are\s+you|how\s+do\s+you\s+work|what\s+can\s+i\s+ask(?:\s+you)?)[\s!.,?]*$/i;
+
+/** A conversational reply for a trivial message, or null when it is a real task to plan. */
+function conversationalReply(task) {
+  const q = String(task || '').trim();
+  if (GREETING.test(q)) return 'Hi. Describe a change you want in this repository and, with Plan first on, I’ll read it before proposing anything.';
+  if (THANKS.test(q)) return 'You’re welcome — describe a task whenever you’re ready.';
+  if (ACK.test(q)) return 'Okay — describe the change and I’ll read the repository before proposing anything.';
+  if (HELP.test(q)) {
+    return 'Describe a coding task — e.g. "add a test for the parser" — and, with Plan first on, I’ll read the repository '
+      + '(without touching it), show you a plan, and wait for your approval before anything runs.';
+  }
+  return null;
+}
+
 export function setupPlanFirst(S) {
   let enabled = true; // default ON: research before work is the point of intake
   try { enabled = localStorage.getItem(KEY) !== 'off'; } catch { /* no storage — the default stands for this page */ }
@@ -50,6 +74,15 @@ export function setupPlanFirst(S) {
 
   /** Ask the daemon for a plan; the turn is pushed first so the owner sees "Planning…" at once. */
   async function requestPlan(session, task, route) {
+    const reply = conversationalReply(task);
+    if (reply !== null) {
+      // Not a coding task — answer right here in the transcript instead of
+      // asking the daemon to "plan" a greeting. No worktree, no write, no
+      // plan card; the session stays exactly as idle as it was.
+      session.chat.push({ who: 'system', text: reply });
+      S.renderSessionHeader(session); S.renderChat(session); S.sessionsChanged(session);
+      return;
+    }
     const turn = { who: 'plan', state: 'planning', task, route, plan: null, planId: null, model: null, note: '', error: null };
     session.chat.push(turn);
     session.planning = true;

@@ -127,7 +127,7 @@ export function setupExplorerOutline(S) {
       r.dataset.outline = String(s.line);
       r.dataset.level = String(s.level || 1);
       r.title = `${s.kind} · line ${s.line} — click to reveal in the editor`;
-      add(r, el('span', 'vskind', s.kind), document.createTextNode(s.name));
+      add(r, el('span', 'vskind', s.kind), el('span', 'vslabel', s.name));
       r.addEventListener('click', () => { if (S.setForgeView) S.setForgeView('editor'); S.revealLineInPrimaryGroup(path, s.line); });
       return r;
     });
@@ -154,7 +154,7 @@ export function setupExplorerOutline(S) {
       const row = el('div', 'vsfile');
       row.dataset.commit = c.sha || '';
       row.title = `${c.sha} · ${c.author || ''} · ${c.date || ''}`;
-      add(row, el('span', 'vskind', c.sha || ''), document.createTextNode(c.summary || '(no message)'), el('span', 'vsmod', relativeTime(c.date)));
+      add(row, el('span', 'vskind', c.sha || ''), el('span', 'vslabel', c.summary || '(no message)'), el('span', 'vsmod', relativeTime(c.date)));
       nodes.push(row);
     }
     if (r.data.truncated) nodes.push(el('div', 'vsnote', `Showing the last ${r.data.cap} commits.`));

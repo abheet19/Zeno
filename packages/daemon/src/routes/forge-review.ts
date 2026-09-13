@@ -1,6 +1,6 @@
 /**
  * The bounded, hash-bound file review the owner sees before a Forge file-write
- * capsule's action: an exact-line diff between the sandbox base and the
+ * capsule's action: an exact-line diff between the workspace base and the
  * proposed bytes, built and re-checked against the payload's hashes.
  *
  * Pure — no daemon state. `buildForgeFileReview` and `MAX_FORGE_PROPOSED_
@@ -205,7 +205,7 @@ function buildReviewDiff(relPath: string, before: string | null, after: string):
 }
 
 /**
- * Build the review from the bytes observed in the sandbox now. A ready review
+ * Build the review from the bytes observed in the workspace now. A ready review
  * exists only when those bytes match the base hash carried by the action.
  */
 export function buildForgeFileReview(payload: WritePayload, observed: string | null): ForgeFileReview {
@@ -232,7 +232,7 @@ export function buildForgeFileReview(payload: WritePayload, observed: string | n
     return {
       ...common,
       state: 'drifted', diff: null, truncated: false, omittedDiffLines: 0, omittedCharacters: 0,
-      note: 'The sandbox file moved after this action was proposed. No diff is shown against the wrong base; re-propose against the current file.',
+      note: 'The workspace file moved after this action was proposed. No diff is shown against the wrong base; re-propose against the current file.',
     };
   }
   const bounded = buildReviewDiff(payload.relPath, observed, payload.contents);
@@ -261,6 +261,6 @@ export function unavailableForgeFileReview(payload: WritePayload): ForgeFileRevi
     truncated: false,
     omittedDiffLines: 0,
     omittedCharacters: 0,
-    note: 'The server could not re-read the sandbox base safely. Re-propose after checking that the file still exists inside the workspace.',
+    note: 'The server could not re-read the workspace base safely. Re-propose after checking that the file still exists inside the workspace.',
   };
 }

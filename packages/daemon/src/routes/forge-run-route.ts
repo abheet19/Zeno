@@ -21,8 +21,8 @@ import { approvedPlanFromBody, planText } from './forge-plan.js';
 
 /**
  * Run a coding agent HEADLESS in an isolated throwaway worktree, then turn each
- * file it changed into a normal approval capsule against the sandbox. The agent
- * proposes by editing a jailed worktree; nothing reaches the sandbox until the
+ * file it changed into a normal approval capsule against the workspace. The agent
+ * proposes by editing a jailed worktree; nothing reaches the workspace until the
  * owner approves each change. Owner-only: starting an agent is the owner's call.
  *
  * This is also the route the window calls when the owner CONFIRMS a hosted
@@ -181,7 +181,7 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
     });
   } catch (err) {
     if (err instanceof WorktreeUnavailable) {
-      return json(res, 409, { error: { code: 'worktree-unavailable', message: `Could not isolate the run: ${err.message}`, resolve: 'Ensure the sandbox has at least one commit.' } });
+      return json(res, 409, { error: { code: 'worktree-unavailable', message: `Could not isolate the run: ${err.message}`, resolve: 'Ensure the workspace has at least one commit.' } });
     }
     const started = progress.providerStarted;
     progress.stop(controller.signal.aborted ? 'cancelled' : 'failed');

@@ -18,6 +18,7 @@
  */
 
 import { $, $$, el, fill, authHeaders } from '../bind.js';
+import { setupCommandMenu } from './command-menu.js';
 
 /* ---- navigation: "open receipts", "go to Forge" — pure, client-side ------- *
  *
@@ -246,15 +247,38 @@ async function ask(question) {
 }
 
 /**
+ * The "/" commands this composer offers right now — never a fixed list: `/new`
+ * is left out when there is no open thread to reset, and each entry runs the
+ * exact control a click would.
+ */
+function homeCommands() {
+  const out = [];
+  const newChat = $('#home-newchat');
+  if (newChat && newChat.offsetParent !== null) {
+    out.push({ id: 'new', hint: 'Start a new chat', run: () => newChat.click() });
+  }
+  out.push({ id: 'model', hint: 'Choose a model', run: () => { const p = $('[data-model-pill]', $('.screen[data-screen="home"]')); if (p) p.click(); } });
+  // Reuses the exact hand-off `d.task`'s "Open in Forge" button below uses:
+  // switch product and focus Forge's own composer. The command menu only
+  // ever fires on a bare "/forge" (see command-menu.js's input regex), so
+  // there is never draft text left in this composer to carry over — the
+  // owner types the task in Forge's own box, same as clicking the product tab.
+  out.push({ id: 'forge', hint: 'Switch to Forge', run: () => seedForgeComposer('') });
+  out.push({ id: 'help', hint: 'What can Zeno do?', run: () => { const ta = $('#home-ta'); if (ta) { ta.value = 'help'; ta.dispatchEvent(new Event('input', { bubbles: true })); const s = $('#home-send'); if (s) s.click(); } } });
+  return out;
+}
+
+/**
  * Wire one composer: a textarea, a send button, and the turn list they write to.
  * Returns false when the markup is not present, so a missing surface is skipped
  * rather than throwing.
  */
-function wire({ ta, send, turns, thread, onFirstTurn }) {
+function wire({ ta, send, turns, thread, onFirstTurn, commands }) {
   if (!ta || !turns) return false;
   if (ta.dataset.askWired) return true;
   ta.dataset.askWired = '1';
 
+  const cmdMenu = commands ? setupCommandMenu(ta, commands) : null;
   let busy = false;
 
   async function submit() {
@@ -328,6 +352,9 @@ function wire({ ta, send, turns, thread, onFirstTurn }) {
     send = fresh;
   }
   ta.addEventListener('keydown', (e) => {
+    // The "/" menu owns arrows/Enter/Escape while it is open; only once it
+    // says it did not handle the key does Enter fall through to Send.
+    if (cmdMenu && cmdMenu.handleKeydown(e)) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); void submit(); }
   }, true);
 
@@ -347,6 +374,7 @@ export async function bind() {
       if (heroBlock) heroBlock.hidden = true;
       if (starters) starters.hidden = true;
     },
+    commands: homeCommands,
   });
 
   // The starter chips prefill the composer; that part of ui.js is honest, and

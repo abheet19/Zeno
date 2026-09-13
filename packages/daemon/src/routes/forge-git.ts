@@ -1,5 +1,5 @@
 /**
- * Forge's read-only view of the sandbox repository (status, one file, search,
+ * Forge's read-only view of the workspace repository (status, one file, search,
  * a file's history, the sized tree) and its one write: the governed commit.
  * All of them drive git through the same jailed executor the kernel uses.
  */
@@ -38,12 +38,12 @@ function gitSpec(ctx: ServerCtx): { repoRoot: string; git: ServerCtx['gitRunner'
   return { repoRoot: ctx.opts.sandbox, git: ctx.gitRunner, fs: ctx.opts.fs };
 }
 
-/** The sandbox repo's state: branch, HEAD, and the files that have changed. */
+/** The workspace repo's state: branch, HEAD, and the files that have changed. */
 export function serveForgeStatus(ctx: ServerCtx, res: ServerResponse): void {
   const run = (args: readonly string[]) => ctx.gitRunner.run(args, ctx.opts.sandbox);
   const isRepo = run(['rev-parse', '--is-inside-work-tree']).status === 0;
   if (!isRepo) {
-    return json(res, 200, { repo: false, root: ctx.opts.sandbox, note: 'The sandbox is not a git repository yet. It is initialised on daemon start.' });
+    return json(res, 200, { repo: false, root: ctx.opts.sandbox, note: 'The workspace is not a git repository yet. It is initialised on daemon start.' });
   }
   const branch = run(['rev-parse', '--abbrev-ref', 'HEAD']).stdout.trim() || '(no commits yet)';
   let head: string | null = null;
@@ -73,7 +73,7 @@ export function serveForgeStatus(ctx: ServerCtx, res: ServerResponse): void {
 }
 
 /**
- * One sandbox file's contents, for the Forge code pane. READ ONLY — this route
+ * One workspace file's contents, for the Forge code pane. READ ONLY — this route
  * has no write half and cannot grow one.
  *
  * The whole risk here is the path, so the path goes through the SAME jail the
@@ -96,15 +96,15 @@ export function serveForgeFile(ctx: ServerCtx, res: ServerResponse, url: URL): v
   } catch {
     // Deliberately one shape for every escape (traversal, absolute path, drive
     // letter, UNC root, symlink out): the answer must not report which trick
-    // was tried, or it becomes a probe for what lives outside the sandbox.
+    // was tried, or it becomes a probe for what lives outside the workspace.
     return json(res, 403, {
-      error: { code: 'path-escape', message: 'That path leaves the sandbox.', resolve: 'Request a file inside the sandbox.' },
+      error: { code: 'path-escape', message: 'That path leaves the workspace.', resolve: 'Request a file inside the workspace.' },
     });
   }
   const contents = ctx.opts.fs.readFile(abs);
   if (contents === null) {
     return json(res, 404, {
-      error: { code: 'not-found', message: `No such file in the sandbox: ${relPath}`, resolve: 'Check the path against GET /forge/status.' },
+      error: { code: 'not-found', message: `No such file in the workspace: ${relPath}`, resolve: 'Check the path against GET /forge/status.' },
     });
   }
   // A NUL byte means this is not text. Say so rather than shipping mojibake
@@ -132,7 +132,7 @@ export function serveForgeFile(ctx: ServerCtx, res: ServerResponse, url: URL): v
 }
 
 /**
- * Search the sandbox — `git grep -n`, and nothing more than that. READ ONLY,
+ * Search the workspace — `git grep -n`, and nothing more than that. READ ONLY,
  * like /forge/file, and built to the same shape on purpose.
  *
  * WHY GIT GREP AND NOT AN INDEX. There is no index here and inventing one
@@ -168,7 +168,7 @@ export function serveForgeSearch(ctx: ServerCtx, res: ServerResponse, url: URL):
     });
   }
 
-  // The optional scope. Absent means the whole sandbox; present means one
+  // The optional scope. Absent means the whole workspace; present means one
   // directory or file inside it, and "inside it" is the jail's word, not ours.
   const scope = url.searchParams.get('path');
   let pathspec: string | null = null;
@@ -179,9 +179,9 @@ export function serveForgeSearch(ctx: ServerCtx, res: ServerResponse, url: URL):
     } catch {
       // One shape for every escape, exactly as /forge/file answers. The reply
       // must not say WHICH trick was tried, or it becomes a probe for what
-      // lives outside the sandbox.
+      // lives outside the workspace.
       return json(res, 403, {
-        error: { code: 'path-escape', message: 'That path leaves the sandbox.', resolve: 'Search a path inside the sandbox.' },
+        error: { code: 'path-escape', message: 'That path leaves the workspace.', resolve: 'Search a path inside the workspace.' },
       });
     }
     // git wants a repo-relative pathspec with forward slashes, even on Windows.
@@ -193,7 +193,7 @@ export function serveForgeSearch(ctx: ServerCtx, res: ServerResponse, url: URL):
   if (run(['rev-parse', '--is-inside-work-tree']).status !== 0) {
     return json(res, 200, {
       query, scope: scope ?? null, repo: false, matches: [], files: 0, total: 0, truncated: false,
-      note: 'The sandbox is not a git repository yet, so there is nothing to search.',
+      note: 'The workspace is not a git repository yet, so there is nothing to search.',
     });
   }
 
@@ -205,7 +205,7 @@ export function serveForgeSearch(ctx: ServerCtx, res: ServerResponse, url: URL):
       error: {
         code: 'search-failed',
         message: `git grep could not run: ${r.stderr.trim() || `it exited ${r.status}`}`,
-        resolve: 'Check that git is installed and that the sandbox is a healthy repository.',
+        resolve: 'Check that git is installed and that the workspace is a healthy repository.',
       },
     });
   }
@@ -242,13 +242,13 @@ export function serveForgeLog(ctx: ServerCtx, res: ServerResponse, url: URL): vo
     try {
       abs = jail(ctx.opts.fs, ctx.opts.sandbox, relPath);
     } catch {
-      return json(res, 403, { error: { code: 'path-escape', message: 'That path leaves the sandbox.', resolve: 'Ask for a file inside the sandbox.' } });
+      return json(res, 403, { error: { code: 'path-escape', message: 'That path leaves the workspace.', resolve: 'Ask for a file inside the workspace.' } });
     }
     pathspec = relative(ctx.opts.sandbox, abs).split(sep).join('/') || '.';
   }
   const run = (args: readonly string[]) => ctx.gitRunner.run(args, ctx.opts.sandbox);
   if (run(['rev-parse', '--is-inside-work-tree']).status !== 0) {
-    return json(res, 200, { path: pathspec, repo: false, commits: [], truncated: false, note: 'The sandbox is not a git repository yet, so there is no history.' });
+    return json(res, 200, { path: pathspec, repo: false, commits: [], truncated: false, note: 'The workspace is not a git repository yet, so there is no history.' });
   }
   const US = String.fromCharCode(0x1f);
   const args = ['log', `-${LOG_CAP + 1}`, `--pretty=%h${US}%an${US}%aI${US}%s`];
@@ -290,7 +290,7 @@ export function serveForgeTree(ctx: ServerCtx, res: ServerResponse): void {
 }
 
 /**
- * Commit the sandbox's changes — through the full gate. The owner asked for
+ * Commit the workspace's changes — through the full gate. The owner asked for
  * this in the Forge surface, so the request itself is the approval: preview a
  * vcs.commit action (T1), approve it as the owner, and let the git executor
  * make the one jailed, proven commit. It lands a receipt like everything else.

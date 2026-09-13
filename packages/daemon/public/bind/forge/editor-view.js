@@ -26,7 +26,7 @@ export function createEditorView(E, S, deps) {
   const tabBar = $('.vsed .vstabs');
   const tabSpacer = tabBar ? tabBar.querySelector('.fgrow') : null;
   // Drop the artifact's four mock tabs (App.tsx/ingest.ts/…) — never left
-  // standing as if they were the sandbox's real open files.
+  // standing as if they were the workspace's real open files.
   if (tabBar) $$('.vstab', tabBar).forEach((t) => t.remove());
 
   // A real navigation history for the primary group: every file opened
@@ -321,7 +321,7 @@ export function createEditorView(E, S, deps) {
     });
     editor.addAction({
       id: 'zeno.discard',
-      label: 'Discard these edits and re-read the file from the sandbox',
+      label: 'Discard these edits and re-read the file from the workspace',
       contextMenuGroupId: 'zeno',
       contextMenuOrder: 2,
       run: () => {

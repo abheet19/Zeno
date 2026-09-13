@@ -31,7 +31,15 @@ export function setupTerminal(S) {
     termIn = oldTermIn.cloneNode(true);
     oldTermIn.replaceWith(termIn);
   }
-  const promptBase = () => (S.statusData && S.statusData.repo && S.statusData.root ? S.statusData.root : 'sandbox');
+  // The prompt names the real working folder — never a fixed "sandbox" — the
+  // same project name (or its basename) the Explorer header and status bar use.
+  const promptBase = () => {
+    if (S.project && S.project.name) return S.project.name;
+    if (S.statusData && S.statusData.repo && S.statusData.root) {
+      return String(S.statusData.root).split(/[\\/]/).filter(Boolean).pop() || 'workspace';
+    }
+    return 'workspace';
+  };
 
   function renderTerminal() {
     if (!term) return;
@@ -204,7 +212,7 @@ export function setupTerminal(S) {
 
   // The bottom "Output" panel ships a fabricated agent run log — a worktree
   // that never existed (wt-7f2a), an edit to a file that is not in the
-  // sandbox, and "142 passed" from a test run nobody ran. It is the most
+  // workspace, and "142 passed" from a test run nobody ran. It is the most
   // convincing invented state on this screen, because it reads exactly like
   // something the daemon printed. Nothing here ever read it: this build has no
   // output channel for the Output view (a run's real transcript is rendered by

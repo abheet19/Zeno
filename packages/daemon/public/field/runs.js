@@ -4,7 +4,7 @@
  * bind/forge-progress.js and bind/orchestrator.js already read inside Forge
  * and Command's right rail. This is a THIRD reader of that one stream — never
  * a new poll — so the field can draw a node for whatever agent is actually
- * running right now, not just the sandbox's uncommitted-changes proxy
+ * running right now, not just the workspace's uncommitted-changes proxy
  * topology.js already draws.
  *
  * A read-only page (no owner token, see state.js's token()) gets no stream and
