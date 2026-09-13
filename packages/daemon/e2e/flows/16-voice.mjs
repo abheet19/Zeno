@@ -144,7 +144,12 @@ async function openExtraWindow(page, daemon, initScript) {
     if (u.port === String(daemon.port)) net.push(`${r.method()} ${u.pathname}`);
   });
   p.on('pageerror', (e) => errs.push(String(e && e.message).slice(0, 200)));
-  await p.goto(daemon.url, { waitUntil: 'domcontentloaded' });
+  // Navigate to the bare ORIGIN, not daemon.url — the launch nonce (?k=) is
+  // single-use and openWindow already spent it, so re-using that URL gets a
+  // degraded page whose binders never fully run. The owner COOKIE that the
+  // first window received is shared across this context, so the origin loads
+  // the full authenticated shell.
+  await p.goto(`http://127.0.0.1:${daemon.port}/`, { waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => window.__zenoBind !== undefined, { timeout: 20_000 }).catch(() => {});
   // voice.js finishes the Settings switch on the `zeno:bound` event, which fires
   // immediately after __zenoBind is published.
@@ -219,6 +224,7 @@ export const criteria = [
   'voice: every mic control is bound by voice.js, not ui.js\'s mock',
   'voice: the state pill is a live status region reporting the real engine',
   'voice: no engine => every control disabled with an exact reason',
+  'voice: the local Whisper installer row is honest about needing the desktop app',
   'voice: wake word requires an explicit disclosure and disarms immediately',
   'voice: ask & propose only — never approve, send, delete or pay',
 ];
@@ -332,6 +338,42 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('the microphone admits that voice here is NOT local and uploads audio',
     !!pill && /not local/i.test(pill.micTitle || '') && /uploads audio/i.test(pill.micTitle || ''),
     String(pill && pill.micTitle));
+
+  /* =================================================================
+   * 3b. THE INSTALLER ROW — honestly desktop-app-only in a real browser
+   *
+   * Headless Chromium has no window.zenoLocalSpeech (that bridge only exists
+   * inside the Electron desktop app), so Settings → Voice's "Local speech
+   * (Whisper)" row has nothing to install here. This asserts the row tells
+   * the truth about that rather than showing a button that would silently do
+   * nothing when clicked.
+   * ================================================================= */
+
+  const localWhisperRow = await page.evaluate(() => {
+    const modal = document.querySelector('#settings-modal');
+    const pane = modal && modal.querySelector('.set-pane[data-setpane="voice"]');
+    const row = pane && [...pane.querySelectorAll('.setrow')]
+      .find((r) => r.querySelector('.lab') && r.querySelector('.lab').textContent.trim() === 'Local speech (Whisper)');
+    const button = row ? row.querySelector('[data-lw-ctl] button') : null;
+    const sub = row ? row.querySelector('.sub') : null;
+    return {
+      found: !!row,
+      hasBridge: !!window.zenoLocalSpeech,
+      disabled: button ? button.disabled : null,
+      label: button ? button.textContent.trim() : null,
+      sub: sub ? sub.textContent.trim() : null,
+    };
+  });
+  ok('this window has no desktop speech bridge — it is a real browser, not Electron',
+    !localWhisperRow.hasBridge);
+  ok('the Local speech (Whisper) row exists in Settings → Voice', localWhisperRow.found, JSON.stringify(localWhisperRow));
+  ok('its Install button carries the real ~1.1 GB size, not a placeholder',
+    /install local whisper/i.test(localWhisperRow.label || '') && /1\.1\s*gb/i.test(localWhisperRow.label || ''),
+    String(localWhisperRow.label));
+  ok('with no bridge, that button is honestly disabled rather than fake-clickable',
+    localWhisperRow.disabled === true, JSON.stringify(localWhisperRow));
+  ok('and the row says so in plain words, not a fake progress or installed state',
+    /available in the zeno desktop app/i.test(localWhisperRow.sub || ''), String(localWhisperRow.sub));
 
   /* =================================================================
    * 4. THE HARD BOUNDARY — voice may ask and propose, nothing more

@@ -39,7 +39,14 @@ import { serveStream } from './routes/stream.js';
 import { postWork, serveWork } from './routes/work.js';
 import { postMemory, serveBrief, serveMemory } from './routes/memory.js';
 import { postApproval, postApprovalDecline, postPreview } from './routes/approvals.js';
-import { postForgeCommit, serveForgeFile, serveForgeSearch, serveForgeStatus } from './routes/forge-git.js';
+import {
+  postForgeCommit,
+  serveForgeFile,
+  serveForgeLog,
+  serveForgeSearch,
+  serveForgeStatus,
+  serveForgeTree,
+} from './routes/forge-git.js';
 import {
   postForgeRoute,
   postForgeTerminal,
@@ -49,6 +56,7 @@ import {
 } from './routes/forge-ops.js';
 import { serveForgeConnectors, serveForgeExtensions } from './routes/forge-catalog.js';
 import { postForgeContext, serveSkills } from './routes/forge-context.js';
+import { handleCapabilities } from './routes/capabilities.js';
 import {
   postForgeModelPull,
   postForgeModelRemove,
@@ -60,16 +68,19 @@ import {
   fireDueScheduledTasks,
   loadMcpServers,
   loadSchedule,
+  postForgeProject,
   postMcpServer,
   postSchedule,
   scheduleDelete,
   scheduleRunNow,
   scheduleToggle,
+  serveForgeProject,
   serveMcpServers,
   serveSchedule,
 } from './routes/config.js';
 import { postForgeCancel } from './routes/forge-run.js';
 import { postForgeRun } from './routes/forge-run-route.js';
+import { postForgePlan } from './routes/forge-plan.js';
 import {
   postChromeAttach,
   postChromeOrigins,
@@ -90,6 +101,7 @@ import {
   serveMeetings,
 } from './routes/counsel.js';
 import { postMeshPairing, postMeshPairingCancel, postMeshSelfCheck, serveMeshDevices } from './routes/mesh.js';
+import { postCallDetected, serveCurrentCall } from './routes/calls.js';
 
 // ---- re-exports: preserved so existing imports of these names from
 // './server.js' (the daemon's own tests, and any external consumer) keep
@@ -154,7 +166,10 @@ export function createServer(opts: DaemonOptions): Server {
         memory,
         kernel: opts.kernel,
         vaultRef: opts.workspace ?? opts.sandbox,
-        projectRoot: opts.sandbox,
+        // A getter, not a copy: the owner can change the project root at
+        // runtime (POST /forge/project), and the memory context must then
+        // read the NEW repository's CLAUDE.md rather than the one open at boot.
+        get projectRoot() { return opts.sandbox; },
         onPendingChanged: () => publishPending(ctx),
         onMemoryChanged: () => publishMemoryChanged(ctx),
         onReceipt: (receipt) => {
@@ -355,6 +370,11 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/forge/status') return serveForgeStatus(ctx, res);
     if (req.method === 'GET' && path === '/forge/file') return serveForgeFile(ctx, res, url);
     if (req.method === 'GET' && path === '/forge/search') return serveForgeSearch(ctx, res, url);
+    if (req.method === 'GET' && path === '/forge/log') return serveForgeLog(ctx, res, url);
+    if (req.method === 'GET' && path === '/forge/tree') return serveForgeTree(ctx, res);
+    // The working folder. Legible to either role; changing it is owner-only.
+    if (req.method === 'GET' && path === '/forge/project') return serveForgeProject(ctx, res);
+    if (req.method === 'POST' && path === '/forge/project') return await postForgeProject(ctx, req, res, role);
     if (req.method === 'POST' && path === '/forge/commit') return await postForgeCommit(ctx, req, res, role);
     if (req.method === 'POST' && path === '/forge/terminal') return await postForgeTerminal(ctx, req, res, role);
     if (req.method === 'GET' && path === '/forge/tests') return serveForgeTests(ctx, res);
@@ -362,6 +382,8 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path === '/forge/extensions') return serveForgeExtensions(ctx, res);
     if (req.method === 'GET' && path === '/forge/connectors') return serveForgeConnectors(ctx, res);
     if (req.method === 'GET' && path === '/skills') return serveSkills(ctx, res);
+    // Customize's add-a-rule / add-a-skill: governed file-write proposals (routes/capabilities.ts).
+    if (path.startsWith('/capabilities/') && await handleCapabilities(ctx, req, res, role, path)) return;
     if (req.method === 'GET' && path === '/forge/agents') {
       return await serveForgeAgents(ctx, res, url.searchParams.get('passive') !== '1');
     }
@@ -387,6 +409,8 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'POST' && path === '/forge/route') return await postForgeRoute(ctx, req, res, role);
     if (req.method === 'POST' && path === '/forge/run/cancel') return await postForgeCancel(ctx, req, res, role);
     if (req.method === 'POST' && path === '/forge/run') return await postForgeRun(ctx, req, res, role);
+    // Plan-first intake: a read-only research pass, before any worktree exists.
+    if (req.method === 'POST' && path === '/forge/plan') return await postForgePlan(ctx, req, res, role);
     // Which sites Zeno may act on in the owner's OWN Chrome. Owner-only, and
     // deliberately not reachable by an agent under any credential.
     if (req.method === 'POST' && path === '/chrome/origins') return await postChromeOrigins(ctx, req, res, role);
@@ -408,6 +432,10 @@ export function createServer(opts: DaemonOptions): Server {
     if (req.method === 'GET' && path.startsWith('/counsel/meetings/')) return serveMeeting(ctx, res, path);
     if (req.method === 'DELETE' && path.startsWith('/counsel/meetings/')) return deleteMeeting(ctx, res, path, role);
     if (req.method === 'POST' && path === '/counsel/ask') return await postCounselAsk(ctx, req, res);
+    // Call presence: the desktop's meeting-window sighting, shared so every
+    // window shows the same "take notes?" banner. Never starts a recording.
+    if (req.method === 'GET' && path === '/calls/current') return serveCurrentCall(ctx, res, role);
+    if (req.method === 'POST' && path === '/calls/detected') return await postCallDetected(ctx, req, res, role);
     if (req.method === 'GET' && path === '/mesh/devices') return serveMeshDevices(ctx, res, role);
     if (req.method === 'POST' && path === '/mesh/pairing') return postMeshPairing(ctx, res, role);
     if (req.method === 'POST' && path === '/mesh/pairing/cancel') return postMeshPairingCancel(ctx, res, role);

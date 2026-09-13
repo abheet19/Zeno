@@ -205,6 +205,13 @@ button{font:inherit; color:inherit}
 .seg button[aria-current]{background:var(--g4); color:var(--ink); box-shadow:inset 0 1px 0 var(--wash-hi)}
 .seg svg{width:14px;height:14px}
 .topright{justify-self:end; display:flex; align-items:center; gap:8px}
+/* ---------- the call banner (global, floats under the top bar) ---------- */
+.callbanner{position:fixed; top:62px; left:50%; transform:translateX(-50%); z-index:60; display:flex; align-items:center; gap:12px; max-width:min(760px,calc(100vw - 32px)); padding:9px 12px 9px 14px; border-radius:13px; font-size:13px; color:var(--ink); background:color-mix(in srgb,var(--cyan) 9%,var(--g2)); border:1px solid color-mix(in srgb,var(--cyan) 38%,var(--rule)); box-shadow:0 18px 44px -20px #000, inset 0 1px 0 var(--wash-hi); backdrop-filter:var(--gl-blur); -webkit-backdrop-filter:var(--gl-blur)}
+.callbanner .cb-dot{flex:none; width:8px; height:8px; border-radius:99px; background:var(--cyan); box-shadow:0 0 0 3px color-mix(in srgb,var(--cyan) 22%,transparent)}
+.callbanner .cb-text{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap} .callbanner .cb-text b{font-weight:500}
+.callbanner .cb-acts{flex:none; display:inline-flex; gap:6px}
+/* Inside Counsel the offer is one click from its own Record button, so it shrinks and moves out of the centre. */
+.callbanner.compact{left:auto; right:16px; transform:none; top:60px; padding:6px 8px 6px 12px; font-size:12px; gap:8px; max-width:min(480px,calc(100vw - 32px))}
 .chip{display:inline-flex; align-items:center; gap:7px; font-family:var(--font-mono); font-size:11px; color:var(--ink-2); padding:5px 10px; border-radius:8px; background:var(--g2); border:1px solid var(--gl-edge); cursor:pointer}
 .chip .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 7px 1px var(--cyan)}
 .iconbtn{width:34px;height:34px;display:grid;place-items:center;border-radius:9px;cursor:pointer;background:none;border:1px solid transparent;color:var(--ink-2)}
@@ -502,6 +509,9 @@ button{font:inherit; color:inherit}
 .tbcta{margin-left:6px; border:0; border-radius:99px; padding:4px 12px; background:var(--cyan); color:var(--g1); font-size:12px; font-weight:600; cursor:pointer}
 .tbcta:hover{filter:brightness(1.08)}
 .tbwin{display:inline-flex; gap:2px; margin-left:8px} .tbwin button{width:28px;height:26px;border:0;background:none;color:var(--ink-3);cursor:pointer;border-radius:5px;font-size:12px} .tbwin button:hover{background:var(--wash); color:var(--ink)}
+/* Agent/Editor view switch — the product switcher's own .seg/.pill look
+   (see the .seg rules above), sized down for this 36px title bar. */
+.tb .seg{padding:2px; margin-left:2px} .tb .seg button{padding:3px 10px; font-size:11.5px}
 /* menus */
 .menu{position:fixed; z-index:70; min-width:250px; background:var(--g2); border:1px solid var(--gl-edge); border-radius:10px; box-shadow:0 22px 60px -20px #000, inset 0 1px 0 var(--wash-hi); padding:5px; font-size:12.5px}
 .menu button{display:flex; align-items:center; gap:12px; width:100%; text-align:left; border:0; background:none; color:var(--ink); padding:6px 10px; border-radius:6px; cursor:pointer}
@@ -509,10 +519,60 @@ button{font:inherit; color:inherit}
 .menu button[disabled]{color:var(--ink-3); cursor:not-allowed} .menu button[disabled]:hover{background:none}
 .menu hr{border:0; border-top:1px solid var(--rule); margin:4px 2px}
 
-.wb{flex:1; min-height:0; display:grid; grid-template-columns:44px 250px minmax(0,1fr) 400px}
-.ide.no-side .wb{grid-template-columns:44px 0 minmax(0,1fr) 400px} .ide.no-side .vsside{display:none}
+/* The Session column is a GRID TRACK. bind/resize.js resizes it by setting
+   --sessw on .wb — setting #sess's own width left the track at its fixed size
+   and the panel spilled past the right edge of the window. */
+.wb{--sessw:400px; flex:1; min-height:0; display:grid; grid-template-columns:44px 250px minmax(0,1fr) var(--sessw)}
+/* Pin each pane to its own column explicitly. Without this, a pane set to
+   display:none below (no-side/no-sess, or the Agent/Editor switch's
+   mode-agent) would slide the remaining panes into the wrong tracks —
+   plain grid auto-placement fills column 1, 2, 3... with whichever panes
+   are still in flow, not with the ones those tracks were sized for. */
+.wb>.vsact{grid-column:1} .wb>.vsside{grid-column:2} .wb>.vsed{grid-column:3} .wb>.sess{grid-column:4}
+.ide.no-side .wb{grid-template-columns:44px 0 minmax(0,1fr) var(--sessw)} .ide.no-side .vsside{display:none}
 .ide.no-sess .wb{grid-template-columns:44px 250px minmax(0,1fr) 0} .ide.no-sess .sess{display:none}
 .ide.no-side.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0}
+/* Forge's Agent/Editor switch (top-left of the title bar; toggled by
+   bind/forge/session.js's setForgeView, persisted as localStorage's
+   zeno-forge-view). Agent — the default — gives the session panel the
+   whole workbench, chat-first. Editor needs no rule of its own: it is
+   exactly the classic layout above, unchanged. */
+.ide.mode-agent .wb{grid-template-columns:44px 0 0 minmax(0,1fr)}
+.ide.mode-agent .vsside, .ide.mode-agent .vsed{display:none}
+/* The status bar is editor chrome — sandbox/branch, Problems/Ports/last-exit,
+   line/col, encoding. Agent mode hides the editor (.vsed above), so its footer
+   has nothing to report and its Problems/Ports/exit readouts would open a panel
+   that is not on screen. Hide it with the editor; Command carries the governance
+   status and Settings opener that also lived here. */
+.ide.mode-agent .vsstat{display:none}
+/* Agent mode gives the session the whole workbench: no leftover fixed width
+   from a resize done in Editor mode may pin it to a narrow column. */
+.ide.mode-agent .sess, .ide.mode-agent #sess{width:auto !important; max-width:none}
+/* Agent mode's own shape (bind/forge/agent-mode.js): sessions rail | transcript
+   + pinned composer | quick actions. The session panel's existing children
+   keep their order in the centre column; the rail and quick column only exist
+   here — Editor mode never lays them out. */
+.ag-rail, .ag-quick{display:none}
+.ide.mode-agent .sess{display:grid; grid-template-columns:272px minmax(0,1fr) 232px; grid-template-rows:auto auto minmax(0,1fr) auto auto; border-left:0}
+.ide.mode-agent .sess>.ag-rail{display:flex; grid-column:1; grid-row:1/-1}
+.ide.mode-agent .sess>.ag-quick{display:flex; grid-column:3; grid-row:1/-1}
+.ide.mode-agent .sess>.sessh{grid-column:2; grid-row:1} .ide.mode-agent .sess>.sesstabs{grid-column:2; grid-row:2}
+.ide.mode-agent .sess>.sessbody{grid-column:2; grid-row:3} .ide.mode-agent .sess>.sesscompose{grid-column:2; grid-row:5}
+.ide.mode-agent .sess>.sesstip, .ide.mode-agent .sessh #s-hist, .ide.mode-agent .sessh #s-close{display:none}
+.ide.mode-agent .sessview, .ide.mode-agent .sesscompose>.composer, .ide.mode-agent .sessfoot{max-width:920px; width:100%; margin-left:auto; margin-right:auto; box-sizing:border-box}
+.ag-rail{flex-direction:column; gap:8px; padding:10px; border-right:1px solid var(--gl-edge); background:var(--g2); min-height:0; position:relative; z-index:1}
+.ag-rail .ag-new{width:100%; justify-content:center}
+.ag-search{width:100%; box-sizing:border-box; font:inherit; font-size:12.5px; color:var(--ink); background:var(--g1); border:1px solid var(--rule-2); border-radius:8px; padding:6px 9px; outline:none} .ag-search:focus{border-color:var(--cyan)}
+.ag-rail .vsvh{padding:4px 2px 0}
+.ag-list{flex:1; min-height:0; overflow:auto; display:flex; flex-direction:column; gap:2px}
+.ag-list .dvsess{padding:8px 8px} .ag-list .dvst{flex:1} .ag-state{flex:none; margin-left:auto; font-size:9.5px}
+.ag-links{display:flex; flex-direction:column; gap:1px; border-top:1px solid var(--rule); padding-top:8px}
+.ag-links button{display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; border:0; background:none; color:var(--ink-2); font:inherit; font-size:12.5px; padding:7px 8px; border-radius:8px; cursor:pointer} .ag-links button:hover{background:var(--wash); color:var(--ink)} .ag-links button span{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3)}
+.ag-rail-foot{font-family:var(--font-mono); font-size:10px; color:var(--ink-3); line-height:1.45; padding:2px 2px 0}
+.ag-quick{flex-direction:column; gap:6px; padding:10px; border-left:1px solid var(--gl-edge); background:var(--g2); position:relative; z-index:1}
+.ag-quick .vsvh{padding:4px 2px 2px}
+.ag-quick button{display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; border:1px solid var(--rule); background:var(--g3); color:var(--ink-2); font:inherit; font-size:12.5px; padding:8px 10px; border-radius:9px; cursor:pointer} .ag-quick button:hover:not(:disabled){color:var(--ink); border-color:var(--rule-2)} .ag-quick button kbd{font-family:var(--font-mono); font-size:10px; color:var(--ink-3); border:1px solid var(--rule); border-radius:4px; padding:1px 5px}
+@media (max-width:1280px){ .ide.mode-agent .sess{grid-template-columns:240px minmax(0,1fr) 0} .ide.mode-agent .sess>.ag-quick{display:none} }
 .ide.no-panel .vspanel{display:none}
 /* Agent = docked side panel next to the editor (Cascade/Windsurf); Editor toggle collapses it. Full chat lives in Command. */
 
@@ -532,6 +592,13 @@ button{font:inherit; color:inherit}
 .vssect{display:flex; align-items:center; gap:4px; padding:5px 8px; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.04em; font-weight:600; color:var(--ink-2); cursor:pointer; border-top:1px solid var(--rule); user-select:none}
 .vssect .chev, .vsdir .chev, .vsresf .chev{width:14px; text-align:center; color:var(--ink-3); font-size:10px}
 .vsvh-a{display:none; gap:1px} .vssect:hover .vsvh-a{display:inline-flex}
+/* Explorer: the working-folder control above the tree (Devin's repo chip). */
+.vsproj{display:flex; align-items:center; padding:4px 8px 4px; flex:none}
+.vsproj-b{display:flex; align-items:center; gap:6px; width:100%; min-width:0; border:1px solid var(--rule-2); background:var(--g3); color:var(--ink); border-radius:8px; padding:5px 8px; font:inherit; font-size:12px; cursor:pointer; text-align:left}
+.vsproj-b:hover{background:var(--wash)} .vsproj-b b{font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0} .vsproj-b .chev{color:var(--ink-3)} .vsproj-b.scratch b{color:var(--ink-2)}
+.vsproj-note{font-size:11px; color:var(--ink-3); padding:0 12px 6px; line-height:1.4}
+.vsoutline{display:flex; flex-direction:column; padding:2px 0 6px} .vsoutline .vsfile{padding-left:14px} .vsoutline .vsfile[data-level="2"]{padding-left:26px} .vsoutline .vsfile[data-level="3"]{padding-left:38px} .vsoutline .vsfile[data-level="4"]{padding-left:50px}
+.vsoutline .vskind{font-family:var(--font-mono); font-size:9.5px; color:var(--ink-3); min-width:26px}
 .vstree{display:flex; flex-direction:column; padding:2px 0 8px}
 .vsdir, .vsfile{display:flex; align-items:center; gap:5px; padding:3px 8px 3px 12px; font-size:12.5px; color:var(--ink-2); cursor:pointer; white-space:nowrap; border:0; background:none; text-align:left; width:100%}
 .vskids .vsdir, .vskids .vsfile{padding-left:26px} .vskids .vskids .vsfile{padding-left:40px}
@@ -635,6 +702,13 @@ button{font:inherit; color:inherit}
 .dvsteps li{display:grid; grid-template-columns:20px 1fr auto; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-2); padding:4px 0}
 .dvsteps li b{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-family:var(--font-mono);font-size:9.5px;background:var(--g5);color:var(--ink-2)} .dvsteps li em{font-style:normal; font-family:var(--font-mono); font-size:10px; color:var(--ink-3)}
 .dvsteps li.done b{background:var(--green); color:var(--g1)} .dvsteps li.done span{color:var(--ink-3); text-decoration:line-through; text-decoration-color:var(--rule-2)} .dvsteps li.run b{background:var(--cyan); color:var(--g1)} .dvsteps li.run span{color:var(--ink)}
+/* Plan-first intake card (bind/forge/plan.js) — reuses .dvplan's frame and .dvsteps' rows. */
+.plan-card{padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; margin-top:6px} .plan-card.approved{border-color:color-mix(in srgb,var(--green) 34%,var(--rule))} .plan-card.pending, .plan-card.editing{border-color:color-mix(in srgb,var(--amber) 34%,var(--rule))}
+.plan-head{display:flex; align-items:center; justify-content:space-between; gap:8px} .plan-goal{margin:0; font-size:13px; color:var(--ink)}
+.plan-card .plan-steps{padding:0} .plan-steps li{grid-template-columns:20px 1fr}
+.plan-step-in{width:100%; min-width:0; font:inherit; font-size:12.5px; color:var(--ink); background:var(--g1); border:1px solid var(--rule-2); border-radius:6px; padding:4px 7px; outline:none} .plan-step-in:focus{border-color:var(--cyan)}
+.plan-list{display:flex; flex-direction:column; gap:3px} .plan-list ul{margin:0; padding-left:16px; font-size:12px; color:var(--ink-2); line-height:1.5} .plan-list.files li{font-family:var(--font-mono); font-size:11.5px}
+[data-plan-first]{cursor:pointer}
 .sess .turn .bt{font-size:13.5px; line-height:1.55} .sess .turn .who{width:26px;height:26px;font-size:10px}
 .dvtool{display:flex; align-items:center; gap:9px; padding:6px 9px; margin:5px 0 0; border:1px solid var(--rule); border-radius:8px; background:var(--g2); font-size:12.5px; color:var(--ink-2); cursor:pointer}
 .dvtool:hover{border-color:var(--rule-2); color:var(--ink)} .dvtool.live{border-color:color-mix(in srgb,var(--cyan) 30%,var(--rule))}
@@ -678,8 +752,8 @@ button{font:inherit; color:inherit}
 .mpd-cost{display:grid; grid-template-columns:repeat(3,1fr); gap:4px} .mpd-cost div{background:var(--g3); border-radius:7px; padding:7px 9px; font-size:10.5px; color:var(--ink-3)} .mpd-cost b{display:block; color:var(--ink); font-size:12.5px; font-weight:600; font-family:var(--font-mono)} .mpd-cost b em{font-style:normal; color:var(--ink-3); font-weight:400; font-size:10px}
 .mpd-str{display:flex; flex-direction:column; gap:5px} .mpd-str div{display:grid; grid-template-columns:76px 1fr auto; gap:8px; align-items:center; font-size:11px; color:var(--ink-3)} .mpd-str i{height:4px; border-radius:99px; background:var(--g5); overflow:hidden; display:block} .mpd-str i::after{content:""; display:block; height:100%; width:var(--w); background:var(--cyan)} .mpd-str span{font-family:var(--font-mono); font-size:10px}
 .mpd-priv{display:flex; align-items:flex-start; gap:8px; font-size:11.5px; color:var(--ink-2); padding:8px 10px; border-radius:8px; background:var(--g3); line-height:1.45} .mpd-priv svg{width:14px;height:14px;flex:none;margin-top:2px} .mpd-priv.loc svg{color:var(--green)} .mpd-priv.eg svg{color:var(--amber)}
-@media (max-width:1280px){ .wb{grid-template-columns:44px 220px minmax(0,1fr) 360px} .ide.no-sess .wb{grid-template-columns:44px 220px minmax(0,1fr) 0} .tbmenu{display:none} .tbcmd{width:260px} }
-@media (max-width:1040px){ .vsside{display:none} .wb{grid-template-columns:44px 0 minmax(0,1fr) 340px} .ide.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0} .tbcta{display:none} }
+@media (max-width:1280px){ .wb{--sessw:360px; grid-template-columns:44px 220px minmax(0,1fr) var(--sessw)} .ide.no-sess .wb{grid-template-columns:44px 220px minmax(0,1fr) 0} .tbmenu{display:none} .tbcmd{width:260px} }
+@media (max-width:1040px){ .vsside{display:none} .wb{--sessw:340px; grid-template-columns:44px 0 minmax(0,1fr) var(--sessw)} .ide.no-sess .wb{grid-template-columns:44px 0 minmax(0,1fr) 0} .tbcta{display:none} }
 /* quick open + toast */
 .quick{position:fixed; inset:0; z-index:75; display:flex; align-items:flex-start; justify-content:center; padding-top:9vh; background:rgba(5,7,9,.35)}
 .quick-card{width:min(640px,92vw); background:var(--g2); border:1px solid var(--gl-edge); border-radius:12px; box-shadow:0 30px 70px -22px #000, inset 0 1px 0 var(--wash-hi); overflow:hidden}
@@ -772,7 +846,10 @@ button{font:inherit; color:inherit}
 .plus-item .mi{width:18px;height:18px;display:grid;place-items:center;color:var(--ink-3);flex:none} .plus-item .mi svg{width:16px;height:16px} .plus-item:hover .mi{color:var(--cyan)}
 
 /* ---------- COUNSEL ---------- */
-.cn{display:grid; grid-template-columns:280px 1fr; height:100%; min-height:0}
+/* Fill the whole area under the 54px top bar (.app's first grid row). With only
+   height:100% the grid took its CONTENT's height, so the Meetings sidebar and its
+   right border stopped short of the bottom of the window. */
+.cn{display:grid; grid-template-columns:280px 1fr; height:100%; min-height:calc(100vh - 54px)}
 .cnside{border-right:1px solid var(--gl-edge); padding:16px 14px; display:flex; flex-direction:column; gap:4px; overflow:auto; background:linear-gradient(180deg,rgba(127,140,160,.045),rgba(127,140,160,.01))}
 .recdot{width:8px;height:8px;border-radius:50%;background:var(--g1);display:inline-block}
 .recdot.big{width:11px;height:11px;background:var(--red);box-shadow:0 0 10px 2px var(--red);animation:recp 1.2s ease-in-out infinite} @keyframes recp{50%{opacity:.35}}
@@ -914,6 +991,21 @@ button{font:inherit; color:inherit}
            chip for the only corner the eye checks for state. -->
     </div>
   </header>
+
+  <!-- The call banner. Global chrome, not any product's: it floats under the
+       top bar so it needs no row in .app's grid and covers nothing that must
+       be clicked. Hidden until the desktop app's meeting-window discovery has
+       reported a sighting (bind/call-banner.js); a plain browser has no such
+       signal, so there it never appears. Take notes only ROUTES to Counsel's
+       consent step — recording still starts only from that step. -->
+  <div class="callbanner" id="call-banner" hidden role="status" aria-live="polite">
+    <span class="cb-dot"></span>
+    <span class="cb-text"><b>A call looks live</b> — <span id="call-banner-what"></span>. Take notes with Counsel →</span>
+    <span class="cb-acts">
+      <button type="button" class="btn p sm" id="call-banner-notes">Take notes</button>
+      <button type="button" class="btn g sm" id="call-banner-dismiss">Dismiss</button>
+    </span>
+  </div>
 
   <div class="products">
   <div class="product on" data-product="command"><div class="body">
@@ -1121,9 +1213,12 @@ button{font:inherit; color:inherit}
         </div>
       </section>
 
-      <!-- ================= INTEGRATIONS — connectors + MCP ================= -->
+      <!-- ================= INTEGRATIONS — what reaches OUT of this machine =================
+           Work sources, the model runtime, Zeno's bundled connectors, and the
+           MCP servers you record. What shapes a run from inside the repository
+           (rules, skills) is Customize's job — the two never overlap. -->
       <section class="screen" data-screen="integrations">
-        <div class="phead"><div><h2>Integrations</h2><p>Connectors and MCP servers. Each is per-run and least-privilege; a connector's effects classify, preview and seal like any other.</p></div><button class="btn g sm">Add a connector</button></div>
+        <div class="phead"><div><h2>Integrations</h2><p>Everything that reaches out of this machine — work sources, the model runtime, Zeno's bundled connectors, and the MCP servers you record. Nothing is connected ambiently; each is per-run and least-privilege, and a connector's effects classify, preview and seal like any other.</p></div><button class="btn g sm" data-integrations-add-mcp>+ Add MCP server</button></div>
         <div class="pbody">
           <div class="live-cards" style="width:100%">
             <div class="lcard"><div class="lk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-.9-2.6c3-.3 6.2-1.5 6.2-6.7A5.2 5.2 0 0 0 20 4.8 4.9 4.9 0 0 0 19.9 1S18.7.6 16 2.5a13.4 13.4 0 0 0-7 0C6.3.6 5.1 1 5.1 1A4.9 4.9 0 0 0 5 4.8 5.2 5.2 0 0 0 3.7 8.4c0 5.2 3.2 6.4 6.2 6.7a3.4 3.4 0 0 0-.9 2.6V22"/></svg>GitHub</div><div class="lm">issues + pull requests</div><div class="lr"><span class="pill wt">not connected</span><button class="laction cy">Connect</button></div></div>
@@ -1143,9 +1238,12 @@ button{font:inherit; color:inherit}
         <div class="pbody"><div class="card rows"><div class="row-list" data-mount="projects-list"><div class="fnote">Reading the projects this daemon knows about…</div></div></div></div>
       </section>
 
-      <!-- ============ CUSTOMIZE — skills, connectors and plugins hub ============ -->
+      <!-- ============ CUSTOMIZE — what shapes a run inside the repository ============
+           Rules and Agent Skills (plus the informational extensions catalog).
+           Adding one is a governed file write the owner approves in Approvals —
+           bind/lists/customize.js + bind/lists/authoring.js. -->
       <section class="screen" data-screen="customize">
-        <div class="phead"><div><h2>Customize</h2><p>Skills, connectors and plugins. Everything here is catalogued read-only and loaded per run — recording one is not connecting it, and nothing is ambient.</p></div></div>
+        <div class="phead"><div><h2>Customize</h2><p>What shapes a Forge run in the selected repository: rules (AGENTS.md, CLAUDE.md and rule folders) and Agent Skills. Adding or editing one is a governed file write you approve — nothing here is loaded ambiently or written silently.</p></div><div style="display:flex;gap:6px"><button class="btn g sm" data-customize-add-rule>+ Add rule</button><button class="btn g sm" data-customize-add-skill>+ Add skill</button></div></div>
         <div class="pbody"><div class="card rows"><div class="row-list" data-mount="customize-list"><div class="fnote">Reading the catalogue…</div></div></div></div>
       </section>
     </main>
@@ -1165,6 +1263,7 @@ button{font:inherit; color:inherit}
     <div class="tb">
       <button class="tbico" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
       <button class="tbico" title="Toggle Primary Side Bar (Ctrl+B)" data-layout="side" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+      <nav class="seg" aria-label="Forge view" id="forge-viewseg"><button type="button" data-forge-view="agent">Agent</button><button type="button" data-forge-view="editor" aria-current="page">Editor</button></nav>
       <nav class="tbmenu"><button>File</button><button>Edit</button><button>Selection</button><button>View</button><button>Go</button><button>Run</button><button>Terminal</button><button>Help</button></nav>
       <span class="fgrow"></span>
       <button class="tbico" title="Go Back">←</button><button class="tbico" title="Go Forward">→</button>
@@ -1197,7 +1296,12 @@ button{font:inherit; color:inherit}
       <aside class="vsside">
         <div class="vsview on" data-vsview="explorer">
           <div class="vsvh">Explorer <span class="fgrow"></span><button class="fico" title="Views and More Actions">⋯</button></div>
-          <div class="vssect open"><span class="chev">▾</span>SANDBOX <span class="fgrow"></span><span class="vsvh-a"><button class="fico" title="New File">+</button><button class="fico" title="New Folder">▣</button><button class="fico" title="Refresh">↻</button><button class="fico" title="Collapse">⇈</button></span></div>
+          <!-- The working folder. Filled by bind/forge/explorer-project.js from
+               GET /forge/project: the repository's real name, its path as the
+               tooltip, and a menu to change it. Nothing here is a fixture. -->
+          <div class="vsproj"><button class="vsproj-b" type="button" data-explorer-project title="Working folder"><span class="vsfo">▣</span><b data-project-name>reading…</b><span class="chev">▾</span></button></div>
+          <div class="vsproj-note" data-project-note hidden></div>
+          <div class="vssect open" data-explorer-root><span class="chev">▾</span><span data-project-head>PROJECT</span> <span class="fgrow"></span><span class="vsvh-a"><button class="fico" title="New File" data-explorer-act="new-file">+</button><button class="fico" title="New Folder" data-explorer-act="new-folder">▣</button><button class="fico" title="Refresh" data-explorer-act="refresh">↻</button><button class="fico" title="Collapse All" data-explorer-act="collapse">⇈</button></span></div>
           <div class="vstree">
             <div class="vsdir open" data-dir><span class="chev">▾</span><span class="vsfo">▣</span>src<span class="vsdotc"></span></div>
             <div class="vskids">
@@ -1218,8 +1322,8 @@ button{font:inherit; color:inherit}
             <div class="vsfile" data-file="package.json"><span class="vsi json">{}</span>package.json</div>
             <div class="vsfile" data-file="tsconfig.json"><span class="vsi json">{}</span>tsconfig.json</div>
           </div>
-          <div class="vssect"><span class="chev">▸</span>OUTLINE</div>
-          <div class="vssect"><span class="chev">▸</span>TIMELINE</div>
+          <div class="vssect open" data-explorer-sect="outline"><span class="chev">▾</span>OUTLINE</div>
+          <div class="vssect open" data-explorer-sect="timeline"><span class="chev">▾</span>TIMELINE</div>
         </div>
         <div class="vsview" data-vsview="search"><div class="vsvh">Search</div><div class="vspad"><input class="vsinput" value="INGEST_TOKEN"><input class="vsinput" placeholder="Replace"><div class="vsres"><div class="vsresf"><span class="chev">▾</span>ingest.ts <em>src</em><span>2</span></div><div class="vsresl">token: process.env.<mark>INGEST_TOKEN</mark>_V1,</div><div class="vsresl">if (!<mark>INGEST_TOKEN</mark>) throw …</div><div class="vsresf"><span class="chev">▾</span>ingest.spec.ts <em>tests</em><span>1</span></div><div class="vsresl">process.env.<mark>INGEST_TOKEN</mark> = 'test';</div></div><div class="vsnote">3 results in 2 files</div></div></div>
         <div class="vsview" data-vsview="scm"><div class="vsvh">Source Control</div><div class="vspad"><input class="vsinput" placeholder="Message (Ctrl+Enter to commit — governed)"><button class="btn p sm" style="width:100%">✓ Commit</button><div class="vssect open" style="padding-left:0"><span class="chev">▾</span>Changes <span class="vsbadge s">2</span></div><div class="vsfile"><span class="vsi ts">TS</span>App.tsx<span class="vsmod">M</span></div><div class="vsfile"><span class="vsi ts">TS</span>ingest.ts<span class="vsmod">M</span></div><div class="vsnote">A commit previews as <code>vcs.commit</code> and seals a receipt when you approve it in Command.</div></div></div>
@@ -1302,6 +1406,22 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
 
       <!-- Session panel (Cascade-style) -->
       <aside class="sess" id="sess">
+        <!-- Agent mode's sessions rail (bind/forge/agent-mode.js). Only laid out
+             under .ide.mode-agent; Editor mode never shows it. Every row is a
+             real session from this browser's own history; the links are real
+             navigation and nothing else. -->
+        <div class="ag-rail" id="ag-rail">
+          <button class="btn p sm ag-new" id="ag-new" type="button">+ New session</button>
+          <input class="ag-search" id="ag-search" type="search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off">
+          <div class="vsvh">Sessions</div>
+          <div class="ag-list" id="ag-list"></div>
+          <div class="ag-links">
+            <button type="button" data-ag-link="automations" title="Scheduled tasks live in Forge’s ZENO sidebar (Editor view)">Automations <span>Scheduled tasks →</span></button>
+            <button type="button" data-product-go="command" data-then="approvals" title="Command → Approvals: every held change, with its real diff">Review <span>Approvals →</span></button>
+            <button type="button" data-product-go="command" data-then="customize" title="Command → Customize: rules, skills, connectors">Rules &amp; Skills <span>Customize →</span></button>
+          </div>
+          <div class="ag-rail-foot">History is kept in this browser only — there is no server-side session store.</div>
+        </div>
         <div class="sessh"><span class="sesst">Session</span><span class="fgrow"></span><button class="fico" title="New Session" id="s-new">+</button><button class="fico" title="Session History" id="s-hist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button><button class="fico" title="More">⋯</button><button class="fico" title="Close Session Panel (Ctrl+Alt+B)" id="s-close">×</button></div>
         <div class="sesstabs" id="s-tabs" hidden role="tablist"><button aria-selected="true" data-stab="chat">Session</button><button data-stab="plan">Plan</button><button data-stab="runs">Runs</button><button data-stab="actions">Actions <span class="fct am">1</span></button><button data-stab="lens">Lens</button></div>
         <div class="sessbody" id="s-body">
@@ -1324,6 +1444,7 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
                 <div class="ag-row">
                   <button class="ag-ic" id="ag-plus" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
                   <button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button>
+                  <button class="pill cy" id="ag-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button>
                   <span class="grow"></span>
                   <button class="ag-ic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button>
                   <button class="ag-send" id="ag-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
@@ -1366,9 +1487,20 @@ PS D:\Code\Zeno\.zeno\sandbox&gt; <span id="vs-termecho"></span><span class="cur
         <div class="sesscompose">
           <div class="composer compact">
             <div class="row"><button class="cbtn attach" id="s-attach" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><textarea id="s-ta" rows="1" placeholder="Ask Zeno to change the codebase…"></textarea><button class="cbtn mic" id="s-mic" title="Voice (mic: Forge)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button><button class="cbtn send" id="s-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
-            <div class="foot"><button class="pill wt" id="s-kind" title="What this run may do">&lt;/&gt; Code ▾</button><button class="pill cy" id="s-model" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><button class="pill wt" data-effort-pill title="Effort — higher consumes more tokens">effort: medium ▾</button><span class="grow"></span><button class="pill wt" id="s-skills" title="Skills, rules and MCP loaded for this run" data-vsgo="zeno">2 skills · 8 tools ▾</button></div>
+            <div class="foot"><button class="pill wt" id="s-kind" title="What this run may do">&lt;/&gt; Code ▾</button><button class="pill cy" id="s-model" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><button class="pill wt" data-effort-pill title="Effort — higher consumes more tokens">effort: medium ▾</button><button class="pill cy" id="s-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button><span class="grow"></span><button class="pill wt" id="s-skills" title="Skills, rules and MCP loaded for this run" data-vsgo="zeno">2 skills · 8 tools ▾</button></div>
           </div>
           <div class="sessfoot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ sandbox</span><span class="grow"></span><span>Vault memory: on</span></div>
+        </div>
+        <!-- Agent mode's quick actions (right column). Each is a real control:
+             New session, the quick-open picker, Command's Customize screen, and
+             Command's Approvals when there are held diffs to view (disabled with
+             its reason otherwise — see agent-mode.js's paintQuick()). -->
+        <div class="ag-quick" id="ag-quick">
+          <div class="vsvh">Quick actions</div>
+          <button type="button" id="aq-new">New session</button>
+          <button type="button" id="aq-open">Open file <kbd>Ctrl+P</kbd></button>
+          <button type="button" id="aq-custom" data-product-go="command" data-then="customize">Open customizations</button>
+          <button type="button" id="aq-diffs" data-product-go="command" data-then="approvals">View diffs</button>
         </div>
       </aside>
     </div>
@@ -1509,10 +1641,11 @@ Open questions (2): …</pre><div class="caps-acts" style="padding:12px 0 0;bord
           <div class="setrow"><div><div class="lab">What voice may do</div><div class="sub">Voice can ask and propose. It can never approve, send, delete or pay — those need a click from the owner.</div></div><span class="pill wt">ask &amp; propose only</span></div>
           <div class="setrow"><div><div class="lab">Speaker identity</div><div class="sub">Unavailable until you opt in. Owner-only, and never an authorization factor.</div></div><span class="pill wt">off</span></div>
           <div class="setrow"><div><div class="lab">Wake word</div><div class="sub">Listen for "Zeno" to start a turn. Off by default — push-to-talk always works.</div></div><div class="toggle" aria-checked="false" role="switch" tabindex="0"><span class="k"></span></div></div>
+          <div class="setrow"><div><div class="lab">Local speech (Whisper)</div><div class="sub">Checking whether the local Whisper runtime is installed…</div></div><div class="lw-ctl" data-lw-ctl><button class="set-btn" disabled title="Checking…">Install local Whisper (~1.1 GB)</button></div></div>
         </div>
-        <div class="set-pane" data-setpane="connectors" data-sub="Skills, MCP servers and plugins — each added by you, all governed.">
-          <div class="setrow"><div><div class="lab">Customize hub</div><div class="sub">Connectors, skills and plugins live in Customize. Each one is added by you and stays behind the approval gate — nothing is loaded ambiently.</div></div><button class="set-btn p" data-set-customize>Open Customize</button></div>
-          <div class="setrow"><div><div class="lab">MCP servers</div><div class="sub">Config stores the command and environment variable NAMES only — never their values, which the OS keychain holds.</div></div><span class="pill wt">0 configured</span></div>
+        <div class="set-pane" data-setpane="connectors" data-sub="What connects Zeno out (MCP, connectors) lives in Integrations; what shapes a run (skills, rules) lives in Customize. Each is added by you and governed.">
+          <div class="setrow"><div><div class="lab">Customize hub</div><div class="sub">Skills and rules live in Customize; MCP servers and connectors live in Integrations. Each is added by you and stays behind the approval gate — nothing is loaded ambiently.</div></div><button class="set-btn p" data-set-customize>Open Customize</button></div>
+          <div class="setrow"><div><div class="lab">MCP servers</div><div class="sub">Managed in Integrations. Config stores the command and environment variable NAMES only — never their values, which the OS keychain holds.</div></div><span class="pill wt">0 configured</span></div>
           <div class="setrow"><div><div class="lab">OAuth connectors</div><div class="sub">Google, Slack, Notion and the rest need a provider app you register. Zeno never ships shared credentials.</div></div><span class="pill wt">not connected</span></div>
         </div>
         <div class="set-pane" data-setpane="security" data-sub="The kernel's guarantees. Nothing here is decorative.">

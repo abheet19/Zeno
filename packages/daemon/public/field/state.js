@@ -83,10 +83,12 @@ export const N = [];
 export const E = [];
 export const ACT = [];
 
-/* The kinds drawn in the live cyan: a surface, a work source, and the local
-   model runtime. Everything else — a repo, a device, a ticket, a memory, a
-   meeting, an installed model — is a thing at rest and reads neutral. */
-export const LIVE_K = { agent: 1, src: 1, runtime: 1 };
+/* The kinds drawn in the live cyan: a surface, a work source, the local
+   model runtime, and a running agent — the one thing on the field actually
+   doing work right now. Everything else — a repo, a device, a ticket, a
+   memory, a meeting, an installed model — is a thing at rest and reads
+   neutral. */
+export const LIVE_K = { agent: 1, src: 1, runtime: 1, run: 1 };
 
 /* What the node card calls each kind. Without this, a new kind printed its own
    internal key at the reader ("mem", "meet", "ml") as if that were a word. */
@@ -103,4 +105,5 @@ export const KIND_WORD = {
   meet: 'meeting · recorded here',
   runtime: 'local model runtime',
   model: 'installed local model',
+  run: 'live agent run',
 };

@@ -151,6 +151,13 @@ export async function bind() {
     const stepsEl = pairSheet ? $('.pairsteps', pairSheet) : null;
     const mhSubOriginal = mhSubEl ? mhSubEl.textContent : '';
     const stepsOriginal = stepsEl ? [...stepsEl.childNodes] : [];
+    // The artifact's `.qr` box is decorative CSS — a grid pattern with a hollow
+    // centre — not an encoded QR. It looks scannable, so an owner points a
+    // phone at it and gets nothing (that is exactly what happened). While no
+    // phone client exists there is nothing a real QR could lead to either, so
+    // the box says so in words instead of miming a code. Restored if a client
+    // ever reports built === true.
+    const qrEl = pairSheet ? $('.qr', pairSheet) : null;
 
     const ownerHeld = !!token();
     const daemonHost = typeof location !== 'undefined' && location.host ? location.host : '';
@@ -201,6 +208,16 @@ export async function bind() {
         mhSubEl.textContent = noClient
           ? 'This mints a real invite and a real code on this machine. Nothing can answer it yet: the Zeno phone client is not built.'
           : mhSubOriginal;
+      }
+      if (qrEl) {
+        qrEl.classList.toggle('qr-off', noClient);
+        if (noClient) {
+          qrEl.removeAttribute('aria-hidden');
+          qrEl.textContent = 'Nothing to scan yet — the phone app that would read a QR is not built. Use the code.';
+        } else {
+          qrEl.setAttribute('aria-hidden', 'true');
+          qrEl.textContent = '';
+        }
       }
       if (!stepsEl) return;
       if (noClient) {

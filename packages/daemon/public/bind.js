@@ -99,6 +99,8 @@ const BINDERS = [
   './bind/compare.js',
   './bind/forge-progress.js',
   './bind/resize.js',
+  './bind/orchestrator.js',
+  './bind/call-banner.js',
   // Last: it re-runs the others, so it must not run before they have run once.
   './bind/live.js',
 ];
