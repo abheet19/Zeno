@@ -1,14 +1,23 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
+const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { tmpdir } = require('node:os');
-const { inspectProject, readProjectPreference, writeProjectPreference } = require('../project.cjs');
+const { inspectProject } = require('../project.cjs');
 
 test('switching projects does not start speech or reference the removed eager warm path', () => {
   const main = readFileSync(join(__dirname, '..', 'main.cjs'), 'utf8');
   assert.doesNotMatch(main, /\bwarmSpeech\b/);
+});
+
+test('the picker only validates and returns a path — the daemon switches and remembers it', () => {
+  // A restart-on-switch would drop the session panel's state and keep a
+  // second copy of the choice in the profile that could disagree with the
+  // daemon's own <workspace>/project.json. Neither may come back.
+  const main = readFileSync(join(__dirname, '..', 'main.cjs'), 'utf8');
+  assert.doesNotMatch(main, /forge-project\.json/);
+  assert.doesNotMatch(main, /sessionProject|projectSwitching|writeProjectPreference/);
+  assert.match(main, /ipcMain\.handle\('zeno:project:choose'[\s\S]*?return inspectProject\(answer\.filePaths\[0\]\);/);
 });
 
 test('folder selection resolves a subfolder to the Git repository root without a shell', () => {
@@ -27,16 +36,6 @@ test('folder selection refuses a non-repository with a useful next step', () => 
   const result = inspectProject('C:\\notes', () => ({ status: 128, stdout: '', stderr: 'not a repository' }), value => value);
   assert.equal(result.ok, false);
   assert.match(result.error, /existing Git repository/);
-});
-
-test('project preference round-trips and invalid JSON cannot select a path', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'zeno-project-pref-'));
-  const path = join(dir, 'forge-project.json');
-  try {
-    writeProjectPreference(path, 'D:\\Code\\Zeno');
-    assert.equal(JSON.parse(readFileSync(path, 'utf8')).path, 'D:\\Code\\Zeno');
-    assert.deepEqual(readProjectPreference(path, value => ({ ok: true, path: value })), { ok: true, path: 'D:\\Code\\Zeno' });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('folder selection canonicalizes both the chosen folder and Git root', () => {
@@ -62,15 +61,4 @@ test('folder selection contains Git launch failures and unreadable roots', () =>
   });
   assert.equal(unreadable.ok, false);
   assert.match(unreadable.error, /repository root.*cannot be read/i);
-});
-
-test('stale and malformed saved projects are never returned as usable', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'zeno-project-stale-'));
-  const path = join(dir, 'forge-project.json');
-  try {
-    writeProjectPreference(path, 'D:\\deleted-repository');
-    assert.deepEqual(readProjectPreference(path, () => ({ ok: false, error: 'That folder cannot be read.' })), { ok: false, error: 'That folder cannot be read.' });
-    require('node:fs').writeFileSync(path, '{not-json', 'utf8');
-    assert.deepEqual(readProjectPreference(path), { ok: false, error: null });
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

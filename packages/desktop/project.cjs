@@ -1,8 +1,15 @@
 'use strict';
-const { mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } = require('node:fs');
-const { dirname } = require('node:path');
+const { realpathSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 
+/**
+ * Validate a folder the owner picked for Forge: it must be readable and sit
+ * inside a Git repository (every agent run is isolated in a git worktree).
+ * A sub-folder resolves up to its repository root — git's own answer. This
+ * is the desktop's half of the check; the daemon runs the same rule again
+ * when the window hands it the path (POST /forge/project), which is also
+ * where the choice is remembered.
+ */
 function inspectProject(input, run = spawnSync, canonical = realpathSync.native) {
   if (typeof input !== 'string' || input.trim() === '') return { ok: false, error: 'Choose a project folder.' };
   let chosen;
@@ -23,22 +30,4 @@ function inspectProject(input, run = spawnSync, canonical = realpathSync.native)
   catch { return { ok: false, error: 'Git found a repository root, but that path cannot be read.' }; }
 }
 
-function readProjectPreference(path, inspect = inspectProject) {
-  try {
-    const value = JSON.parse(readFileSync(path, 'utf8'));
-    return inspect(value && value.path);
-  } catch {
-    return { ok: false, error: null };
-  }
-}
-
-function writeProjectPreference(path, project) {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ path: project }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-}
-
-function clearProjectPreference(path) {
-  try { unlinkSync(path); } catch (error) { if (!error || error.code !== 'ENOENT') throw error; }
-}
-
-module.exports = { clearProjectPreference, inspectProject, readProjectPreference, writeProjectPreference };
+module.exports = { inspectProject };

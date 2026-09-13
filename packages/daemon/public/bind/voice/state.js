@@ -19,6 +19,14 @@ export const vstate = {
   micButtons: [],
   engineNote: '',
 
+  // ---- true when window.zenoLocalSpeech exists (the desktop bridge) but the
+  // local Whisper runtime files are not actually on disk yet; owned by
+  // voice/pill.js's refreshLocalRuntimeStatus(), read by its own paintState().
+  // The bridge itself is always present on Windows regardless of whether
+  // anything was ever installed, so without this flag a missing runtime would
+  // paint as a live, idle engine instead of a disabled one. ----
+  localRuntimeMissing: false,
+
   // ---- wake mode's one on/off flag; owned by voice/wake.js, read by
   // voice/ptt.js (one recogniser at a time) and voice/pill.js (what
   // "settled" means while wake mode is still on) ----

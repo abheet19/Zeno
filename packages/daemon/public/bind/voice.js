@@ -51,7 +51,9 @@
 import { getJSON, $, screenEl, token } from '../bind.js';
 import { SpeechRecognition, waitForSpeechIdle } from '../whisper.js';
 import { vstate } from './voice/state.js';
-import { setState, reply, paintState, engineUnavailableReason } from './voice/pill.js';
+import {
+  setState, reply, paintState, engineUnavailableReason, refreshLocalRuntimeStatus,
+} from './voice/pill.js';
 import { clickProduct, gotoCommandScreen, cap } from './voice/nav.js';
 import { wireMicButton, abortPttNow } from './voice/ptt.js';
 import { readWakePref, restoreWakeMode, disarmWake, wireWakeSettingsToggle } from './voice/wake.js';
@@ -341,6 +343,14 @@ export async function bind() {
     if (!SpeechRecognition) failed.push('no speech recognition engine is available (neither local Whisper nor a Web Speech API)');
 
     paintState(); // draws idle/disabled honestly before any async work below
+
+    // The desktop bridge exists whether or not local Whisper was ever
+    // installed (see preload.cjs), so its actual presence on disk needs its
+    // own, separate check — repainted immediately when it resolves, and again
+    // whenever a Settings → Voice install finishes (see speech-install.cjs /
+    // main.cjs, relayed here by preload.cjs as this same window event).
+    void refreshLocalRuntimeStatus().then(paintState);
+    window.addEventListener('zeno:speech-runtime-changed', () => { void refreshLocalRuntimeStatus().then(paintState); });
 
     window.addEventListener('zeno:release-command-voice', onExternalRelease);
     // The window going away stops the microphone; it does not revoke consent.

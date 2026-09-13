@@ -9,6 +9,7 @@
     "packages/desktop/package.json",
     "package.json",
     "packages/desktop/speech.cjs",
+    "packages/desktop/speech-install.cjs",
     "packages/desktop/whisper.cjs",
     "packages/desktop/project.cjs",
     "packages/desktop/preload.cjs",

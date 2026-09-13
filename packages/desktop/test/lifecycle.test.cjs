@@ -11,7 +11,6 @@ const {
   protectDiagnosticStream,
   registerGracefulQuit,
   registerSecondInstanceFocus,
-  resolveDaemonProject,
   stopDaemonChild,
 } = require('../lifecycle.cjs');
 
@@ -165,29 +164,10 @@ test('the project picker accepts only the current loopback main frame', () => {
   assert.equal(isTrustedMainFrame({ sender, senderFrame: mainFrame }, window, 'http://127.0.0.1:7317'), false);
 });
 
-test('project selection has stable precedence and trims explicit launch paths', () => {
-  const dependencies = { readPreference: () => ({ ok: true, path: 'D:\\saved' }), clearPreference() {} };
-  assert.deepEqual(resolveDaemonProject({ sessionProject: ' D:\\picked ', environmentProject: 'D:\\env', preferencePath: 'pref' }, dependencies), { path: 'D:\\picked', source: 'session' });
-  assert.deepEqual(resolveDaemonProject({ sessionProject: null, environmentProject: ' D:\\env ', preferencePath: 'pref' }, dependencies), { path: 'D:\\env', source: 'environment' });
-  assert.deepEqual(resolveDaemonProject({ sessionProject: null, environmentProject: '', preferencePath: 'pref' }, dependencies), { path: 'D:\\saved', source: 'preference' });
-});
-
-test('a stale saved project is forgotten and launch falls back to the safe sandbox', () => {
-  const cleared = [];
-  const result = resolveDaemonProject(
-    { sessionProject: null, environmentProject: '', preferencePath: 'C:\\profile\\forge-project.json' },
-    { readPreference: () => ({ ok: false, error: 'That folder cannot be read.' }), clearPreference: path => cleared.push(path) },
-  );
-  assert.deepEqual(result, { path: null, source: 'sandbox' });
-  assert.deepEqual(cleared, ['C:\\profile\\forge-project.json']);
-});
-
-test('an unreadable stale preference cannot prevent sandbox startup', () => {
-  const result = resolveDaemonProject(
-    { sessionProject: null, environmentProject: '', preferencePath: 'C:\\profile\\forge-project.json' },
-    { readPreference: () => ({ ok: false }), clearPreference: () => { throw new Error('access denied'); } },
-  );
-  assert.deepEqual(result, { path: null, source: 'sandbox' });
+test('without an explicit override the daemon decides the project itself — no ZENO_PROJECT_DIR is invented', () => {
+  const env = createDaemonEnvironment({ PATH: 'C:\\tools' }, { isPackaged: true, workspacePath: 'C:\\profile\\workspace', project: undefined });
+  assert.equal(env.ZENO_PROJECT_DIR, undefined);
+  assert.equal(env.ZENO_DIR, 'C:\\profile\\workspace');
 });
 
 test('desktop daemon environment preserves Ollama discovery and selects the canonical project', () => {

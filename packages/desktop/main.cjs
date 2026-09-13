@@ -23,7 +23,8 @@
  */
 const { app, BrowserWindow, shell, dialog, ipcMain, desktopCapturer, session } = require('electron');
 const { createWhisperEngine, installWhisperSpeech, resolveWhisperRuntime } = require('./whisper.cjs');
-const { clearProjectPreference, inspectProject, readProjectPreference, writeProjectPreference } = require('./project.cjs');
+const { describeStatus: describeSpeechInstallStatus, installWhisperRuntime } = require('./speech-install.cjs');
+const { inspectProject } = require('./project.cjs');
 const {
   claimDesktopInstance,
   createDaemonEnvironment,
@@ -31,7 +32,6 @@ const {
   protectDiagnosticStream,
   registerGracefulQuit,
   registerSecondInstanceFocus,
-  resolveDaemonProject,
   stopDaemonChild,
 } = require('./lifecycle.cjs');
 const { spawn } = require('node:child_process');
@@ -69,10 +69,21 @@ let daemon = null;
 /** @type {BrowserWindow | null} */
 let win = null;
 let launchUrl = ORIGIN;
-let sessionProject = null;
-let projectSwitching = false;
-const speechEngine = createWhisperEngine(resolveWhisperRuntime());
-const stopSpeech = installWhisperSpeech(ipcMain, () => win, ORIGIN, speechEngine);
+// Held behind a proxy, not a plain const: a successful local Whisper install
+// (see the IPC handlers below) replaces the engine underneath so the mic works
+// without a restart. installWhisperSpeech captures whatever object it is given
+// once, so the object it holds must forward to whichever engine is current
+// rather than be the engine itself.
+let activeSpeechEngine = createWhisperEngine(resolveWhisperRuntime());
+const speechEngineHandle = {
+  available: () => activeSpeechEngine.available(),
+  ready: () => activeSpeechEngine.ready(),
+  transcribe: (...args) => activeSpeechEngine.transcribe(...args),
+  stop: () => activeSpeechEngine.stop(),
+  status: () => activeSpeechEngine.status(),
+};
+const stopSpeech = installWhisperSpeech(ipcMain, () => win, ORIGIN, speechEngineHandle);
+let speechInstallController = null;
 
 /**
  * Find the daemon entry point. Packaged, it sits beside the app resources;
@@ -104,19 +115,18 @@ function startDaemon() {
     // Program Files it is not writable at all. So the packaged app names a
     // per-user location instead. A checkout keeps the old behaviour, and an
     // explicit ZENO_DIR still wins over both.
+    //
+    // The Forge working folder is NOT decided here any more. The daemon keeps
+    // the owner's choice itself (<workspace>/project.json, written by its
+    // POST /forge/project route and read back at every start), so the
+    // desktop no longer holds a second copy that could disagree with it. An
+    // explicit ZENO_PROJECT_DIR in this process's environment still passes
+    // through as a per-launch override, exactly as `npm run up` honours it.
     const userDataPath = app.getPath('userData');
-    const project = resolveDaemonProject({
-      sessionProject,
-      environmentProject: process.env.ZENO_PROJECT_DIR,
-      preferencePath: join(userDataPath, 'forge-project.json'),
-    }, {
-      readPreference: readProjectPreference,
-      clearPreference: clearProjectPreference,
-    });
     const env = createDaemonEnvironment(process.env, {
       isPackaged: app.isPackaged,
       workspacePath: join(userDataPath, 'workspace'),
-      project: project.path,
+      project: process.env.ZENO_PROJECT_DIR,
     });
 
     const child = spawn(process.execPath, [entry], {
@@ -177,48 +187,68 @@ function trustedFrame(event) {
   return isTrustedMainFrame(event, win, ORIGIN);
 }
 
+// Whether local Whisper is actually on disk right now — read fresh on every
+// call rather than cached, since installing (below) can change the answer.
+ipcMain.handle('zeno:speech:install:status', event => {
+  if (!trustedFrame(event)) return { installed: false };
+  return describeSpeechInstallStatus();
+});
+
+// One install at a time. Nothing downloads until the owner clicks Install in
+// Settings → Voice; there is no other caller of installWhisperRuntime().
+ipcMain.handle('zeno:speech:install:start', async event => {
+  if (!trustedFrame(event)) return { ok: false, error: 'not-trusted', message: 'This window cannot install local Whisper.' };
+  if (process.platform !== 'win32') return { ok: false, error: 'unsupported-platform', message: 'Local Whisper install is only available in the Windows desktop app.' };
+  if (speechInstallController) return { ok: false, error: 'in-progress', message: 'An install is already in progress.' };
+  const sender = event.sender;
+  speechInstallController = new AbortController();
+  try {
+    const result = await installWhisperRuntime({
+      signal: speechInstallController.signal,
+      onProgress: progress => { if (!sender.isDestroyed()) sender.send('zeno:speech:install:progress', progress); },
+    });
+    // The engine created at launch captured whatever (non-existent) path
+    // resolveWhisperRuntime() picked back then; re-resolve now that the files
+    // are real, and swap it in behind the handle so the mic works without a
+    // restart. The idle-stopped old engine holds no process to leak.
+    await activeSpeechEngine.stop().catch(() => {});
+    activeSpeechEngine = createWhisperEngine(resolveWhisperRuntime());
+    if (!sender.isDestroyed()) sender.send('zeno:speech:install:runtime-changed');
+    return { ok: true, alreadyInstalled: Boolean(result.alreadyInstalled), executable: result.executable, model: result.model, gpu: Boolean(result.gpu) };
+  } catch (error) {
+    const code = error && typeof error.code === 'string' ? error.code : 'install-failed';
+    return { ok: false, error: code, message: String(error && error.message ? error.message : error) };
+  } finally {
+    speechInstallController = null;
+  }
+});
+
+ipcMain.handle('zeno:speech:install:cancel', event => {
+  if (!trustedFrame(event) || !speechInstallController) return false;
+  speechInstallController.abort();
+  return true;
+});
+
 // Counsel receives only recognized meeting-window names. The handler requests
 // no thumbnail and exposes neither source ids nor the rest of the user's window
 // inventory; the same main-frame origin check protects every desktop bridge.
 ipcMain.handle('zeno:meeting:detect', createMeetingPresenceHandler({ desktopCapturer, trustedFrame }));
 
+// The native folder picker for Forge's "Change working folder". This ONLY
+// asks the owner and validates the answer (a folder inside a Git repository,
+// resolved to its root). It no longer restarts the daemon: the window hands
+// the path to POST /forge/project, which switches the repository in place —
+// no reload, the session panel keeps its state — and persists the choice in
+// the daemon's own workspace, the single place it is remembered.
 ipcMain.handle('zeno:project:choose', async (event) => {
-  if (!trustedFrame(event) || projectSwitching) return { ok: false, error: 'The project picker is not available in this window.' };
+  if (!trustedFrame(event)) return { ok: false, error: 'The project picker is not available in this window.' };
   const answer = await dialog.showOpenDialog(win, {
     title: 'Choose the Git repository Forge should work in',
     buttonLabel: 'Open in Forge',
     properties: ['openDirectory'],
   });
   if (answer.canceled || answer.filePaths.length !== 1) return { ok: false, canceled: true };
-  const inspected = inspectProject(answer.filePaths[0]);
-  if (!inspected.ok) return inspected;
-  const preference = join(app.getPath('userData'), 'forge-project.json');
-  const previous = readProjectPreference(preference);
-  writeProjectPreference(preference, inspected.path);
-  sessionProject = inspected.path;
-  projectSwitching = true;
-  setTimeout(() => {
-    void (async () => {
-      try {
-        await stopSpeech();
-        await stopDaemon();
-        launchUrl = await startDaemon();
-        if (win && !win.isDestroyed()) await win.loadURL(launchUrl);
-      } catch (error) {
-        sessionProject = previous.ok ? previous.path : null;
-        if (previous.ok) writeProjectPreference(preference, previous.path);
-        else clearProjectPreference(preference);
-        try {
-          launchUrl = await startDaemon();
-          if (win && !win.isDestroyed()) await win.loadURL(launchUrl);
-        } catch { /* the error box below is the useful diagnosis */ }
-        dialog.showErrorBox('Forge could not open that project', String(error && error.message ? error.message : error));
-      } finally {
-        projectSwitching = false;
-      }
-    })();
-  }, 100);
-  return { ok: true, path: inspected.path };
+  return inspectProject(answer.filePaths[0]);
 });
 
 function createWindow() {

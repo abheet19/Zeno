@@ -37,7 +37,16 @@ let currentState = 'idle';
 let currentDetail = '';
 let idleTimer = null;
 
+// The desktop bridge (window.zenoLocalSpeech) exists on every Windows launch
+// of the app regardless of whether the local Whisper runtime was ever
+// installed — it is only the IPC surface, not proof the files are there. So
+// "no engine" has two different honest reasons, and only a live disk check
+// (refreshLocalRuntimeStatus, below) can tell them apart.
+const LOCAL_RUNTIME_MISSING_REASON =
+  'Local Whisper is not installed on this machine yet — install local Whisper in Settings → Voice to use the microphone.';
+
 export function engineUnavailableReason() {
+  if (vstate.localRuntimeMissing) return LOCAL_RUNTIME_MISSING_REASON;
   if (SpeechRecognition) return '';
   return 'No speech engine is available in this window — local Whisper needs the Zeno desktop app’s speech service, and this browser has no Web Speech API either. Typed chat still works.';
 }
@@ -47,12 +56,37 @@ export function engineDescription() {
   return engineUnavailableReason();
 }
 
+/**
+ * Ask the desktop bridge whether the local Whisper runtime is actually
+ * installed, and update the one flag paintState() trusts for it. Called once
+ * from bind()'s bind() after the first paint, and again whenever
+ * preload.cjs relays a `zeno:speech-runtime-changed` event (fired after a
+ * successful Settings → Voice install) — so the mic re-enables without a
+ * restart. A window with no bridge at all (a browser, or macOS/Linux) has
+ * nothing to ask and is left alone.
+ */
+export async function refreshLocalRuntimeStatus() {
+  const bridge = window.zenoLocalSpeech;
+  if (!bridge || typeof bridge.installStatus !== 'function') { vstate.localRuntimeMissing = false; return; }
+  try {
+    const status = await bridge.installStatus();
+    vstate.localRuntimeMissing = !(status && status.installed);
+  } catch {
+    // A failed status check is not proof the runtime is missing — leave the
+    // engine's own truthiness as the only signal rather than over-claiming.
+    vstate.localRuntimeMissing = false;
+  }
+  vstate.engineNote = engineUnavailableReason();
+}
+
 /** Repaint the pill and every mic button from the one piece of state. Never
  * shows a state the engine did not actually reach. */
 export function paintState() {
-  // "idle" is a resting engine. With no engine at all there is nothing resting,
-  // so the pill says so rather than borrowing the word for "ready".
-  const info = (!SpeechRecognition && currentState === 'idle')
+  // "idle" is a resting engine. With no engine at all — or a bridge whose
+  // runtime is not actually installed — there is nothing resting, so the
+  // pill says so rather than borrowing the word for "ready".
+  const noEngine = !SpeechRecognition || vstate.localRuntimeMissing;
+  const info = (noEngine && currentState === 'idle')
     ? STATE_INFO.unavailable
     : (STATE_INFO[currentState] || STATE_INFO.idle);
   if (vstate.pillEl) {
@@ -61,7 +95,7 @@ export function paintState() {
     vstate.pillEl.title = currentDetail || vstate.engineNote || '';
   }
   const active = currentState === 'listening' || currentState === 'transcribing';
-  const engineOk = !!SpeechRecognition;
+  const engineOk = !!SpeechRecognition && !vstate.localRuntimeMissing;
   for (const b of vstate.micButtons) {
     b.classList.toggle('rec', active);
     if (b.classList.contains('ag-ic')) {

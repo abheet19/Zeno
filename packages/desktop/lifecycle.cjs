@@ -109,29 +109,11 @@ function nonEmptyPath(value) {
 }
 
 /**
- * The project picked during this session wins. An explicit launch-time project
- * comes next, then the last valid saved choice. Invalid saved state is removed
- * so a deleted or moved repository cannot poison every later launch.
+ * The daemon's environment. `project` is an explicit per-launch override
+ * (ZENO_PROJECT_DIR) and nothing else: the owner's saved working folder is
+ * the daemon's own state (<workspace>/project.json), so the desktop no
+ * longer resolves or remembers one.
  */
-function resolveDaemonProject(options, dependencies) {
-  const session = nonEmptyPath(options.sessionProject);
-  if (session) return { path: session, source: 'session' };
-
-  const environment = nonEmptyPath(options.environmentProject);
-  if (environment) return { path: environment, source: 'environment' };
-
-  const saved = dependencies.readPreference(options.preferencePath);
-  if (saved && saved.ok && nonEmptyPath(saved.path)) {
-    return { path: saved.path.trim(), source: 'preference' };
-  }
-
-  // Missing preferences and stale preferences share the same safe fallback.
-  // `clearPreference` is idempotent; a read-only profile must not prevent Zeno
-  // from opening its built-in sandbox, so cleanup failure stays non-fatal.
-  try { dependencies.clearPreference(options.preferencePath); } catch {}
-  return { path: null, source: 'sandbox' };
-}
-
 function createDaemonEnvironment(baseEnvironment, options) {
   const env = { ...baseEnvironment, ELECTRON_RUN_AS_NODE: '1', ZENO_NO_OPEN: '1' };
   if (options.isPackaged && !nonEmptyPath(env.ZENO_DIR)) {
@@ -151,6 +133,5 @@ module.exports = {
   protectDiagnosticStream,
   registerGracefulQuit,
   registerSecondInstanceFocus,
-  resolveDaemonProject,
   stopDaemonChild,
 };

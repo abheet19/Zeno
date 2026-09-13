@@ -6,7 +6,7 @@
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
-    "typecheck": "node --check main.cjs && node --check preload.cjs && node --check project.cjs && node --check lifecycle.cjs && node --check whisper.cjs && node --check zoom.cjs && node --check meeting-presence.cjs",
+    "typecheck": "node --check main.cjs && node --check preload.cjs && node --check project.cjs && node --check lifecycle.cjs && node --check whisper.cjs && node --check speech-install.cjs && node --check zoom.cjs && node --check meeting-presence.cjs",
     "test": "node --test test/*.test.cjs",
     "check": "npm run typecheck && npm run test"
   }
