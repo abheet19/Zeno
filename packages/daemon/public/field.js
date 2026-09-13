@@ -78,15 +78,35 @@ export function init(section) {
     const go = t.closest('[data-go]');
     if (go) {
       const name = go.getAttribute('data-go');
-      const nb = document.querySelector(`[data-product="${name}"]`) || document.querySelector(`[data-nav="${name}"]`);
+      // Switch to the product via its nav button (data-product also matches the
+      // product CONTAINER, which comes first in the DOM — click only a button).
+      const nb = document.querySelector(`.seg [data-product="${name}"]`)
+        || [...document.querySelectorAll(`[data-product="${name}"]`)].find((e2) => e2.tagName === 'BUTTON')
+        || document.querySelector(`[data-nav="${name}"]`);
       if (nb) nb.click();
+      // A model node also picks that model in Forge — call the picker's own
+      // apply directly (robust to load order), with the event as a fallback for
+      // a build where the direct hook is not present.
+      const model = go.getAttribute('data-model');
+      if (model) {
+        const detail = { agentId: 'local', model };
+        window.__zenoPendingForgeModel = detail;
+        if (typeof window.zenoApplyForgeModel === 'function') window.zenoApplyForgeModel('local', model);
+        else window.dispatchEvent(new CustomEvent('zeno:forge-select-model', { detail }));
+      }
       return;
     }
     const jump = t.closest('[data-jump]');
     if (jump) {
       const raw = jump.getAttribute('data-jump');
-      // `sec-vault` and `cmd-hero` are old section ids; the rail speaks screens.
-      const screen = raw === 'cmd-hero' ? 'home' : raw.replace(/^sec-/, '');
+      // The card speaks the PREVIOUS renderer's section names — field-model.js's
+      // ticketAction still says `timeline` / `desk` / `pending`, and older cards
+      // say `sec-vault` / `cmd-hero` — while the rail speaks screens. Without
+      // this translation "Find it in the receipts" and "Go to approvals" looked
+      // for screens that do not exist and did nothing, which is exactly how the
+      // owner reported them.
+      const OLD_TO_SCREEN = { timeline: 'receipts', desk: 'work', pending: 'approvals', 'cmd-hero': 'home' };
+      const screen = OLD_TO_SCREEN[raw] || raw.replace(/^sec-/, '');
       const rail = document.querySelector(`.nav-i[data-screen="${screen}"]`) || document.getElementById(raw);
       if (rail) rail.click();
     }

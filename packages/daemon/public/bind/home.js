@@ -153,12 +153,18 @@ function bindRunning(forgeRes, sec) {
   const data = ok ? forgeRes.data : null;
   const hasRepo = ok && data.repo === true;
   const changed = hasRepo && Array.isArray(data.changed) ? data.changed.length : 0;
-  setSum(header, !ok ? null : (changed > 0 ? 1 : 0));
+  // "Running" counts AGENT RUNS, which bind/orchestrator.js reads live from
+  // the daemon's run-progress stream and writes into this header itself. This
+  // read only knows the sandbox's repo state, and uncommitted changes are not
+  // a running process — counting them here put "RUNNING · 1" over a machine
+  // where nothing ran. So this header says 0 until the orchestrator sees a
+  // real run; the sandbox card below is kept, labelled as what it is.
+  setSum(header, !ok ? null : 0);
   let body;
   if (!ok) body = [el('div', 'hnote', 'The sandbox could not be read.')];
-  else if (!hasRepo) body = [el('div', 'hnote', 'No sandbox repository yet.')];
-  else if (changed > 0) body = [runningCard(data, changed)];
-  else body = [el('div', 'hnote', 'No active runs. The sandbox is clean.')];
+  else if (!hasRepo) body = [el('div', 'hnote', 'No agent is running. No sandbox repository yet.')];
+  else if (changed > 0) body = [el('div', 'hnote', 'No agent is running.'), runningCard(data, changed)];
+  else body = [el('div', 'hnote', 'No agent is running. The sandbox is clean.')];
   fill(sec, header, ...body);
 }
 

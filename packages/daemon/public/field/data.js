@@ -12,6 +12,7 @@ import { renderReadouts } from './readouts.js';
 import { draw } from './engine.js';
 import { renderList } from './list.js';
 import { renderNodeCard } from './card.js';
+import { liveRuns, startRunStream } from './runs.js';
 
 async function getJSON(path) {
   const res = await fetch(path, { headers: authHeaders(), cache: 'no-store' });
@@ -37,7 +38,33 @@ export function invalidateAgents() {
   agentsAt = 0;
 }
 
+/* The last successful set of daemon reads, so a run-progress SSE event (see
+   field/runs.js) can repaint the topology the moment it arrives without
+   re-fetching /state·/work·/forge·/memory·/counsel/meetings — those are a
+   separate, slower-moving read this module already throttles/polls
+   elsewhere, and a live agent run must never wait on that cadence. */
+let LAST = null;
+let lastListEl = null;
+
+/* Re-draws the field from the LAST daemon read plus whatever field/runs.js
+   currently knows — the repaint callback handed to startRunStream(). A no-op
+   until the first refresh() below has actually landed once. */
+function paintRuns() {
+  if (!LAST) return;
+  const { state, work, forge, mem, meetings, agents } = LAST;
+  buildTopology(state, work, forge, mem, meetings, agents, liveRuns());
+  if (S.sel && !g(S.sel)) S.sel = null;
+  if (F.c) draw();
+  renderList(lastListEl);
+  renderNodeCard();
+}
+
 export async function refresh(listEl) {
+  lastListEl = listEl;
+  // Idempotent: only the first call actually opens the EventSource. Started
+  // here (rather than from field.js) so this module stays the one place that
+  // wires every daemon read — polled or streamed — to every renderer.
+  startRunStream(paintRuns);
   const wantAgents = !agentsRead || (Date.now() - agentsAt) > AGENTS_MIN_MS;
   // Every read is settled on its own and every failure falls back to a shape
   // that contributes NO nodes. A daemon with no vault, no meeting archive or no
@@ -63,7 +90,8 @@ export async function refresh(listEl) {
     wantAgents ? getJSON('/forge/agents?passive=1').catch(() => null) : Promise.resolve(AGENTS),
   ]);
   if (wantAgents) { AGENTS = agents; agentsRead = true; agentsAt = Date.now(); }
-  buildTopology(state, work, forge, mem, meetings, agents);
+  LAST = { state, work, forge, mem, meetings, agents };
+  buildTopology(state, work, forge, mem, meetings, agents, liveRuns());
   renderReadouts(state, work, forge, mem, agents);
   if (S.sel && !g(S.sel)) S.sel = null;   // the thing you had selected is gone
   if (F.c) draw();

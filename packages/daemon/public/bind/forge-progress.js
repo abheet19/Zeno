@@ -22,7 +22,8 @@
  * to how sessions are tracked cannot silently break the progress line.
  */
 
-import { token, authHeaders } from '../bind.js';
+import { authHeaders } from '../bind.js';
+import { subscribeRunProgress } from '../run-progress-stream.js';
 
 /* The five orchestration milestones, in the owner's words. These name what ZENO
    is doing, never a guess at how far through its own thinking the model is —
@@ -41,8 +42,6 @@ const PHASE_LABEL = {
 
 let host = null; // the element under the session title where progress lives
 let current = null; // { runId } of the run currently shown, or null
-let source = null;
-let backoff = 1000;
 
 function ensureHost() {
   const title = document.querySelector('.sesstitle');
@@ -155,39 +154,7 @@ async function doCancel(runId, btn) {
   }
 }
 
-function connect() {
-  if (!token()) return; // a read-only page cannot run, so it has no progress
-  if (source) { try { source.close(); } catch { /* already gone */ } }
-  try {
-    source = new EventSource('/forge/run-progress');
-  } catch {
-    return; // no EventSource: the "Working" pill remains, honestly static
-  }
-
-  source.addEventListener('run-progress', (e) => {
-    let ev;
-    try { ev = JSON.parse(e.data); } catch { return; }
-    if (ev && typeof ev === 'object' && ev.runId) render(ev);
-  });
-  // Some servers emit the default event type; accept both rather than miss one.
-  source.addEventListener('message', (e) => {
-    let ev;
-    try { ev = JSON.parse(e.data); } catch { return; }
-    if (ev && typeof ev === 'object' && ev.runId && ev.phase) render(ev);
-  });
-
-  source.addEventListener('open', () => { backoff = 1000; });
-  source.addEventListener('error', () => {
-    if (!source || source.readyState !== 2 /* CLOSED */) return; // EventSource retries transient drops itself
-    source = null;
-    setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, 30_000);
-  });
-}
-
 export async function bind() {
-  connect();
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !source) connect();
-  });
+  // One shared stream feeds every run-progress consumer — see run-progress-stream.js.
+  subscribeRunProgress(render);
 }

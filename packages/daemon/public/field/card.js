@@ -6,6 +6,7 @@
 import { ticketAction } from '../field-model.js';
 import { S, esc, KIND_WORD } from './state.js';
 import { g, attOf, ageStr } from './attention.js';
+import { fmtElapsed } from './runs.js';
 
 /* The card has TWO hosts, because the field has two forms.
  *
@@ -78,6 +79,18 @@ export function renderNodeCard() {
     const action = ticketAction(n);
     act = `<button type="button" class="btn sm ${action.tone}" data-jump="${action.jump}">${action.label}</button>`;
     note = `<div class="ncnote">Status: <b>${esc(lbl)}</b>. Glowing means it wants your attention.</div>`;
+  } else if (n.k === 'run') {
+    // What this run is doing lives in the label + n.d (topology.js already put
+    // the phase/percent there, straight from field/runs.js's SSE tracker). The
+    // card adds only what the daemon's event does not carry directly — how
+    // long it has been going — and the one thing worth doing about it: go look.
+    const r = n.run || {};
+    act = '<button type="button" class="btn sm p" data-go="forge">Open Forge</button>';
+    note = `<div class="ncnote">Elapsed <b>${esc(fmtElapsed(r.startedAt))}</b>. Live from the daemon's own <code>/forge/run-progress</code> stream — nothing here is guessed.</div>`;
+  } else if (n.k === 'src') {
+    // A work source (local backlog, GitHub) is where tickets come from; its
+    // place in the UI is the Work screen, which lists what each source holds.
+    act = '<button type="button" class="btn sm p" data-jump="work">Open Work</button>';
   } else if (n.k === 'dev') {
     act = '<button type="button" class="btn sm g" data-jump="devices">Manage device</button>';
   } else if (n.k === 'vault' || n.k === 'mem') {
@@ -89,6 +102,10 @@ export function renderNodeCard() {
   } else if (n.k === 'meet') {
     act = '<button type="button" class="btn sm p" data-go="counsel">Open Counsel</button>';
     note = '<div class="ncnote">A recording you consented to, saved and summarised as local Markdown. Detected credential-like secrets were redacted before it was written to disk.</div>';
+  } else if (n.k === 'model' && n.model) {
+    // A model node opens Forge WITH that model picked for the next run —
+    // "Open Forge" alone left the owner to find it again in the picker.
+    act = `<button type="button" class="btn sm p" data-go="forge" data-model="${esc(n.model)}">Open Forge with ${esc(n.model)}</button>`;
   } else if (n.k === 'runtime' || n.k === 'model') {
     act = '<button type="button" class="btn sm p" data-go="forge">Open Forge</button>';
     note = '<div class="ncnote">Runs on <b>this machine</b>, on 127.0.0.1. Nothing it is asked leaves here, which is why this link carries no ⚡.</div>';

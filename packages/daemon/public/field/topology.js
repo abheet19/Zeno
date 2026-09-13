@@ -3,8 +3,9 @@
  *
  * WHAT IS NOT PORTED from the Gate-2 prototype is its data. Every node here is
  * built from live daemon state — GET /state, /work, /forge/status, /memory,
- * /counsel/meetings and /forge/agents — and when a category is empty the field
- * simply shows fewer nodes. Nothing is invented to fill a hole: a quiet field
+ * /counsel/meetings, /forge/agents, and (for the agent-run nodes) whatever
+ * field/runs.js has read off GET /forge/run-progress — and when a category is
+ * empty the field simply shows fewer nodes. Nothing is invented to fill a hole: a quiet field
  * is the honest picture of a quiet system, and it says so in words rather than
  * drawing a busy one. There is no Jira node, no merge-request node and no
  * teammate node, because there is no Jira, no merge request and no team.
@@ -19,6 +20,7 @@
 import { pendingRepoEdge } from '../field-model.js';
 import { N, E, ACT, S, clip } from './state.js';
 import { minutesSince, ageStr } from './attention.js';
+import { PHASE_LABEL } from './runs.js';
 
 /* ---- geometry: a deterministic fibonacci sphere, core at the centre --------
    The prototype hand-placed seventeen known nodes. We cannot: the node list is
@@ -49,7 +51,7 @@ function sourceAtt(s) {
   return s.state === 'failed' ? 'error' : s.state === 'partial' ? 'needs' : null;
 }
 
-export function buildTopology(state, work, forge, mem, meetings, agents) {
+export function buildTopology(state, work, forge, mem, meetings, agents, runs = []) {
   const nodes = [];
   const edges = [];
   const act = [];
@@ -216,12 +218,34 @@ export function buildTopology(state, work, forge, mem, meetings, agents) {
     models.slice(0, 6).forEach((m, i) => {
       const id = 'ml' + i;
       nodes.push({
-        id, k: 'model', l: clip(m, 20),
+        id, k: 'model', l: clip(m, 20), model: m,
         d: `${m} — installed locally and pickable in Forge. It runs on this machine; nothing it is asked leaves it.`,
       });
       edges.push([id, 'runtime']);
     });
   }
+
+  // 12 · live agent runs — the thing Command actually orchestrates, not the
+  //      sandbox's uncommitted-changes proxy in section 4. Each entry comes
+  //      straight from the daemon's own /forge/run-progress stream (see
+  //      field/runs.js), so a run that never started, or one this window
+  //      never subscribed to (no owner token), draws no node here. A run
+  //      still flashing its terminal outcome (see runs.js's hold window)
+  //      reads verified/error/waiting instead of active, then vanishes when
+  //      runs.js drops it from the map — never mid-glow.
+  runs.forEach((r) => {
+    const id = 'run' + r.runId;
+    const att = !r.terminal ? 'active' : r.outcome === 'failed' ? 'error' : r.outcome === 'cancelled' ? 'waiting' : 'verified';
+    const phaseKey = r.terminal ? (r.outcome || r.phase) : r.phase;
+    const phaseWord = PHASE_LABEL[phaseKey] || phaseKey || 'Working';
+    const who = r.model ? `${r.agentId || 'agent'} · ${r.model}` : (r.agentId || 'agent');
+    nodes.push({
+      id, k: 'run', l: clip(who, 22), att, run: r,
+      d: `${phaseWord}${r.terminal ? '' : ` · ${Number.isFinite(r.percent) ? r.percent : 0}%`} — reported live by the daemon's own progress stream.`,
+    });
+    edges.push(['forge', id]);
+    if (!r.terminal) act.push(id, 'forge');
+  });
 
   placeNodes(nodes);
   // N/E/ACT are shared, fixed containers (see state.js) — refilled in place so
@@ -237,7 +261,7 @@ export function buildTopology(state, work, forge, mem, meetings, agents) {
   // The empty note is only true when the whole machine is quiet, so it counts
   // everything the field can now draw — not just the things that want you.
   const liveThings = pending.length + sources.filter((s) => s.state !== 'not-configured').length
-    + (changed ? 1 : 0) + items.length + notes.length + mtgs.length + models.length + receipts.length;
+    + (changed ? 1 : 0) + items.length + notes.length + mtgs.length + models.length + receipts.length + runs.length;
   // An empty field has two causes and they are not the same fact. "Quiet" is a
   // statement about a daemon that ANSWERED; when the reads that feed this field
   // failed, the field is empty because nothing could be read, and calling that
