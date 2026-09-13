@@ -51,6 +51,15 @@
 .composer .row > textarea{flex:1 1 auto; min-width:0}
 .composer .row > .cbtn{align-self:flex-end}
 
+/* The live Forge run progress line — real orchestration phase, percent, token
+   count, and the Cancel control the window never used to have. Sits under the
+   session title, hidden until a run is actually in flight. */
+.forge-progress{display:flex; flex-direction:column; gap:6px; margin:8px 0 4px}
+.forge-progress-line{display:flex; align-items:center; gap:10px}
+.forge-progress-text{flex:1; min-width:0; font-family:var(--font-mono,monospace); font-size:11.5px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.forge-progress-bar{height:4px; border-radius:3px; background:color-mix(in srgb,var(--ink-3) 22%,transparent); overflow:hidden}
+.forge-progress-fill{height:100%; border-radius:3px; background:var(--cyan,#38C3D6); transition:width .4s ease}
+
 /* The Standing Field's node card. Clicking a node in the orb picks it; this is
    where what you picked is described, and where its one real action lives.
    Pinned bottom-left over the canvas so it never covers the core. */
