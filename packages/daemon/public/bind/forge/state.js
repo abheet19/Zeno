@@ -76,5 +76,30 @@ export function createForgeState() {
 
     paintModelPills: null,              // modelpicker.js: () => void
     sendTask: null,                     // session.js: (session, task) => Promise<void>
+    setForgeView: null,                 // session.js: ('agent'|'editor') => void — the Agent/Editor switch
+    renderChat: null,                   // session.js: (session) => void
+    renderSessionHeader: null,          // session.js: (session) => void
+    proceedWithRoute: null,             // session.js: (session, task, route, plan|null) => Promise<void> — the one path from a routed task to a run
+    openSession: null,                  // session.js: (index) => void
+    startNewSession: null,              // session.js: () => session
+
+    // ---- owned by agent-mode.js (the chat-first Agent layout + local history) ----
+    renderSessionsList: null,           // () => void — the sessions rail
+    sessionsChanged: null,              // (session|null) => void — persist to localStorage 'zeno-forge-sessions' + repaint
+    restoreSessions: null,              // (makeSession) => number — restore this browser's past sessions, idle
+
+    // ---- owned by session-views.js (the Runs/Actions/Plan/Lens tabs) ----
+    proposalCard: null,                 // (proposal) => HTMLElement
+    renderRuns: null,                   // (session) => void
+    renderActions: null,                // (session) => void
+    renderPlan: null,                   // (session) => void
+    renderLens: null,                   // (session) => void
+
+    // ---- owned by plan.js (plan-first intake); read by session.js / session-views.js ----
+    planFirstEnabled: null,             // () => boolean — the composer toggle, persisted as localStorage 'zeno-plan-first'
+    requestPlan: null,                  // (session, task, route) => Promise<void> — POST /forge/plan, then the plan card
+    planTurnNode: null,                 // (turn, session) => HTMLElement — a `who: 'plan'` chat turn's body
+    renderPlanSummary: null,            // (session|null) => void — the #s-plan details under the title
+    latestPlanTurn: null,               // (session) => turn|null
   };
 }

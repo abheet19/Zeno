@@ -11,26 +11,80 @@
  */
 import { $, $$, el, fill } from '../../bind.js';
 import {
-  add, cloneReplace, disableCtl, postJSON,
+  add, cloneReplace, disableCtl, postJSON, runMark,
 } from './dom.js';
+import { setupPlanFirst } from './plan.js';
+import { setupSessionViews } from './session-views.js';
+import { setupAgentMode } from './agent-mode.js';
 
 export function setupSession(S) {
   const ide = S.ide;
   let sessionSeq = 0;
+  // The secondary tabs and the plan-first intake card live in their own
+  // modules (line budget); both register on S and call back into the render
+  // functions this file registers further down.
+  setupSessionViews(S);
+  setupPlanFirst(S);
+  setupAgentMode(S);
+
+  /* ---- Agent / Editor view switch (top-left of the title bar) -----------
+     A Codex-style segmented control (index.html's #forge-viewseg, reusing
+     the product switcher's own .seg/.pill look at title-bar scale). "Agent"
+     gives THIS panel the whole workbench — chat-first, matching the empty
+     state's own hero below. "Editor" is exactly the classic layout this
+     artifact already ships (explorer + Monaco + terminal primary, this
+     panel a fixed strip) — index.html's .ide.mode-agent rule is the only
+     CSS either mode needs, so switching is just toggling that one class.
+
+     Two different "defaults" are both true at once, deliberately: the
+     screen an owner opens Forge to (before any session exists) is the
+     classic workbench — untouched — but the first session ever started on
+     this device goes chat-first (see startNewSession() below), UNLESS the
+     owner already told this device otherwise, which is remembered
+     (localStorage) and always wins over either default. */
+  const VIEW_KEY = 'zeno-forge-view';
+  const viewSegBtns = $$('#forge-viewseg [data-forge-view]');
+  let viewChosen = false; // an explicit choice — this boot's restore, or a click — has been applied
+  function applyForgeView(mode) {
+    if (ide) ide.classList.toggle('mode-agent', mode === 'agent');
+    for (const b of viewSegBtns) {
+      if (b.dataset.forgeView === mode) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    }
+  }
+  function setForgeView(mode) {
+    mode = mode === 'agent' ? 'agent' : 'editor';
+    viewChosen = true;
+    try { localStorage.setItem(VIEW_KEY, mode); } catch { /* private window or storage disabled — just don't persist */ }
+    applyForgeView(mode);
+  }
+  S.setForgeView = setForgeView; // proposalCard()/turnNode() switch to Editor before opening a file
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === 'agent' || v === 'editor') { viewChosen = true; applyForgeView(v); }
+  } catch { /* no persisted choice — the classic layout stands until a session starts */ }
+  for (const b of viewSegBtns) b.addEventListener('click', () => setForgeView(b.dataset.forgeView));
 
   function makeSession() {
     sessionSeq += 1;
     return {
       id: `s${sessionSeq}`, title: null, chat: [], runs: [], lastProposed: [],
       agentId: 'local', model: '', effort: 'medium', autoRoute: true, memoryEnabled: true,
-      running: false, pendingHosted: null, compareRunMode: 'parallel',
+      running: false, planning: false, pendingHosted: null, compareRunMode: 'parallel',
+      createdAt: Date.now(), updatedAt: Date.now(),
     };
   }
   S.draftSession = makeSession(); // model/effort state before any session exists
+  // Past sessions from this browser's own history (agent-mode.js) — real
+  // transcripts and run records, restored idle. Nothing in flight resumes.
+  S.restoreSessions(makeSession);
+  S.renderSessionsList(); // the rail was painted empty before the restore
 
   const sEmpty = $('#s-empty'), sHist = $('#s-history'), sTabs = $('#s-tabs'), sBody = $('#s-body');
-  const sTitle = $('#s-title'), sStatus = $('#s-status'), sTurns = $('#s-turns'), sPlanDetails = $('#s-plan');
-  if (sPlanDetails) sPlanDetails.hidden = true; // no structured plan from the daemon
+  const sTitle = $('#s-title'), sStatus = $('#s-status'), sTurns = $('#s-turns');
+  // The artifact's "Zeno's plan" details under the title ships with four
+  // mock steps; plan.js's renderPlanSummary() owns it now and hides it until
+  // a session really has a plan.
+  S.renderPlanSummary(null);
   // The artifact ships four fabricated history rows (each wired by ui.js to
   // its own mock openSession()) — dropped immediately so none can ever be
   // clicked, rather than waiting for the first real History open.
@@ -56,25 +110,32 @@ export function setupSession(S) {
     const tip = $('#s-tip'); if (tip) tip.hidden = true;
     renderSessionHeader(session);
     renderChat(session);
-    renderRuns(session);
-    renderActions(session);
-    renderPlan(session);
-    renderLens(session);
+    S.renderRuns(session);
+    S.renderActions(session);
+    S.renderPlan(session);
+    S.renderLens(session);
+    S.renderPlanSummary(session);
     S.paintModelPills();
+    S.renderSessionsList();
   }
+  S.openSession = (i) => { if (!S.sessions[i]) return; S.activeIdx = i; showActiveSession(S.sessions[i]); if (sHist) sHist.hidden = true; };
 
   function renderSessionHeader(session) {
+    S.sessionsChanged(null); // every state change comes through here: persist + repaint the rail
     if (sTitle) sTitle.textContent = session.title || 'New session';
     if (sStatus) {
-      const tone = session.running ? 'cy' : session.pendingHosted ? 'am' : 'wt';
+      const tone = session.running || session.planning ? 'cy' : session.pendingHosted ? 'am' : 'wt';
       sStatus.className = `pill ${tone}`;
-      fill(sStatus, el('span', 'd'), document.createTextNode(session.running ? 'Working' : session.pendingHosted ? 'Waiting on you' : session.chat.length ? 'Idle' : 'New'));
+      const word = session.running ? 'Working' : session.planning ? 'Planning' : session.pendingHosted ? 'Waiting on you' : session.chat.length ? 'Idle' : 'New';
+      fill(sStatus, el('span', 'd'), document.createTextNode(word));
     }
   }
+  S.renderSessionHeader = renderSessionHeader;
 
   function turnNode(t, session) {
     const d = el('div', `turn ${t.who === 'you' ? 'you' : 'z'}`);
     const who = el('div', 'who', t.who === 'you' ? 'A' : 'Z');
+    if (t.who === 'plan') { add(d, who, S.planTurnNode(t, session)); return d; }
     const bt = el('div', 'bt');
     if (t.who === 'you') {
       add(bt, el('p', null, t.text));
@@ -103,25 +164,36 @@ export function setupSession(S) {
         add(bt, row);
       }
     } else {
+      // Clear hierarchy for a run's own turn, so it reads as a transcript
+      // rather than a wall of text: a status pill (the same word/colour the
+      // Runs tab uses — runMark()), the agent's own note, then every file it
+      // actually touched — each a real "open it" control, not a static
+      // label — and finally the real proposal capsule(s) this run produced
+      // (never a generic "N waiting" count standing in for them).
+      const mark = runMark(t);
+      const head = el('div', 'frh');
+      add(head, el('span', `pill ${mark.tone}`, mark.word));
+      const who2 = [t.agentId, t.model, t.effort].filter(Boolean).join(' · ');
+      if (who2) add(head, el('span', 'frm', who2));
+      add(bt, head);
       add(bt, el('p', null, t.note || (t.files && t.files.length ? `Changed ${t.files.length} file(s).` : 'No files were changed.')));
       for (const path of (t.files || [])) {
         const tool = el('div', 'dvtool');
+        // A real control, not decoration: opens the file in the editor
+        // (switching out of Agent view to show it). tabIndex/role/keydown
+        // make it as keyboard-reachable as a native button, since .dvtool
+        // is a styled <div> everywhere else this class is used too.
+        tool.tabIndex = 0;
+        tool.setAttribute('role', 'button');
+        tool.title = `Open ${path} in the editor`;
         add(tool, el('span', 'dvtool-t', path));
+        const openThis = () => { S.setForgeView('editor'); void S.openFile(path); };
+        tool.addEventListener('click', openThis);
+        tool.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openThis(); } });
         add(bt, tool);
       }
-      if (t.waiting) {
-        const ap = el('div', 'dvapproval');
-        const h = el('div', 'dva-h');
-        add(h, el('span', 'tier', 'write'), el('b', null, `${t.waiting} change${t.waiting === 1 ? '' : 's'} need your approval`));
-        const a = el('div', 'dva-a');
-        const go = el('button', 'btn p sm', 'Review in Command');
-        go.type = 'button';
-        go.dataset.productGo = 'command';
-        go.dataset.then = 'approvals';
-        add(a, go);
-        add(ap, h, a);
-        add(bt, ap);
-      }
+      for (const p of (t.proposed || [])) add(bt, S.proposalCard(p));
+      if (t.planSteps) add(bt, el('div', 'frm', `ran with your approved plan (${t.planSteps} steps)`));
       if (t.tokenUsage) add(bt, el('div', 'vsnote', t.tokenUsage));
     }
     add(d, who, bt);
@@ -134,68 +206,7 @@ export function setupSession(S) {
     fill(sTurns, ...session.chat.map((t) => turnNode(t, session)));
     sTurns.scrollTop = sTurns.scrollHeight;
   }
-
-  function renderRuns(session) {
-    const view = $('.sessview[data-stab="runs"]');
-    if (!view) return;
-    if (!session.runs.length) { fill(view, el('div', 'fnote', 'No runs yet in this session.')); return; }
-    fill(view, ...session.runs.slice().reverse().map((r) => {
-      const card = el('div', 'frun');
-      const h = el('div', 'frh');
-      // A Forge run NEVER applies anything. Every file it changes becomes an
-      // approval capsule, and the kernel writes only after the owner clicks in
-      // Command — so "applied" is the one outcome this card structurally
-      // cannot report. It reported it anyway for every successful run, in
-      // green, directly above its own line reading "1 waiting · 0 applied".
-      // That is the exact claim the gate exists to make impossible.
-      const mark = r.cancelled ? { tone: 'wt', word: 'cancelled' }
-        : !r.ok ? { tone: 'rd', word: 'failed' }
-          : r.waiting > 0 ? { tone: 'am', word: `${r.waiting} waiting on you` }
-            : r.applied > 0 ? { tone: 'gr', word: 'applied' }
-              : { tone: 'wt', word: 'no changes' };
-      add(h, el('span', `pill ${mark.tone}`, mark.word), el('b', null, r.task.length > 60 ? `${r.task.slice(0, 57)}…` : r.task));
-      const m = el('div', 'frm', `${r.agentId}${r.model ? ' · ' + r.model : ''} · ${r.effort || ''} · ${r.files} file(s) · ${r.waiting} waiting · ${r.applied} applied${r.note ? ' · ' + r.note : ''}`);
-      add(card, h, m);
-      return card;
-    }));
-  }
-
-  function renderActions(session) {
-    const view = $('.sessview[data-stab="actions"]');
-    if (!view) return;
-    const proposed = session.lastProposed || [];
-    if (!proposed.length) { fill(view, el('div', 'fnote', 'No proposed changes from this session yet.')); return; }
-    const nodes = proposed.map((p) => {
-      const card = el('div', 'fact-c');
-      const h = el('div', 'frh');
-      add(h, el('span', 'tier', `${p.tier || '?'} · write`), el('b', null, p.path || '(unknown path)'));
-      add(card, h, el('div', 'frm', p.auto ? 'already sealed — the kernel auto-committed this write' : 'waiting for your approval'));
-      if (!p.auto) {
-        const go = el('button', 'laction cy', 'Open in Command');
-        go.dataset.productGo = 'command'; go.dataset.then = 'approvals';
-        add(card, go);
-      }
-      return card;
-    });
-    nodes.push(el('div', 'fnote', 'Each changed file becomes one approval capsule. Forge never applies a write itself; Command approves it.'));
-    fill(view, ...nodes);
-  }
-
-  function renderPlan(session) {
-    const view = $('.sessview[data-stab="plan"]');
-    if (!view) return;
-    const last = session.chat.slice().reverse().find((t) => t.who === 'agent');
-    const nodes = [el('div', 'fnote', 'This daemon does not return a structured step plan — here is the agent’s own run log, unedited.')];
-    if (last && last.log) nodes.push(el('pre', 'fterm', last.log));
-    else nodes.push(el('div', 'vsnote', 'No run log yet.'));
-    fill(view, ...nodes);
-  }
-
-  function renderLens(session) {
-    const view = $('.sessview[data-stab="lens"]');
-    if (!view) return;
-    fill(view, el('div', 'fnote', 'Forge Lens’s exact assembled prompt preview is not read by this build. What actually goes to the agent is the task text you typed, plus Vault memory when it is on, plus any skills you select.'));
-  }
+  S.renderChat = renderChat;
 
   // Session panel header's "···" (More) — confirmed live: it opens nothing
   // and nothing anywhere has a listener on it. There is no additional
@@ -242,10 +253,15 @@ export function setupSession(S) {
     s.agentId = S.draftSession.agentId; s.model = S.draftSession.model; s.effort = S.draftSession.effort; s.autoRoute = S.draftSession.autoRoute;
     S.sessions.push(s);
     S.activeIdx = S.sessions.length - 1;
+    // First session on this device with no explicit view choice yet: go
+    // chat-first (see the view-switch setup above for why this is not
+    // simply the page's own boot default).
+    if (!viewChosen) applyForgeView('agent');
     showActiveSession(s);
     const ta = $('#s-ta'); if (ta) ta.focus();
     return s;
   }
+  S.startNewSession = startNewSession; // agent-mode.js's "New session" controls
   if (newBtn) newBtn.addEventListener('click', () => startNewSession());
 
   // ---- composer takeover (drop ui.js's mock send/keydown handlers) ----
@@ -285,13 +301,14 @@ export function setupSession(S) {
 
   async function sendTask(session, task) {
     task = String(task || '').trim();
-    if (!task || session.running) return;
+    if (!task || session.running || session.planning) return;
     if (!S.OWNER) {
       session.chat.push({ who: 'system', text: 'This window has no owner token, so Forge is read-only here — open Zeno from its launcher to run agents.' });
       renderChat(session);
       return;
     }
     if (!session.title) session.title = task.length > 48 ? `${task.slice(0, 45)}…` : task;
+    session.updatedAt = Date.now();
     session.running = true;
     session.chat.push({ who: 'you', text: task });
     renderSessionHeader(session);
@@ -318,16 +335,35 @@ export function setupSession(S) {
       route = { agentId: session.agentId, model: session.model, effort: session.effort, rationale: 'Manual routing — you selected the model.' };
     }
 
+    /* Plan first: the route is decided, but nothing runs yet. The daemon's
+       read-only plan pass comes back as a card, and the ONLY way from there to
+       a run is its Approve button, which calls proceedWithRoute() below —
+       exactly what this line would have done with the toggle off. */
+    if (S.planFirstEnabled()) {
+      session.running = false;
+      await S.requestPlan(session, task, route);
+      return;
+    }
+    await proceedWithRoute(session, task, route, null);
+  }
+  S.sendTask = sendTask;
+
+  /** Start (or, for a hosted route, ask to confirm) a routed task. `plan` is
+   *  the owner-approved plan card, or null for a straight run. A hosted route
+   *  still stops here for its own confirmation — planning never skips it. */
+  async function proceedWithRoute(session, task, route, plan) {
     if (route.agentId !== 'local') {
       session.running = false;
-      session.pendingHosted = { task, route };
+      session.pendingHosted = { task, route, plan };
       session.chat.push({ who: 'system', text: `This sends your task to ${route.agentId === 'codex' ? 'OpenAI (Codex)' : 'Anthropic (Claude Code)'} — nothing runs until you confirm.`, confirm: true });
       renderSessionHeader(session); renderChat(session); renderHistoryIfOpen();
       return;
     }
-    await runResolved(session, task, route, false);
+    session.running = true;
+    renderSessionHeader(session);
+    await runResolved(session, task, route, false, plan);
   }
-  S.sendTask = sendTask;
+  S.proceedWithRoute = proceedWithRoute;
 
   async function confirmHosted(session) {
     const pending = session.pendingHosted;
@@ -335,7 +371,7 @@ export function setupSession(S) {
     session.pendingHosted = null;
     session.running = true;
     renderSessionHeader(session);
-    await runResolved(session, pending.task, pending.route, true);
+    await runResolved(session, pending.task, pending.route, true, pending.plan || null);
   }
 
   /** The local model the "Run locally instead" button would use, or '' if none. */
@@ -356,20 +392,24 @@ export function setupSession(S) {
     session.running = true;
     session.chat.push({ who: 'system', text: `Running on ${model} on this machine instead — nothing leaves your computer.` });
     renderSessionHeader(session); renderChat(session);
-    await runResolved(session, pending.task, { agentId: 'local', model, effort: pending.route.effort, rationale: 'You chose to run this on-device.' }, false);
+    await runResolved(session, pending.task, { agentId: 'local', model, effort: pending.route.effort, rationale: 'You chose to run this on-device.' }, false, pending.plan || null);
   }
 
-  async function runResolved(session, task, route, hostedConfirmed) {
+  async function runResolved(session, task, route, hostedConfirmed, plan = null) {
     const runId = `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     const body = { task, memoryEnabled: session.memoryEnabled !== false, skillIds: [...S.selectedSkillIds], agentId: route.agentId, runId };
     if (route.model) body.model = route.model;
     if (route.effort) body.effort = route.effort;
     if (hostedConfirmed) body.hostedConfirmed = true;
+    // The approved plan (as the owner left it, edits included) rides along;
+    // the daemon appends it UNDER the task as owner-approved context.
+    if (plan && plan.plan) { body.plan = plan.plan; if (plan.planId) body.planId = plan.planId; }
     const r = await postJSON('/forge/run', body);
     session.running = false;
+    session.updatedAt = Date.now();
     if (!r.ok) {
       if (r.status === 428 && r.data && r.data.confirmation) {
-        session.pendingHosted = { task, route };
+        session.pendingHosted = { task, route, plan };
         session.chat.push({ who: 'system', text: (r.data.error && r.data.error.message) || 'Confirm this run before it starts.', confirm: true });
       } else {
         session.chat.push({ who: 'system', text: `The run did not start: ${r.error || (r.data && r.data.error && r.data.error.message) || 'unknown error'}` });
@@ -383,23 +423,56 @@ export function setupSession(S) {
     const changed = Array.isArray(d.changed) ? d.changed : [];
     const applied = proposed.filter((p) => p && p.auto).length;
     const waiting = proposed.length - applied;
+    // "planned" is the DAEMON's word: only a run whose response carries the
+    // plan it was actually given is reported as one.
+    const planSteps = d.plan && Number.isFinite(d.plan.steps) ? d.plan.steps : 0;
     session.lastProposed = proposed;
     session.chat.push({
       who: 'agent', agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
-      files: changed, waiting, applied, log: typeof run.log === 'string' ? run.log : '',
+      files: changed, waiting, applied, proposed, log: typeof run.log === 'string' ? run.log : '', planSteps,
+      ok: run.ok === true, cancelled: run.cancelled === true, // turnNode's runMark() needs the same shape session.runs already carries
       note: run.ok === false ? (run.note || 'The agent did not complete this task.') : (run.note || ''),
     });
     session.runs.push({
       task, ok: run.ok === true, cancelled: run.cancelled === true,
       agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
-      files: changed.length, waiting, applied, note: run.ok === false ? (run.note || '') : '',
+      files: changed.length, waiting, applied, planSteps, note: run.ok === false ? (run.note || '') : '',
     });
-    renderSessionHeader(session); renderChat(session); renderRuns(session); renderActions(session); renderPlan(session); renderHistoryIfOpen();
+    renderSessionHeader(session); renderChat(session); S.renderRuns(session); S.renderActions(session); S.renderPlan(session); renderHistoryIfOpen();
     void S.loadStatus();
     if (S.currentFile) void S.openFile(S.currentFile);
   }
 
   function renderHistoryIfOpen() { if (sHist && !sHist.hidden) renderHistory(); }
+
+  /* Command -> Forge: "describe a task in Command and it opens a NEW
+     agent/chat in Forge and it works". bind/ask.js's "Run in Forge now"
+     button (on a `delegated` offer) dispatches this event and switches to the
+     Forge product; this is the other half — start a fresh session and send
+     the task through the SAME sendTask() the composer itself calls. Nothing
+     about governance changes: sendTask() still routes local vs hosted, and a
+     hosted route still stops and renders its own confirm turn — this never
+     passes hostedConfirmed. Guarded on `window` (not just this closure)
+     because setupSession() could in principle run more than once per page
+     (see state.js's own comment on that); in practice it runs exactly once,
+     but the guard costs nothing and keeps a future re-bind from stacking a
+     second listener that would start two sessions per click. */
+  if (!window.__zenoCommandRunWired) {
+    window.__zenoCommandRunWired = true;
+    window.addEventListener('zeno:command-run', (e) => {
+      const task = e && e.detail && typeof e.detail.task === 'string' ? e.detail.task.trim() : '';
+      if (!task) return;
+      /* Switch to Forge here, not only in the ask.js button that usually fires
+         this — the event must be self-contained so ANY caller (a future voice
+         command, the orb, an e2e driver) that dispatches it lands the owner on
+         the new agent, not on whatever surface they were on. Clicking the real
+         product switch is a no-op if Forge is already showing. */
+      const forgeBtn = document.querySelector('.seg [data-product="forge"]');
+      if (forgeBtn) forgeBtn.click();
+      const session = startNewSession();
+      void sendTask(session, task);
+    });
+  }
 
   return { showEmptyState };
 }

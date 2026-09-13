@@ -17,6 +17,7 @@ import { CODEX_HOSTED_BECAUSE, HOSTED_BECAUSE, probeAgents } from './delegate-pr
 import { ensureOllama } from './ollama-lifecycle.js';
 import { reserveForgeRun, releaseForgeRun } from './forge-gate.js';
 import { performRun, pickLocalModel, WorktreeUnavailable } from './forge-run.js';
+import { approvedPlanFromBody, planText } from './forge-plan.js';
 
 /**
  * Run a coding agent HEADLESS in an isolated throwaway worktree, then turn each
@@ -85,7 +86,17 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
       error: { code: 'unsupported-effort', message: `Unknown effort "${requestedEffort}".`, resolve: 'Choose low, medium, high, or the provider default.' },
     });
   }
-  const prepared = prepareForgeContext(ctx, body);
+  // A plan the owner approved on the plan card rides into the prompt as
+  // context UNDER the task, never instead of it: the owner's task stays the
+  // operative request (and the summary line a held proposal is decided from —
+  // `ownerTask` below is still the bare task), the plan is how to do it.
+  const approved = approvedPlanFromBody(body);
+  if (!approved.ok) return json(res, approved.status, approved.body);
+  const taskWithPlan = approved.plan === null ? task : `${task}\n\n${planText(approved.plan)}`;
+  if (taskWithPlan.length > MAX_FORGE_TASK_CHARS) {
+    return json(res, 413, { error: { code: 'task-too-large', message: 'The task plus its approved plan is too long.', resolve: 'Shorten the plan steps, or run without a plan.' } });
+  }
+  const prepared = prepareForgeContext(ctx, { ...body, task: taskWithPlan });
   if (!prepared.ok) return json(res, prepared.status, prepared.body);
   if (body['contextHash'] !== undefined && typeof body['contextHash'] !== 'string') {
     return json(res, 400, {
@@ -164,6 +175,9 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
     json(res, 200, {
       ...outcome,
       context: prepared.view,
+      // What the run was told to follow, so the window can say "planned" only
+      // about a run that really carried a plan.
+      plan: approved.plan === null ? null : { planId: approved.planId, steps: approved.plan.steps.length },
     });
   } catch (err) {
     if (err instanceof WorktreeUnavailable) {

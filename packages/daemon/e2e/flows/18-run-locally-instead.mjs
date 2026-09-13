@@ -28,6 +28,13 @@ export async function run({ daemon, page, ok, Blocked }) {
   await page.click('[data-product="forge"]');
   await page.waitForTimeout(800);
 
+  // "Plan first" is on by default and would stop this Send at a plan card
+  // (24-plan-first.mjs covers that path). This flow is about the hosted→local
+  // redirect, so turn it off through the real first-run toggle, as an owner who
+  // wants a straight run would.
+  await page.evaluate(() => { const t = document.querySelector('#ag-planfirst'); if (t && t.getAttribute('aria-pressed') === 'true') t.click(); });
+  ok('plan-first is off for this flow', await page.evaluate(() => document.querySelector('#ag-planfirst')?.getAttribute('aria-pressed') === 'false'));
+
   await page.evaluate(() => {
     const ta = document.querySelector('#ag-ta');
     ta.value = 'Create utils.js at the repo root exporting a function double(n) that returns n*2. Plain JavaScript.';

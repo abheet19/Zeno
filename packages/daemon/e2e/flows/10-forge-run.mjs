@@ -179,6 +179,12 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   const pill = await page.evaluate(() => document.querySelector('#s-model')?.textContent.replace(/\s+/g, ' ').trim() ?? '');
   ok('the composer pill names the model the run will use', pill.includes(model) && pill.includes('local'), pill);
 
+  // "Plan first" is on by default and would stop this Send at a plan card
+  // (24-plan-first.mjs covers that path). This flow is about the RUN, so turn
+  // it off through the real toggle, as an owner who wants a straight run would.
+  await page.evaluate(() => { const t = document.querySelector('#s-planfirst'); if (t && t.getAttribute('aria-pressed') === 'true') t.click(); });
+  ok('plan-first is off for this flow', await page.evaluate(() => document.querySelector('#s-planfirst')?.getAttribute('aria-pressed') === 'false'));
+
   await page.fill('#s-ta', TASK);
   await page.click('#s-send');
 
