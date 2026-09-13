@@ -1902,6 +1902,20 @@ async function bindForge() {
         b.type = 'button';
         b.addEventListener('click', () => void confirmHosted(session));
         add(row, b);
+        /* A local-first product should never make "send my code to a paid cloud
+           provider" the only button. The first-run hero has no model selector
+           (the design keeps it minimal), so a first task always auto-routes and
+           the balanced-default router escalates to a hosted agent — the owner's
+           only offered action was to confirm that egress. This second button
+           runs the same task on this machine instead, with no bytes leaving and
+           no bill. It appears only when a local model is actually installed. */
+        if (localModelChoice() && session.pendingHosted) {
+          const local = el('button', 'btn g sm', 'Run locally instead');
+          local.type = 'button';
+          local.title = `Run this on ${localModelChoice()} on this machine — nothing leaves your computer.`;
+          local.addEventListener('click', () => void runLocallyInstead(session));
+          add(row, local);
+        }
         add(bt, row);
       }
     } else {
@@ -2136,6 +2150,27 @@ async function bindForge() {
     session.running = true;
     renderSessionHeader(session);
     await runResolved(session, pending.task, pending.route, true);
+  }
+
+  /** The local model the "Run locally instead" button would use, or '' if none. */
+  function localModelChoice() {
+    const locals = (agentsData && Array.isArray(agentsData.localModels)) ? agentsData.localModels : [];
+    if (!locals.length) return '';
+    // Prefer an 8b/14b: qwen3:4b tends to exhaust its budget before proposing.
+    return locals.find((m) => /8b|14b/.test(m)) || locals[0];
+  }
+
+  /** Redirect a held hosted proposal to a real local run — no egress, no bill. */
+  async function runLocallyInstead(session) {
+    const pending = session.pendingHosted;
+    if (!pending) return;
+    const model = localModelChoice();
+    if (!model) return;
+    session.pendingHosted = null;
+    session.running = true;
+    session.chat.push({ who: 'system', text: `Running on ${model} on this machine instead — nothing leaves your computer.` });
+    renderSessionHeader(session); renderChat(session);
+    await runResolved(session, pending.task, { agentId: 'local', model, effort: pending.route.effort, rationale: 'You chose to run this on-device.' }, false);
   }
 
   async function runResolved(session, task, route, hostedConfirmed) {
