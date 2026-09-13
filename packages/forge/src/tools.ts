@@ -36,33 +36,73 @@
  * Pure and I/O-free, in the manner of `kernel/src/risk.ts`: a tool name and its
  * arguments in, a verdict out. Deciding what a call would cost is separate from
  * asking anyone about it.
+ *
+ * THE SPLIT. This file is the dispatcher (`classifyToolCall`) plus the tool
+ * groups it does not delegate elsewhere. Zeno's own browser and the owner's
+ * signed-in Chrome are each tiered by a substantial set of rules of their own,
+ * so those live in `browse-tools.ts` and `chrome-tools.ts`; the shell escalation
+ * patterns live in `shell-risk.ts`; the shared `ToolVerdict` shape lives in
+ * `tool-base.ts`; and the two string helpers every classifier needs live in
+ * `tool-text.ts`. Every one of those is re-exported below unchanged, so nothing
+ * that imports `./tools.js` — inside this package or in `@abheet19/zeno-forge`'s
+ * consumers — needs to know the file split happened.
  */
-import type { ActionKind, DataZone } from '@abheet19/zeno-kernel';
-// The browser's own bounds, read from the package that enforces them. The
-// classifier and the window must agree on what a navigable URL is, or a capsule
-// ends up describing something that never happens.
-import { navigableUrl } from '@abheet19/zeno-browse';
-// The owner's-Chrome bounds, read from the package that enforces them, for the
-// same reason: the classifier and the extension must agree on what an origin is
-// and which ones are reachable, or a capsule describes something that will not
-// happen — or worse, something that will happen somewhere else.
-import { decideOrigin, type OriginPolicy } from '@abheet19/zeno-chrome';
+import type { OriginPolicy } from '@abheet19/zeno-chrome';
+import { MCP_TOOL_PREFIX, type ToolGate, type ToolVerdict } from './tool-base.js';
+import { field, oneLine } from './tool-text.js';
+import {
+  BROWSE_ACT_METHODS,
+  BROWSE_METHODS,
+  BROWSE_NAV_METHODS,
+  BROWSE_READ_METHODS,
+  BROWSE_SERVER,
+  browseToolName,
+  browseTools,
+  classifyBrowseCall,
+  isBrowseTool,
+} from './browse-tools.js';
+import {
+  CHROME_ACT_METHODS,
+  CHROME_METHODS,
+  CHROME_NAV_METHODS,
+  CHROME_READ_METHODS,
+  CHROME_SERVER,
+  chromeToolName,
+  chromeTools,
+  classifyChromeCall,
+  isChromeTool,
+  NO_CHROME_ORIGINS,
+} from './chrome-tools.js';
+import { DESTRUCTIVE_SHELL, GOVERNANCE_SURFACE } from './shell-risk.js';
 
-/** How a tool call is handled. There is no fourth answer. */
-export type ToolGate = 'routine' | 'governed' | 'refused';
-
-/** The verdict on one call: what it costs, and the sentence the owner reads. */
-export interface ToolVerdict {
-  readonly gate: ToolGate;
-  /** The kernel action kind this call is previewed as. Meaningless for `refused`. */
-  readonly kind: ActionKind;
-  /** The zones it touches — what raises the tier beyond the kind's own floor. */
-  readonly dataZones: readonly DataZone[];
-  /** One human sentence, the thing that actually appears on the capsule. */
-  readonly summary: string;
-  /** Why, in the owner's words. Always at least one. */
-  readonly reasons: readonly string[];
-}
+// Re-exported so every one of these stays importable from `./tools.js` exactly
+// as before the split. See the file comment above for where each now lives.
+export type { ToolGate, ToolVerdict };
+export {
+  BROWSE_ACT_METHODS,
+  BROWSE_METHODS,
+  BROWSE_NAV_METHODS,
+  BROWSE_READ_METHODS,
+  BROWSE_SERVER,
+  browseToolName,
+  browseTools,
+  classifyBrowseCall,
+  isBrowseTool,
+};
+export {
+  CHROME_ACT_METHODS,
+  CHROME_METHODS,
+  CHROME_NAV_METHODS,
+  CHROME_READ_METHODS,
+  CHROME_SERVER,
+  chromeToolName,
+  chromeTools,
+  classifyChromeCall,
+  isChromeTool,
+  NO_CHROME_ORIGINS,
+};
+export { DESTRUCTIVE_SHELL, GOVERNANCE_SURFACE };
+export { MCP_TOOL_PREFIX };
 
 /**
  * Reads that cannot leave the worktree the agent was given.
@@ -100,9 +140,6 @@ export const SHELL_TOOLS: readonly string[] = ['Bash'];
 /** The tools whose whole purpose is to leave this machine. */
 export const NETWORK_TOOLS: readonly string[] = ['WebFetch', 'WebSearch'];
 
-/** The prefix the CLI gives every tool that comes from an MCP server. */
-export const MCP_TOOL_PREFIX = 'mcp__';
-
 /**
  * The MCP server name Forge's permission host is published under, and the tool
  * the CLI calls on it. `--permission-prompt-tool` takes the full dotted name.
@@ -111,113 +148,6 @@ export const GATE_SERVER = 'zeno_gate';
 /** The bare tool name the bridge publishes, before the CLI's server prefix. */
 export const GATE_METHOD = 'request_permission';
 export const GATE_TOOL = `${MCP_TOOL_PREFIX}${GATE_SERVER}__${GATE_METHOD}`;
-
-/**
- * The MCP server name Zeno's OWN browser is published under, and its operations.
- *
- * WHY THIS IS DIFFERENT FROM EVERY OTHER MCP SERVER. The generic rule below
- * rates an MCP call as egress because "an MCP server is a process outside the
- * worktree that Zeno neither started nor bounds". That sentence is the reason
- * the browser is EMBEDDED rather than reached through an external driver: this
- * particular process Zeno spawns itself (`@abheet19/zeno-browse`), hands a fresh
- * in-memory session with no profile, jails to http(s), drives one operation at a
- * time and kills when the run ends. So it is not rated by the generic rule — it
- * is rated by what each operation actually does, which is strictly more precise
- * and, for `click` and `type`, strictly STRICTER.
- *
- * Being Zeno's own process is not a licence to be routine. Every one of these is
- * governed; the tiering only decides how loud the capsule is.
- */
-export const BROWSE_SERVER = 'zeno_browse';
-
-/** Reads of a page ALREADY open. No new bytes leave; external bytes come in. */
-export const BROWSE_READ_METHODS: readonly string[] = ['read', 'screenshot'];
-/** The one operation that fetches. This IS network egress. */
-export const BROWSE_NAV_METHODS: readonly string[] = ['navigate'];
-/** Operations that make the page ACT — submit a form, post, spend, log in. */
-export const BROWSE_ACT_METHODS: readonly string[] = ['click', 'type'];
-
-/** Every browser operation, in the order the surface lists them. */
-export const BROWSE_METHODS: readonly string[] = [
-  ...BROWSE_NAV_METHODS,
-  ...BROWSE_READ_METHODS,
-  ...BROWSE_ACT_METHODS,
-];
-
-/** The full tool name the CLI gives one browser operation. */
-export function browseToolName(method: string): string {
-  return `${MCP_TOOL_PREFIX}${BROWSE_SERVER}__${method}`;
-}
-
-/** The browser's tool names, as `--tools` takes them. */
-export function browseTools(): readonly string[] {
-  return BROWSE_METHODS.map(browseToolName);
-}
-
-/** True when a name is one of Zeno's browser tools, known or not. */
-export function isBrowseTool(toolName: string): boolean {
-  return toolName.startsWith(`${MCP_TOOL_PREFIX}${BROWSE_SERVER}__`);
-}
-
-/**
- * The MCP server name the OWNER'S OWN, SIGNED-IN CHROME is published under.
- *
- * A SEPARATE NAMESPACE FROM `zeno_browse`, AND THAT IS THE POINT. The two look
- * alike and are not alike, and merging them would be the single most damaging
- * simplification available in this file:
- *
- *   `mcp__zeno_browse__*` drives a window Zeno started — fresh session, NO
- *     PROFILE, no cookies, no logins. The worst it can do on a page is what a
- *     stranger with a brand-new browser can do.
- *
- *   `mcp__zeno_chrome__*` drives the browser the owner is LOGGED INTO. Every
- *     request carries their cookies. An agent acting there acts AS THEM on every
- *     site they are signed into.
- *
- * Two blast radii, two namespaces, two sets of capsule wording — so that an
- * owner reading a receipt weeks later can tell which browser acted, and so that
- * the tool NAME itself, which appears on every capsule, says which one it is.
- */
-export const CHROME_SERVER = 'zeno_chrome';
-
-/** Reads of the page in front — of AUTHENTICATED content. */
-export const CHROME_READ_METHODS: readonly string[] = ['read', 'screenshot'];
-/** The one operation that fetches, with the owner's session attached. */
-export const CHROME_NAV_METHODS: readonly string[] = ['navigate'];
-/** Operations that make the page ACT, as the owner. */
-export const CHROME_ACT_METHODS: readonly string[] = ['click', 'type'];
-
-/** Every Chrome operation, in the order the surface lists them. */
-export const CHROME_METHODS: readonly string[] = [
-  ...CHROME_NAV_METHODS,
-  ...CHROME_READ_METHODS,
-  ...CHROME_ACT_METHODS,
-];
-
-/** The full tool name the CLI gives one operation in the owner's Chrome. */
-export function chromeToolName(method: string): string {
-  return `${MCP_TOOL_PREFIX}${CHROME_SERVER}__${method}`;
-}
-
-/** The Chrome tools' names, as `--tools` takes them. */
-export function chromeTools(): readonly string[] {
-  return CHROME_METHODS.map(chromeToolName);
-}
-
-/** True when a name is one of the owner's-Chrome tools, known or not. */
-export function isChromeTool(toolName: string): boolean {
-  return toolName.startsWith(`${MCP_TOOL_PREFIX}${CHROME_SERVER}__`);
-}
-
-/**
- * The allowlist a classification is made against when the caller supplies none.
- *
- * EMPTY, and that is a decision rather than a placeholder. An origin policy is
- * owner state; a code path that lost it must not thereby widen anything. An
- * empty allowlist refuses every origin, so the failure mode of forgetting to
- * thread the policy through is "nothing works", never "everything is allowed".
- */
-export const NO_CHROME_ORIGINS: OriginPolicy = { allowed: [] };
 
 /**
  * Tools that are never available, whatever anyone approves.
@@ -245,313 +175,9 @@ export const NO_CHROME_ORIGINS: OriginPolicy = { allowed: [] };
  */
 export const NEVER_TOOLS: readonly string[] = ['Task', 'Agent', GATE_TOOL];
 
-/**
- * Shapes of command that are not merely "running something".
- *
- * Deliberately few and legible, in the spirit of `SENSITIVE_PATHS`: a rule you
- * cannot hold in your head is a rule you cannot audit. Matching one raises the
- * capsule from `shell.exec` to `destructive`; matching none changes nothing
- * about whether the owner is asked.
- */
-export const DESTRUCTIVE_SHELL: readonly RegExp[] = [
-  /\brm\s+(-[a-z]*\s+)*-[a-z]*[rf]/i, // rm -rf, rm -fr, rm -r -f
-  /\b(rmdir|rd)\b.*\/s\b/i, // Windows recursive remove
-  /\bdel\b.*\/[sq]\b/i,
-  /\b(mkfs|format)\b/i,
-  /\bdd\s+if=/i,
-  /\b(shutdown|reboot)\b/i,
-  /\bgit\s+push\b.*(--force|-f)\b/i,
-  /\bgit\s+(reset\s+--hard|clean\s+-[a-z]*[fd])/i,
-  /\b(npm|pnpm|yarn)\s+publish\b/i,
-  /\bchmod\s+(-R\s+)?777\b/i,
-];
-
-/**
- * The one place a command reaches back at Zeno itself.
- *
- * The ledger is the evidence; the signing key is what makes it evidence; the
- * proposer token and policy are what decide who may ask for what. A command
- * naming any of them is not an ordinary command, and it is rated `destructive`
- * so the capsule says so in the loudest words the tier model has. It is still
- * only a pattern — the real answer is that the owner sees the command.
- */
-export const GOVERNANCE_SURFACE: readonly RegExp[] = [
-  /\.zeno\b/i,
-  /\bledger\.jsonl\b/i,
-  /\bproposer\.token\b/i,
-  /\bpolicy\.json\b/i,
-  // A `keys` PATH SEGMENT — `ls keys/`, `.zeno\keys`, `cat keys` — and not the
-  // ordinary word, so `Object.keys(x)` in a one-liner is left alone.
-  /(^|[\s/\\'"])keys([/\\]|$|[\s'"])/i,
-];
-
-/** Pull one string field out of an unknown tool input, or '' when it is absent. */
-function field(input: unknown, name: string): string {
-  if (typeof input !== 'object' || input === null) return '';
-  const v = (input as Record<string, unknown>)[name];
-  return typeof v === 'string' ? v : '';
-}
-
-/** One line, bounded — a capsule summary is read, not scrolled. */
-function oneLine(text: string, cap = 240): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > cap ? flat.slice(0, cap) + '…' : flat;
-}
-
 /** True when a name is a tool published by some MCP server. */
 export function isMcpTool(toolName: string): boolean {
   return toolName.startsWith(MCP_TOOL_PREFIX);
-}
-
-/**
- * Classify one call to Zeno's own browser.
- *
- * THE TIERING, AND WHY EACH RUNG IS WHERE IT IS. "It's all just a browser" is
- * exactly the flattening this function refuses. Three genuinely different things
- * happen behind one window:
- *
- *   `read`, `screenshot` — T2, `net.fetch`, zone `external`. No new bytes leave:
- *     the page is already open, and the owner approved the navigation that
- *     opened it. But bytes ARRIVE — the kernel's own definition of `net.fetch`
- *     is "bytes leave this machine, or arrive from off it" — and what arrives is
- *     untrusted text that goes straight into the agent's context, where it can
- *     try to instruct it. That is not routine, and it is not T0: a T0 kind would
- *     be `auto` under the default policy, and `permission-gate.ts` refuses an
- *     auto-rated governed call outright rather than running it unattended.
- *
- *   `navigate` — T2, `net.fetch`, zone `external`, AND it exists only when the
- *     network is switched on. This is the fetch. It is gated at least as
- *     strictly as `WebFetch`: same kind, same tier, same `ZENO_FORGE_NETWORK`
- *     off-switch, and the capsule carries the literal URL — the whole URL, as it
- *     will be requested, in the spirit of `shell.exec` showing the literal
- *     command. A URL Zeno's browser would not open (a `file:` path, a `data:`
- *     document, a credential in the authority) is REFUSED here, before any
- *     capsule exists: an owner should never be asked to approve a navigation
- *     that the window would then reject, and should never be shown a secret.
- *
- *   `click`, `type` — T3, `shell.exec`, zones `external` and `personal`. A click
- *     is not a read. It submits the form, sends the message, places the order,
- *     accepts the terms; typing puts the agent's words into somebody else's
- *     system. Like a command, the harmless and the catastrophic are the same
- *     ACTION and only the owner reading the literal target tells them apart —
- *     which is precisely the argument for rating `shell.exec` at T3, so these
- *     are rated there too. The capsule names the exact selector and, for `type`,
- *     the exact text.
- *
- * An operation this function does not know is REFUSED, and deliberately not
- * allowed to fall through to the generic MCP rule: something calling itself
- * Zeno's browser and asking for a verb Zeno's browser does not have is the last
- * thing to round down.
- */
-export function classifyBrowseCall(toolName: string, input: unknown): ToolVerdict {
-  const method = toolName.slice(`${MCP_TOOL_PREFIX}${BROWSE_SERVER}__`.length);
-  const bounded = 'the page runs in a window Zeno started: a fresh session with no profile, no cookies and no logins, and it can open nothing but http and https';
-
-  if (BROWSE_NAV_METHODS.includes(method)) {
-    const asked = field(input, 'url');
-    const url = navigableUrl(asked);
-    if (!url.ok) {
-      return {
-        gate: 'refused',
-        kind: 'net.fetch',
-        dataZones: [],
-        summary: `Zeno’s browser will not open that address.`,
-        reasons: [url.reason, 'a navigation Zeno would refuse is never put in front of the owner as a question'],
-      };
-    }
-    return {
-      gate: 'governed',
-      kind: 'net.fetch',
-      dataZones: ['external'],
-      summary: `Open in Zeno’s browser: ${oneLine(url.url)}`,
-      reasons: [
-        'this is a page fetch — it leaves the machine, and what goes out cannot be recalled by refusing the next one',
-        bounded,
-      ],
-    };
-  }
-
-  if (BROWSE_READ_METHODS.includes(method)) {
-    const what = method === 'screenshot' ? 'take a picture of' : 'read the visible text of';
-    return {
-      gate: 'governed',
-      kind: 'net.fetch',
-      dataZones: ['external'],
-      summary: `Zeno’s browser: ${what} the page it already has open.`,
-      reasons: [
-        'no new request is made — this reads the page the owner already approved opening',
-        'what comes back is untrusted text from off this machine, and it goes into the agent’s context',
-      ],
-    };
-  }
-
-  if (BROWSE_ACT_METHODS.includes(method)) {
-    const selector = oneLine(field(input, 'selector'), 120);
-    const shown = selector === '' ? '(no element named)' : `"${selector}"`;
-    const summary =
-      method === 'type'
-        ? `Zeno’s browser: type "${oneLine(field(input, 'text'), 120)}" into ${shown} on the page it has open.`
-        : `Zeno’s browser: click ${shown} on the page it has open.`;
-    return {
-      gate: 'governed',
-      kind: 'shell.exec',
-      dataZones: ['external', 'personal'],
-      summary,
-      reasons: [
-        'this makes the page ACT — a click can submit a form, send a message, accept terms or place an order',
-        'no rule here can tell a harmless control from a consequential one — read the element and the page, that is the check',
-        bounded,
-      ],
-    };
-  }
-
-  return {
-    gate: 'refused',
-    kind: 'read',
-    dataZones: [],
-    summary: `"${toolName}" is not an operation Zeno’s browser has.`,
-    reasons: [
-      'nobody has decided what this call can reach, and an unclassified capability is not a safe one',
-      `Zeno’s browser does exactly these: ${BROWSE_METHODS.join(', ')}`,
-    ],
-  };
-}
-
-/**
- * Classify one call to the OWNER'S OWN, SIGNED-IN CHROME.
- *
- * THE TIERING, AND WHY EVERY RUNG IS ABOVE ITS `zeno_browse` TWIN.
- *
- * The single fact that decides all of it: this browser has the owner's identity
- * and the sandboxed window has none. Everything below follows from that, and the
- * binding rule is that NOTHING HERE MAY BE T2 OR BELOW — because even a read is
- * a read of authenticated content, and T2 is the tier the product uses for
- * "bytes crossed the boundary", not for "an agent looked at your mail".
- *
- *   `read`, `screenshot` — T3, `shell.exec`, zones `external` and `personal`.
- *     Its twin is T2. It is raised for a reason that is not symmetry: what is on
- *     the page is whatever the owner is SIGNED IN TO — an inbox, an admin
- *     console, a private repository, a half-filled form with their address in
- *     it. Rating that as "an external fetch" would describe the wrong event
- *     entirely. It sits with `shell.exec` because the argument for that tier
- *     applies exactly: the harmless case and the catastrophic case are the SAME
- *     ACTION, and only the owner reading the literal origin tells them apart.
- *
- *   `navigate` — T3, `shell.exec`, same zones. Its twin is T2 and is honestly
- *     rated there, because that fetch is anonymous. This one is not: the request
- *     carries the owner's session cookies, so a GET can BE a state change — a
- *     logout link, an unsubscribe link, a one-click confirmation, an
- *     `?action=delete` a page author never expected a robot to follow. "It is
- *     only a navigation" stops being true the moment the browser is signed in.
- *
- *   `click`, `type` — T3, `destructive`, same zones. Its twin is `shell.exec`,
- *     and this is a strictly louder KIND at the same tier — exactly the move
- *     `DESTRUCTIVE_SHELL` makes for a command that deletes or publishes. A click
- *     as the owner sends the mail, transfers the money, accepts the terms,
- *     deletes the repository, in their name, from their account, with their
- *     cookies. There is no honest wording weaker than `destructive` for that,
- *     and T3 is the top of the approvable range: T4 is refused outright rather
- *     than approvable, and a capability the owner deliberately switched on
- *     should be approvable or absent, not permanently denied theatre.
- *
- * THE ORIGIN IS DECIDED HERE, BEFORE A CAPSULE EXISTS. An origin that is not on
- * the owner's allowlist, or that is on the never-list, is REFUSED — never put in
- * front of the owner as a question, exactly as a `file:` URL is refused for the
- * sandboxed window today. Adding an origin is an owner act performed in the Zeno
- * window, and deliberately not something an agent can ask for mid-run: a
- * standing decision that can be requested in the moment is not a standing
- * decision, it is one more capsule in a stream of capsules.
- *
- * EVERY CAPSULE NAMES THE ORIGIN AND SAYS WHOSE BROWSER THIS IS. The summary
- * leads with `Your signed-in Chrome`, names the origin in full, and the reasons
- * say in as many words that this is the authenticated profile and not the
- * throwaway window. An owner must never have to work out which browser a capsule
- * means.
- */
-export function classifyChromeCall(toolName: string, input: unknown, policy: OriginPolicy): ToolVerdict {
-  const method = toolName.slice(`${MCP_TOOL_PREFIX}${CHROME_SERVER}__`.length);
-  if (!CHROME_METHODS.includes(method)) {
-    return {
-      gate: 'refused',
-      kind: 'read',
-      dataZones: [],
-      summary: `"${toolName}" is not an operation Zeno performs in your own Chrome.`,
-      reasons: [
-        'nobody has decided what this call can reach, and an unclassified capability is not a safe one',
-        `Zeno’s Chrome bridge does exactly these: ${CHROME_METHODS.join(', ')}`,
-      ],
-    };
-  }
-
-  // The origin, first and before everything. `navigate` states a whole URL; the
-  // rest state the origin they expect to be acting on, and the extension refuses
-  // them if the tab in front is somewhere else.
-  const stated = method === 'navigate' ? field(input, 'url') : field(input, 'origin');
-  const decided = decideOrigin(stated, policy);
-  if (!decided.ok) {
-    return {
-      gate: 'refused',
-      kind: 'read',
-      dataZones: [],
-      summary: 'Zeno will not act on that site in your own Chrome.',
-      reasons: [decided.reason, 'an action Zeno would refuse is never put in front of the owner as a question'],
-    };
-  }
-  const origin = decided.origin;
-
-  // The sentence that must appear on every one of these capsules, and never on
-  // a `zeno_browse` one. The owner has two browsers in play; the capsule says
-  // which.
-  const whose =
-    'THIS IS YOUR OWN SIGNED-IN CHROME — not the throwaway window Zeno starts. It carries your cookies and ' +
-    'your sessions, so anything done here is done AS YOU, on an account you are logged into';
-
-  if (CHROME_NAV_METHODS.includes(method)) {
-    return {
-      gate: 'governed',
-      kind: 'shell.exec',
-      dataZones: ['external', 'personal'],
-      summary: `Your signed-in Chrome · ${origin} — open ${oneLine(field(input, 'url'))}`,
-      reasons: [
-        whose,
-        'a signed-in navigation is not an anonymous fetch: the request carries your session, so a plain link can log you out, unsubscribe you or confirm something',
-        `${origin} is on the Chrome allowlist you set yourself`,
-      ],
-    };
-  }
-
-  if (CHROME_READ_METHODS.includes(method)) {
-    const what = method === 'screenshot' ? 'take a picture of' : 'read the visible text of';
-    return {
-      gate: 'governed',
-      kind: 'shell.exec',
-      dataZones: ['external', 'personal'],
-      summary: `Your signed-in Chrome · ${origin} — ${what} the page in front of you.`,
-      reasons: [
-        whose,
-        'what is on that page is whatever you are signed in to, so this is a read of your own private content, not of a public page',
-        'and what comes back is untrusted text that goes straight into the agent’s context',
-      ],
-    };
-  }
-
-  const selector = oneLine(field(input, 'selector'), 120);
-  const shown = selector === '' ? '(no element named)' : `"${selector}"`;
-  const summary =
-    method === 'type'
-      ? `Your signed-in Chrome · ${origin} — type "${oneLine(field(input, 'text'), 120)}" into ${shown}`
-      : `Your signed-in Chrome · ${origin} — click ${shown}`;
-  return {
-    gate: 'governed',
-    kind: 'destructive',
-    dataZones: ['external', 'personal'],
-    summary,
-    reasons: [
-      whose,
-      'a click here sends the message, accepts the terms, places the order or deletes the thing — in your name, from your account',
-      'no rule can tell a harmless control from a consequential one — read the element and the site, that is the check',
-    ],
-  };
 }
 
 /**

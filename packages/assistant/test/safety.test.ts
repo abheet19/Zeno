@@ -108,7 +108,17 @@ function sources(): { name: string; text: string }[] {
 
 test('every source file is present and readable — the scan below is not vacuous', () => {
   const names = sources().map((s) => s.name).sort();
-  assert.deepEqual(names, ['ground.ts', 'index.ts', 'intent.ts', 'prompt.ts', 'snapshot.ts']);
+  assert.deepEqual(names, [
+    'actionable-request.ts',
+    'ground.ts',
+    'index.ts',
+    'intent-lines.ts',
+    'intent.ts',
+    'invisible-chars.ts',
+    'path-safety.ts',
+    'prompt.ts',
+    'snapshot.ts',
+  ]);
 });
 
 test('no module imports node:*, another package, or anything at all outside this package', () => {

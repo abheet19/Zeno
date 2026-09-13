@@ -80,7 +80,7 @@
     else { route.innerHTML='<span>Okay — answering instead of building.</span>'; } });
 
   // ---- Home: the live chat, in place ----
-  const heroBlock=$('#hero-block'), startersBlock=$('#starters-block'), homeThread=$('#home-thread'), homeTurns=$('#home-turns'), homeTA=$('#home-ta'), homeMic=$('#home-mic');
+  const heroBlock=$('#hero-block'), startersBlock=$('#starters-block'), homeThread=$('#home-thread'), homeTurns=$('#home-turns'), homeTA=$('#home-ta');
   let homeChat=null;
   function enterThread(){ heroBlock.hidden=true; startersBlock.hidden=true; homeThread.hidden=false; }
   function resetHome(){ heroBlock.hidden=false; startersBlock.hidden=false; homeThread.hidden=true; homeTurns.innerHTML=''; homeChat=null; homeTA.value=''; homeTA.style.height='auto'; ORB.kick(); }
@@ -92,7 +92,6 @@
     renderChatsList(); homeTA.value=''; homeTA.style.height='auto'; homeTurns.lastElementChild.scrollIntoView({block:'end',behavior:'smooth'}); }
   $('#home-send').addEventListener('click', sendHome);
   homeTA.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendHome(); } });
-  homeMic.addEventListener('click', ()=>{ homeMic.classList.toggle('rec'); const vs=$('#voice-state'); const on=homeMic.classList.contains('rec'); if(vs){ vs.className='pill '+(on?'cy':'wt'); vs.innerHTML='<span class="d"></span>voice: '+(on?'listening · mic: Command':'idle'); } homeTA.placeholder=on?'Listening… speak, then press the mic to stop':'Message Zeno…'; if(!homeMic.classList.contains('rec')&&!homeTA.value){ homeTA.value='Rotate the ingest token and add a test for it'; homeTA.dispatchEvent(new Event('input')); } });
   $('#home-newchat').addEventListener('click', resetHome);
   $$('[data-newchat]').forEach(b=> b.addEventListener('click', ()=>{ resetHome(); show('home'); homeTA.focus(); }));
   $$('[data-fill]').forEach(b=> b.addEventListener('click', ()=>{ homeTA.value=b.dataset.fill; homeTA.dispatchEvent(new Event('input')); homeTA.focus(); }));
@@ -118,10 +117,6 @@
   const IDE_VISIBLE=()=> $('.product[data-product="forge"]').classList.contains('on');
   // Agent | Editor
   // The agent lives in the secondary side panel (Ctrl+Alt+B toggles it) — it is not a mode, so there is no Agent/Editor switch.
-  { const agStart=()=>{ const ta=$('#ag-ta'); const t=(ta&&ta.value.trim())||''; const st=$('#s-ta'); if(t){ if(st){ st.value=t; st.dispatchEvent(new Event('input')); } sendSession(); if(ta) ta.value=''; } else { newSession(); if(st) setTimeout(()=>st.focus(),0); } };
-    const agSend=$('#ag-send'); if(agSend) agSend.addEventListener('click', agStart);
-    const agTa=$('#ag-ta'); if(agTa){ agTa.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); agStart(); } }); agTa.addEventListener('input', ()=>{ agTa.style.height='auto'; agTa.style.height=Math.min(agTa.scrollHeight,200)+'px'; }); }
-    const agPlus=$('#ag-plus'); if(agPlus) agPlus.addEventListener('click', e=>{ e.stopPropagation(); openPlus(agPlus); }); }
   // Forge run-mode: Code / Ask / Plan (Ask = read-only, Plan = plan-first, Code = governed writes)
   const FMODES=[
     {id:'code', label:'Code', glyph:'</>', desc:'Can write and edit code', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/></svg>'},
@@ -136,28 +131,6 @@
     const r=anchor.getBoundingClientRect(); const h=fmodeEl.offsetHeight||170; fmodeEl.style.left=Math.max(8,r.left)+'px'; fmodeEl.style.top=Math.max(8,r.top-h-8)+'px'; }
   { const sk=$('#s-kind'); if(sk){ applyFmode('code'); sk.addEventListener('click', e=>{ e.stopPropagation(); openFmode(sk); }); } }
   document.addEventListener('click', e=>{ if(fmodeEl && !e.target.closest('.fmode-menu') && e.target.id!=='s-kind') closeFmode(); });
-  // Forge "+" attach / context menu — Zeno already has most of these; the menu gathers them
-  const PLUS_ITEMS=[
-    ['Upload image','<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M21 15l-5-4-5 4-3-2-5 4"/>','Attach a screenshot or image as context for this run'],
-    ['Files','<path d="M6 3h9l5 5v13H6z"/><path d="M15 3v6h6"/>','Add specific repository files to the run context'],
-    ['Directories','<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>','Add a whole directory as context'],
-    ['Skills','<path d="M12 2l2.4 6.9L21 11l-6.6 2.1L12 20l-2.4-6.9L3 11l6.6-2.1z"/>','Discovery-only skills, catalogued read-only — never loaded ambiently'],
-    ['Conversations','<path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>','Bring a past chat in as context'],
-    ['Code Context Items','<path d="M8 9l-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/>','Pin symbols, snippets or Lens items for the run'],
-    ['Git','<circle cx="6" cy="6" r="2.3"/><circle cx="6" cy="18" r="2.3"/><circle cx="18" cy="8" r="2.3"/><path d="M6 8.3v7.4M18 10.3c0 3-3 4-6 4H8"/>','Branch, diff and history — the commit is the only governed write'],
-    ['MCP servers','<path d="M9 7V3M15 7V3M8 7h8v3a4 4 0 0 1-8 0zM12 14v7"/>','Recorded MCP servers — names only, never their values'],
-    ['Rules','<path d="M4 6h16M4 12h16M4 18h10"/>','AGENTS.md and CLAUDE.md rules loaded for this run'],
-    ['Terminal','<path d="M4 17l6-5-6-5M12 19h8"/>','One-shot commands; write commands come back held for approval'],
-    ['Codemaps','<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"/>','A map of the repo the agent can navigate'],
-    ['Trigger Workflow','<circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="18" r="2.3"/><path d="M8.3 6H14a4 4 0 0 1 4 4v5.7"/>','Scheduled tasks run under a T1 ceiling — still gated'] ];
-  let plusEl=null;
-  function closePlus(){ if(plusEl){ plusEl.remove(); plusEl=null; } }
-  function openPlus(anchor){ if(plusEl){ closePlus(); return; } plusEl=document.createElement('div'); plusEl.className='plus-menu'; plusEl.setAttribute('role','menu');
-    plusEl.innerHTML=PLUS_ITEMS.map(it=>'<button class="plus-item" role="menuitem" data-plus="'+esc(it[0])+'"><span class="mi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'+it[1]+'</svg></span>'+esc(it[0])+'</button>').join('');
-    document.body.append(plusEl); plusEl.querySelectorAll('[data-plus]').forEach(b=> b.addEventListener('click', ()=>{ const it=PLUS_ITEMS.find(x=>x[0]===b.dataset.plus); closePlus(); if(it) toast(it[2]); }));
-    const r=anchor.getBoundingClientRect(); const h=plusEl.offsetHeight||420; plusEl.style.left=Math.max(8,r.left)+'px'; plusEl.style.top=Math.max(8,r.top-h-8)+'px'; }
-  { const sa=$('#s-attach'); if(sa) sa.addEventListener('click', e=>{ e.stopPropagation(); openPlus(sa); }); }
-  document.addEventListener('click', e=>{ if(plusEl && !e.target.closest('.plus-menu') && e.target.id!=='s-attach' && !e.target.closest('#s-attach')) closePlus(); });
   // layout toggles (duplicated in title bar + panel; keep them in sync)
   function syncLayout(k, on){ $$('[data-layout="'+k+'"]').forEach(x=> x.setAttribute('aria-pressed', on?'true':'false')); ide.classList.toggle('no-'+k, !on); }
   $$('[data-layout]').forEach(b=> b.addEventListener('click', ()=>{ const k=b.dataset.layout; syncLayout(k, ide.classList.contains('no-'+k)); }));
@@ -259,37 +232,18 @@
     else if(e.ctrlKey && k==='`'){ e.preventDefault(); showPanel('terminal'); termIn.focus(); }
     else if(e.ctrlKey && k==='.'){ e.preventDefault(); if(!$('#s-body').dataset.open) newSession(); $('#s-ta').focus(); }
     else if(e.ctrlKey && k==='l'){ e.preventDefault(); syncLayout('sess', true); $('#s-ta').focus(); }
-    else if(e.key==='Escape'){ quick.hidden=true; closeMenu(); closeModelPicker(); closeCompare(); } });
+    else if(e.key==='Escape'){ quick.hidden=true; closeMenu(); closeModelPicker(); } });
   // toast
   function toast(msg){ let t=$('#toast'); if(!t){ t=document.createElement('div'); t.id='toast'; document.body.append(t); } t.textContent=msg; t.classList.add('on'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('on'),2400); }
   // ---- Session panel ----
-  const SESS=[
-    {title:'Rotate the ingest token', st:'cy', stt:'Working', model:'qwen3:8b · local', plan:true, turns:'live'},
-    {title:'Add ingest tests', st:'am', stt:'Awaiting approval', model:'codex', plan:false, turns:[{who:'you',html:'<p>Add tests for the ingest parser.</p>'},{who:'z',html:'<p>Wrote <code>tests/ingest.spec.ts</code> in the worktree and ran the suite — 142 passed, exited 0. One approval (T1 · new file) is waiting for you.</p><div class="dvapproval"><div class="dva-h"><span class="tier">T1 · write</span><b>1 change needs your approval</b></div><div class="dva-m">tests/ingest.spec.ts · new · action 7c02…41aa · single-use</div><div class="dva-a"><button class="btn p sm" data-product-go="command" data-then="approvals">Review in Command</button><button class="btn g sm" data-file-open="ingest.spec.ts">Open file</button></div></div>'}]},
-    {title:'Scaffold the App shell', st:'gr', stt:'Applied', model:'claude-code', plan:false, turns:[{who:'you',html:'<p>Scaffold the App shell with a Capsule and a Receipt component.</p>'},{who:'z',html:'<p>Applied after your approval and sealed as receipt <span class="cite">78f2…6ce4</span>. <button class="laction" data-product-go="command" data-then="receipts">Open receipt</button></p>'}]},
-    {title:'Bump vitest', st:'rd', stt:'Failed', model:'qwen3:8b · local', plan:false, turns:[{who:'you',html:'<p>Bump vitest to 2.1.</p>'},{who:'z',html:'<p><code>npm install vitest@2.1</code> exited 1 in the worktree (peer conflict with <code>@vitest/ui</code>). Nothing was applied to your repo. <button class="laction" data-vsp-open="output">See output</button> <button class="laction cy" id="s-retry">Retry with --legacy-peer-deps</button></p>'}]} ];
-  const sBody=$('#s-body'), sEmpty=$('#s-empty'), sHist=$('#s-history'), sTabs=$('#s-tabs'), sChat=$('.sessview[data-stab="chat"]'), sTurns=$('#s-turns'), sPlan=$('#s-plan');
-  const LIVE_TURNS=sTurns.innerHTML;
+  const sBody=$('#s-body'), sEmpty=$('#s-empty'), sHist=$('#s-history'), sTabs=$('#s-tabs'), sTurns=$('#s-turns'), sPlan=$('#s-plan');
   function showSTab(name){ $$('#s-tabs [data-stab]').forEach(b=> b.setAttribute('aria-selected', b.dataset.stab===name?'true':'false')); $$('.sessview').forEach(v=> v.hidden=v.dataset.stab!==name); }
   $$('#s-tabs [data-stab]').forEach(b=> b.addEventListener('click', ()=> showSTab(b.dataset.stab)));
-  function openSession(i){ const s=SESS[i]; sBody.dataset.open='1'; sEmpty.hidden=true; sHist.hidden=true; sTabs.hidden=false; $$('.dvsess').forEach((d,j)=> d.classList.toggle('on', j===i));
-    $('#s-title').textContent=s.title; const st=$('#s-status'); st.className='pill '+s.st; st.innerHTML='<span class="d"></span>'+s.stt; sPlan.hidden=!s.plan; sTurns.innerHTML= s.turns==='live' ? LIVE_TURNS : s.turns.map(t=>'<div class="turn '+t.who+'"><div class="who">'+(t.who==='you'?'A':'Z')+'</div><div class="bt">'+t.html+'</div></div>').join('');
-    $('#s-tip').hidden=true; showSTab('chat'); }
   function newSession(){ sBody.dataset.open='1'; sEmpty.hidden=true; sHist.hidden=true; sTabs.hidden=false; $$('.dvsess').forEach(d=>d.classList.remove('on')); $('#s-title').textContent='New session'; const st=$('#s-status'); st.className='pill wt'; st.innerHTML='<span class="d"></span>idle'; sPlan.hidden=true; sTurns.innerHTML='<div class="fnote">Describe the change. Zeno plans it, works in an isolated worktree, and sends every effect to Command for your approval.</div>'; showSTab('chat'); $('#s-ta').focus(); }
-  { const ss=$('#s-start'); if(ss) ss.addEventListener('click', newSession); } $('#s-new').addEventListener('click', ()=>{ sBody.dataset.open=''; sEmpty.hidden=false; sHist.hidden=true; sTabs.hidden=true; $$('.sessview').forEach(v=>v.hidden=true); const t=$('#ag-ta'); if(t) setTimeout(()=>t.focus(),0); });
-  $('#s-hist').addEventListener('click', ()=>{ const open=!sHist.hidden; sHist.hidden=open; if(!open){ sEmpty.hidden=true; sTabs.hidden=true; $$('.sessview').forEach(v=>v.hidden=true); } else if(sBody.dataset.open){ sTabs.hidden=false; showSTab('chat'); } else { sEmpty.hidden=false; } });
-  $$('.dvsess[data-sopen]').forEach(d=> d.addEventListener('click', ()=> openSession(+d.dataset.sopen)));
+  { const ss=$('#s-start'); if(ss) ss.addEventListener('click', newSession); }
   $('#s-close').addEventListener('click', ()=> syncLayout('sess', false));
   $('#s-tip').addEventListener('click', ()=>{ $('#s-tip').hidden=true; });
-  document.addEventListener('click', e=>{ if(e.target.id==='s-retry'){ e.target.replaceWith(Object.assign(document.createElement('span'),{className:'pill cy',innerHTML:'<span class="d"></span>retrying in worktree'})); } });
-  function sendSession(){ const ta=$('#s-ta'), t=ta.value.trim(); if(!t) return; if(!sBody.dataset.open) newSession(); const n=sTurns.querySelector('.fnote'); if(n) n.remove();
-    sTurns.insertAdjacentHTML('beforeend','<div class="turn you"><div class="who">A</div><div class="bt"><p>'+esc(t)+'</p></div></div>'); $('#s-title').textContent=t.length>48?t.slice(0,45)+'…':t; const st=$('#s-status'); st.className='pill cy'; st.innerHTML='<span class="d"></span>Working';
-    sTurns.insertAdjacentHTML('beforeend','<div class="turn z"><div class="who">Z</div><div class="bt"><p>Planning in worktree <code>wt-'+Math.floor(Math.random()*0xfff).toString(16).padStart(3,'0')+'a</code> on <b>'+esc($('#s-model').textContent.replace(' ▾','').trim())+'</b>. Nothing touches your files until you approve.</p><div class="dvtool"><span class="dvtool-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></span><span class="dvtool-t">Reading the repo &amp; rules (AGENTS.md, CLAUDE.md)</span><span class="dvtool-r"><span class="dots"><i></i><i></i><i></i></span></span></div></div></div>');
-    ta.value=''; ta.style.height='auto'; sTurns.lastElementChild.scrollIntoView({block:'end',behavior:'smooth'}); }
-  $('#s-send').addEventListener('click', sendSession);
-  $('#s-ta').addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendSession(); } });
-  $('#s-mic').addEventListener('click', ()=>{ const on=$('#s-mic').classList.toggle('rec'); $('#s-ta').placeholder=on?'Listening… press the mic to stop':'Ask Zeno to change the codebase…'; if(!on&&!$('#s-ta').value){ $('#s-ta').value='Add a retry with backoff to the ingest client'; } });
-  
+
   /* ---- Devin-style first-run quick actions ---------------------------------
      Each goes somewhere real: a task, the file palette, the customization view,
      or the changes this session would make. */
@@ -335,7 +289,6 @@
 
   syncLayout('sess', true); // boot Forge with the editor + the agent panel's first-run state (#s-empty)
   // extensions install (governed: shows as a held effect)
-  $$('.vsinst').forEach(b=> b.addEventListener('click', ()=>{ b.textContent='Installing…'; b.disabled=true; setTimeout(()=>{ b.replaceWith(Object.assign(document.createElement('span'),{className:'pill gr',innerHTML:'<span class="d"></span>installed'})); toast('Extension installed in the isolated extension host'); },900); }));
 
   // ---------- MODEL PICKER (shared) ----------
   // vram: GB VRAM footprint estimate (weights + KV + overhead), local models only; cloud = 0. Real installed models on this machine (Ollama, Q4_K_M).
@@ -348,7 +301,7 @@
     {id:'claude-sonnet-5', g:'', name:'Claude Sonnet 5', sub:'Anthropic · 1M context', where:'cloud', ctx:'1M', cost:[3,0.3,15], str:[90,88,80], eff:1, key:true, vram:0},
     {id:'gpt-5-codex', g:'', name:'GPT-5 Codex', sub:'OpenAI · 400K context', where:'cloud', ctx:'400K', cost:[1.25,0.125,10], str:[92,86,72], eff:1, key:false, locked:'needs an API key', vram:0} ];
   const MI={ local:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>', cloud:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1-.5-8A6 6 0 0 1 18 9a4 4 0 0 1 0 9H7z"/></svg>', route:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h5a4 4 0 0 0 4-4v-2a4 4 0 0 1 4-4h-5"/></svg>' };
-  let mpEl=null, mpdEl=null, mpAnchor=null, MODEL='qwen3:8b', MPMODE='single', RECALL=true, EFFORT={}, CMP=new Set(), cmpEl=null, ROUTE_FALLBACK='claude-sonnet-5';
+  let mpEl=null, mpdEl=null, mpAnchor=null, MODEL='qwen3:8b', MPMODE='single', RECALL=true, EFFORT={}, CMP=new Set(), ROUTE_FALLBACK='claude-sonnet-5';
   // GPU capability — in the real app this is fetched from GET /forge/models/capability (nvidia-smi + Ollama /api/ps); here it is this machine's real card.
   const GPU={ name:'RTX 3080', total:12, usable:11 };   // 12 GB card; ~1 GB reserved for the display + KV headroom
   let RUNMODE='parallel', RUNMODE_USER=false;             // 'parallel' | 'sequential' — chosen honestly from whether the models fit; RUNMODE_USER = owner overrode it
@@ -422,59 +375,13 @@
         +'</div>'
         +'<div class="mp-foot-row"><span>Compare<span class="sub">'+(n?('One task · '+n+' model'+(n>1?'s':'')+' · isolated worktrees'):'Select 2 or 3 models to run side by side')+'</span></span><button class="btn p sm" id="mp-run"'+(n<2?' disabled':'')+'>Compare'+(n?' '+n:'')+' →</button></div>';
       foot.querySelectorAll('[data-run]').forEach(b=> b.addEventListener('click', (e)=>{ if(b.disabled) return; e.stopPropagation(); RUNMODE=b.dataset.run; RUNMODE_USER=true; syncFoot(); }));
-      const run=foot.querySelector('#mp-run'); if(run) run.addEventListener('click', ()=>{ if(CMP.size>=2) openCompare([...CMP]); });
+      // #mp-run's own click is claimed by bind/compare.js (a capturing,
+      // stopImmediatePropagation listener on document) before it ever reaches
+      // a handler attached here — see bind/compare.js's bind() for why.
     } else {
       foot.style.display='';
       foot.innerHTML='<span>Recall Vault memory<span class="sub">Ground this run in your notes · nothing leaves the machine</span></span><div class="toggle" id="mp-recall" role="switch" aria-checked="'+RECALL+'" tabindex="0"><span class="k"></span></div>';
       const rt=foot.querySelector('#mp-recall'); const flip=()=>{ RECALL=!RECALL; rt.setAttribute('aria-checked', RECALL); }; rt.addEventListener('click', flip); rt.addEventListener('keydown', e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); flip(); } }); }
-  }
-  const DIFF_SIMPLE=[{n:'src/ingest.ts', L:[['ctx',' export async function ingest(evt){'],['del','-  return post(\'/ingest\', evt);'],['add','+  for (let i = 0; i < 3; i++) {'],['add','+    try { return await post(\'/ingest\', evt); }'],['add','+    catch (e) { if (i === 2) throw e; await sleep(500); }'],['add','+  }'],['ctx',' }']]}];
-  const DIFF_RICH=[{n:'src/ingest.ts', L:[['ctx',' export async function ingest(evt){'],['del','-  return post(\'/ingest\', evt);'],['add','+  const max = 4;'],['add','+  for (let i = 0; i < max; i++) {'],['add','+    try { return await post(\'/ingest\', evt); }'],['add','+    catch (e) {'],['add','+      if (i === max - 1) throw e;'],['add','+      await sleep(200 * 2 ** i + Math.random() * 100); // backoff + jitter'],['add','+    }'],['add','+  }'],['ctx',' }']]},{n:'tests/ingest.spec.ts  · new', L:[['add','+test(\'retries then succeeds\', async () => {'],['add','+  const post = flakyTwice(okResponse);'],['add','+  await expect(ingest(evt)).resolves.toEqual(ok);'],['add','+  expect(post).toHaveBeenCalledTimes(3);'],['add','+});']]}];
-  function diffHtml(files){ return files.map(f=>'<div class="cmp-diff"><div class="fn">'+esc(f.n)+'</div>'+f.L.map(l=>'<span class="ln cd-'+l[0]+'">'+esc(l[1])+'</span>').join('')+'</div>').join(''); }
-  function wtId(){ return 'wt-'+Math.floor(Math.random()*0xffff).toString(16).padStart(4,'0'); }
-  function closeCompare(){ if(cmpEl){ cmpEl.remove(); cmpEl=null; } }
-  function openCompare(ids){ closeModelPicker(); closeCompare();
-    const task=($('#s-ta')&&$('#s-ta').value.trim())||'Add a retry with backoff to the ingest client';
-    const models=ids.map(id=>MODELS.find(m=>m.id===id)).filter(Boolean); if(models.length<2) return;
-    const seq = RUNMODE==='sequential' && cmpLocals(ids).length>1;   // only locals contend for the GPU; cloud is always parallel
-    cmpEl=document.createElement('div'); cmpEl.className='cmpv'; cmpEl.setAttribute('role','dialog'); cmpEl.setAttribute('aria-modal','true'); cmpEl.setAttribute('aria-label','Compare models on one task');
-    cmpEl.innerHTML='<div class="cmp-top"><span class="mi" style="width:20px;height:20px;color:var(--ink-3);display:inline-flex">'+MI.route+'</span><div class="cmp-tt"><span class="k">Compare run · one task · '+(seq?'sequential · GPU-limited':'parallel')+' · isolated worktrees</span><b>'+esc(task)+'</b></div><div class="cmp-sum" id="cmp-sum"><span class="pill '+(seq?'am':'cy')+'"><span class="d"></span>'+(seq?'sequential':models.length+' running')+'</span></div><button class="iconbtn" id="cmp-x" title="Close comparison" style="margin-left:8px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div><div class="cmp-grid" id="cmp-grid"></div>';
-    document.body.append(cmpEl); cmpEl.querySelector('#cmp-x').addEventListener('click', closeCompare);
-    const grid=cmpEl.querySelector('#cmp-grid'); const done=[]; let settled=0;
-    // Build every column up front (so the grid is stable); queued locals wait their turn under sequential.
-    const cols=models.map(m=>{ const cloud=m.where==='cloud'; const w=wtId();
-      const col=document.createElement('div'); col.className='cmp-col'; col.dataset.mid=m.id;
-      col.innerHTML='<div class="cmp-colh"><span class="mi">'+MI[m.where]+'</span><span class="cmp-nm"><b>'+esc(m.name)+'</b><span>'+(cloud?esc(m.sub.split(' · ')[0]):(m.vram+' GB'))+' · '+esc(w)+'</span></span><span class="pill '+(cloud?'am':'cy')+'" data-stat><span class="d"></span>planning</span></div><div class="cmp-colb" data-body><div class="cmp-step"><span>Reading repo &amp; rules</span><span class="dots"><i></i><i></i><i></i></span></div></div>';
-      grid.append(col);
-      return { m, cloud, col, stat:col.querySelector('[data-stat]'), body:col.querySelector('[data-body]') }; });
-    function runCol(c, onReady){ const {m, cloud, col, stat, body}=c;
-      const ms=cloud? 2600+Math.random()*1500 : 1500+Math.random()*1000;
-      const tok=cloud? 2800+Math.floor(Math.random()*1200) : 1100+Math.floor((m.str?m.str[0]:60)*7);
-      const cost=cloud&&m.cost? (tok/1e6)*(m.cost[0]+m.cost[2]) : 0;
-      stat.className='pill '+(cloud?'am':'cy'); stat.innerHTML='<span class="d"></span>planning'; body.innerHTML='<div class="cmp-step"><span>Reading repo &amp; rules</span><span class="dots"><i></i><i></i><i></i></span></div>';
-      setTimeout(()=>{ if(!cmpEl) return; stat.className='pill '+(cloud?'am':'cy'); stat.innerHTML='<span class="d"></span>editing'; body.innerHTML='<div class="cmp-step"><span>Editing <code>src/ingest.ts</code>'+(cloud?' · writing test':'')+'</span><span class="dots"><i></i><i></i><i></i></span></div>'; }, ms*0.45);
-      setTimeout(()=>{ if(!cmpEl) return; stat.className='pill gr'; stat.innerHTML='<span class="d"></span>ready';
-        body.innerHTML=diffHtml(cloud?DIFF_RICH:DIFF_SIMPLE); requestAnimationFrame(()=> body.querySelectorAll('.cmp-diff').forEach(d=>d.classList.add('in')));
-        const mtr=document.createElement('div'); mtr.className='cmp-mtr'; mtr.innerHTML='<div><span class="k">Wall time</span><b>'+(ms/1000).toFixed(1)+'s</b></div><div><span class="k">Tokens</span><b>'+tok.toLocaleString()+'</b></div><div><span class="k">'+(cloud?'Cost':'VRAM')+'</span><b>'+(cloud?'$'+cost.toFixed(3):(m.vram||'?')+' GB')+'</b></div>'; col.append(mtr);
-        const cf=document.createElement('div'); cf.className='cmp-colf'; cf.innerHTML='<button class="btn p" data-keep>Keep this diff</button><span class="pill wt">'+(cloud?'test added · passes':'compiles · no test')+'</span>'; col.append(cf);
-        cf.querySelector('[data-keep]').addEventListener('click', ()=> keepOne(col, m));
-        done.push({col,m,ms,str:(m.str?m.str[1]:50)}); settled++; if(settled===models.length) suggest(done); if(onReady) onReady();
-      }, ms);
-    }
-    const cloudC=cols.filter(c=>c.cloud), localC=cols.filter(c=>!c.cloud);
-    cloudC.forEach(c=> runCol(c));                                   // cloud always concurrent — its own process, no VRAM
-    if(!seq){ localC.forEach(c=> runCol(c)); }                       // fits: all locals run together
-    else {                                                           // GPU can't hold them: queue, then chain one at a time
-      localC.forEach((c,i)=>{ if(i>0){ c.stat.className='pill wt'; c.stat.innerHTML='<span class="d"></span>queued'; c.body.innerHTML='<div class="cmp-step"><span>Queued — the GPU runs these one at a time</span></div>'; } });
-      const runNext=i=>{ if(i>=localC.length) return; runCol(localC[i], ()=> runNext(i+1)); }; runNext(0);
-    }
-    function suggest(list){ const sum=cmpEl&&cmpEl.querySelector('#cmp-sum'); if(!sum) return; const best=list.slice().sort((a,b)=> b.str-a.str || a.ms-b.ms)[0]; const fast=list.slice().sort((a,b)=>a.ms-b.ms)[0]; sum.innerHTML='<span class="pill wt">fastest: '+esc(fast.m.name)+'</span><span class="pill cy"><span class="d"></span>suggested: '+esc(best.m.name)+'</span>'; }
-    function keepOne(col, m){ if(!cmpEl||cmpEl.dataset.kept) return; cmpEl.dataset.kept='1';
-      grid.querySelectorAll('.cmp-col').forEach(c=>{ c.classList.add(c===col?'win':'lost'); const f=c.querySelector('.cmp-colf'); if(f){ const kb=f.querySelector('[data-keep]'); if(kb) kb.outerHTML=(c===col)?'<span class="cmp-badge win">✓ kept · held for your approval</span>':'<span class="cmp-badge lost">worktree dropped</span>'; } });
-      const rc=Math.floor(Math.random()*0xffff).toString(16).padStart(4,'0');
-      cmpEl.querySelector('#cmp-sum').innerHTML='<span class="pill gr"><span class="d"></span>kept '+esc(m.name)+' · staged '+rc+'…</span>';
-      toast('Kept '+m.name+'’s diff — staged as a held effect. Approve it to apply; the other worktrees were dropped.');
-    }
   }
   $('#vs-lastexit').textContent='exit 0';
   document.addEventListener('click', e=>{ const r=e.target.closest('[data-run-cmd]'); if(r){ showProduct('forge'); showPanel('terminal'); runTerm(r.dataset.runCmd); } });
@@ -487,36 +394,15 @@
   navs.forEach(n=> n.addEventListener('click', ()=>{ if(n.dataset.screen) $$('.mtabs [data-screen]').forEach(b=>{ b.dataset.screen===n.dataset.screen ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'); }); }));
   const msheet=$('#msheet'); $$('[data-msheet]').forEach(b=> b.addEventListener('click', ()=> msheet.hidden=false)); msheet.querySelectorAll('[data-close]').forEach(b=> b.addEventListener('click', ()=> msheet.hidden=true));
   $$('[data-mscreen]').forEach(b=> b.addEventListener('click', ()=>{ msheet.hidden=true; show(b.dataset.mscreen); }));
-  const pair=$('#pair-sheet'); let pairT=null;
-  function startPair(){ pair.hidden=false; let left=120; const ex=$('#pair-exp'); const code=()=>{ const d=()=>Math.floor(Math.random()*10); $('#pair-code').textContent=d()+' '+d()+' '+d()+' · '+d()+' '+d()+' '+d(); }; code(); clearInterval(pairT); ex.textContent='2:00';
-    pairT=setInterval(()=>{ left--; if(left<=0){ clearInterval(pairT); ex.textContent='expired — tap New code'; return; } ex.textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0'); },1000);
-    $('#pair-new').onclick=()=>{ left=120; code(); ex.textContent='2:00'; }; }
-  $$('[data-pair]').forEach(b=> b.addEventListener('click', startPair)); pair.querySelectorAll('[data-close]').forEach(b=> b.addEventListener('click', ()=>{ pair.hidden=true; clearInterval(pairT); }));
+  const pair=$('#pair-sheet');
+  pair.querySelectorAll('[data-close]').forEach(b=> b.addEventListener('click', ()=> pair.hidden=true));
   $('#mf-editor').addEventListener('click', ()=>{ const on=ide.classList.toggle('m-editor'); $('#mf-editor').textContent=on?'Back to the run':'View code (read-only)'; });
 
-  // ---------- COUNSEL — consent → record → save → ask afterwards ----------
-  const MEETINGS=[
-    {title:'Design review — Command home', meta:'Today · 41 min · 3 decisions · 4 actions'},
-    {title:'Weekly sync', meta:'Tue · 28 min · 1 decision · 2 actions'},
-    {title:'Forge terminal bug triage', meta:'Mon · 17 min · 2 decisions'} ];
+  // ---------- COUNSEL — navigation chrome (bind/counsel.js owns the recorder) ----------
   function cnGo(v){ $$('.cnview').forEach(x=> x.classList.toggle('on', x.dataset.cnview===v)); $('.cnmain').scrollTop=0; }
   document.addEventListener('click', e=>{ const g=e.target.closest('[data-cngo]'); if(g) cnGo(g.dataset.cngo); });
-  $('#cn-record').addEventListener('click', ()=> cnGo('preflight'));
-  const c1=$('#cn-c1'), c2=$('#cn-c2'), cstart=$('#cn-start');
-  [c1,c2].forEach(c=> c.addEventListener('change', ()=> cstart.disabled=!(c1.checked&&c2.checked)));
-  let cnTimer=null, cnSec=0, cnPaused=false, cnLineI=0;
-  const LIVE=[['Abheet','Let\'s start with the terminal — it loses stdout on fast commands.'],['unknown','Only on Windows? I saw it with git status.'],['Abheet','Yes, the detached kill-tree runner. Zeno should hold the pipe until exit.'],['unknown','And the think-sentinel leak in run.log?'],['Abheet','Separate fix. Strip anything before a closing sentinel is confirmed.'],['Abheet','Two decisions then. I\'ll take the terminal one.']];
-  function fmt(s){ return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0'); }
-  function cnTick(){ if(cnPaused) return; cnSec++; $('#cn-timer').textContent=fmt(cnSec); if(cnSec%4===0 && cnLineI<LIVE.length){ const [w,t]=LIVE[cnLineI++]; const L=$('#cn-lines'); L.querySelectorAll('.now').forEach(x=>x.classList.remove('now')); const d=document.createElement('div'); d.className='cnl now'; d.innerHTML='<span class="cnw">'+w+'</span><span class="cnt2">'+fmt(cnSec)+'</span><span>'+esc(t)+'</span>'; L.append(d); d.scrollIntoView({block:'end'}); } }
-  cstart.addEventListener('click', ()=>{ cnSec=0; cnLineI=0; cnPaused=false; $('#cn-lines').innerHTML=''; $('#cn-timer').textContent='00:00'; $('#cn-pause').textContent='Pause'; cnGo('live'); clearInterval(cnTimer); cnTimer=setInterval(cnTick,1000); });
-  $('#cn-pause').addEventListener('click', e=>{ cnPaused=!cnPaused; e.target.textContent=cnPaused?'Resume':'Pause'; const rd=$('.recdot.big'); rd.style.animationPlayState=cnPaused?'paused':'running'; rd.style.opacity=cnPaused?'.4':'1'; });
-  $('#cn-end').addEventListener('click', ()=>{ clearInterval(cnTimer); const title=$('#cn-title').value||'Untitled meeting'; MEETINGS.unshift({title, meta:'Just now · '+fmt(cnSec)+' · summary ready'}); renderMeetings(); openMeeting(0); });
-  function renderMeetings(){ const L=$('#cn-list'); L.innerHTML=''; MEETINGS.forEach((m,i)=>{ const b=document.createElement('button'); b.className='cnrow'; b.dataset.cnopen=i; b.innerHTML='<b>'+esc(m.title)+'</b><span>'+esc(m.meta)+'</span>'; L.append(b); }); }
-  function openMeeting(i){ const m=MEETINGS[i]; $('#cn-post-title').textContent=m.title; $('#cn-post-meta').textContent=m.meta; cnGo('post'); $$('.cntabs button')[0].click(); }
-  document.addEventListener('click', e=>{ const r=e.target.closest('[data-cnopen]'); if(r) openMeeting(+r.dataset.cnopen); });
   $$('[data-cntab]').forEach(b=> b.addEventListener('click', ()=>{ $$('.cntabs button').forEach(x=> x.setAttribute('aria-selected', x.dataset.cntab===b.dataset.cntab?'true':'false')); $$('.cnp').forEach(p=> p.classList.toggle('on', p.dataset.cntab===b.dataset.cntab)); }));
   $('#cn-send').addEventListener('click', e=>{ const st=$('#cn-mailstate'); st.className='pill am'; st.innerHTML='<span class="d"></span>not configured — add a mail provider in Settings; nothing left this machine'; e.target.disabled=true; });
-  renderMeetings();
 
   // ================= Standing Field — Gate-2 renderer =================
   const cvs=$('#orb'), ctx=cvs.getContext('2d');

@@ -236,12 +236,21 @@ test('Forge lets the owner pick real skills for a run, and Lens stays a separate
   // catalog markup or `openSkillsCatalog`-style modal exists anywhere under
   // packages/daemon/public/bind) — asserted here as what actually ships, not
   // reworded to sound like the old modal still exists.
-  const source = readFileSync(join(__dirname, '..', '..', 'daemon', 'public', 'bind', 'forge.js'), 'utf8');
-  assert.match(source, /const selectedSkillIds = new Set\(\)/,
+  // bind/forge.js was split into bind/forge/*.js; selectedSkillIds now lives in
+  // the shared bind/forge/state.js and renderLens in a session module. Read the
+  // whole forge surface so this pins the GUARANTEE (real skill selection is what
+  // a run sends; Lens stays separate; no resurrected catalog modal) wherever the
+  // code lives, not the file it happens to be in.
+  const forgeDir = join(__dirname, '..', '..', 'daemon', 'public', 'bind', 'forge');
+  const source = [join(__dirname, '..', '..', 'daemon', 'public', 'bind', 'forge.js')]
+    .concat(readdirSync(forgeDir).filter((f) => f.endsWith('.js')).map((f) => join(forgeDir, f)))
+    .map((p) => readFileSync(p, 'utf8'))
+    .join('\n');
+  assert.match(source, /selectedSkillIds: new Set\(\)/,
     'ticking a skill in the ZENO sidebar is the real selection, not a fixed mock count');
   assert.match(source, /selectedSkillIds\.size/,
     'the composer\'s "N skills" pill reads the real selection size');
-  assert.match(source, /skillIds: \[\.\.\.selectedSkillIds\]/,
+  assert.match(source, /skillIds: \[\.\.\.S\.selectedSkillIds\]/,
     'a run is sent with exactly the skills the owner ticked');
   assert.match(source, /function renderLens\(session\)/,
     'Lens remains its own function, separate from the skills selector');

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -143,7 +143,18 @@ test('Command voice adds a spoken task only after the Work API proves the stored
 });
 
 test('Counsel only answers from saved meetings after active capture ends', () => {
-  const source = readFileSync(new URL('../../public/bind/counsel.js', import.meta.url), 'utf8');
+  // bind/counsel.js was split into bind/counsel/*.js; the live-Q&A guard now
+  // lives in bind/counsel/ask-view.js. Read the whole counsel surface so this
+  // pins the GUARANTEE (no answering while a call is live) wherever the code
+  // lives, not the file it happens to be in. `doesNotMatch(askPrivately)` must
+  // hold across ALL of it — that method must exist nowhere.
+  const dir = new URL('../../public/bind/counsel/', import.meta.url);
+  const entry = readFileSync(new URL('../../public/bind/counsel.js', import.meta.url), 'utf8');
+  const mods = readdirSync(dir)
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => readFileSync(new URL(f, dir), 'utf8'))
+    .join('\n');
+  const source = entry + '\n' + mods;
   assert.doesNotMatch(source, /askPrivately/);
   assert.match(source, /Live Q&A is off while this meeting is active/);
   assert.match(source, /archiveState !== 'ok' \|\| !!CALL/);

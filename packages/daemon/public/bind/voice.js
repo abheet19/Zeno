@@ -32,23 +32,35 @@
  * This file only ever YIELDS to that event; it never dispatches it, because
  * Command is the polite party — it checks before it starts and it never fights
  * for the microphone.
+ *
+ * THE SPLIT. At ~1,000 lines this file mixed eight concerns together: the
+ * eight capture states + spoken replies, push-to-talk, wake mode + its
+ * Settings toggle, Command-screen navigation, and everything below. Those now
+ * live in voice/*.js — pill.js, ptt.js, wake.js, nav.js — with the handful of
+ * things more than one of them needs (wake mode's on/off flag, the mic/pill
+ * elements) on the shared `vstate` object in voice/state.js. What stays here:
+ * the network calls a spoken intent can make (never /approvals), the switch
+ * that turns an Outcome into one of them, capture ownership itself, and
+ * bind(). voice/ptt.js and voice/wake.js reach the capture-ownership
+ * functions and the Outcome dispatcher below through `vstate`'s function
+ * registry rather than importing this file — this file already imports THEM
+ * (for wireMicButton/abortPttNow/restoreWakeMode/disarmWake/etc.), so the
+ * reverse import would be a cycle.
  */
 
-import { getJSON, $, $$, el, fill, screenEl, token } from '../bind.js';
-import { interpret } from '../session.js';
-import { WakeListener, WAKE_WINDOW_MS, RETENTION_MS } from '../listen.js';
-import { SpeechRecognition, localSpeech, waitForSpeechIdle } from '../whisper.js';
-import { captureOwnerLabel, chooseSystemVoice } from '../ask-voice-model.js';
+import { getJSON, $, screenEl, token } from '../bind.js';
+import { SpeechRecognition, waitForSpeechIdle } from '../whisper.js';
+import { vstate } from './voice/state.js';
+import { setState, reply, paintState, engineUnavailableReason } from './voice/pill.js';
+import { clickProduct, gotoCommandScreen, cap } from './voice/nav.js';
+import { wireMicButton, abortPttNow } from './voice/ptt.js';
+import { readWakePref, restoreWakeMode, disarmWake, wireWakeSettingsToggle } from './voice/wake.js';
 
 /* ---------------------------------------------------------------- *
  * Small shared helpers                                              *
  * ------------------------------------------------------------------ */
 
 const CAPTURE_OWNER = 'command';
-const WAKE_PREF_KEY = 'zeno.voice.wake';
-// Bumping this re-asks consent from anyone who accepted an older, weaker
-// description of what the microphone does.
-const DISCLOSURE_VERSION = 4;
 
 function authHeaders(extra) {
   const h = Object.assign({ accept: 'application/json' }, extra || {});
@@ -80,28 +92,11 @@ async function postJSON(path, body) {
   }
 }
 
-function readWakePref() {
-  try {
-    const raw = window.localStorage.getItem(WAKE_PREF_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    return !!(parsed && parsed.on === true && parsed.disclosure === DISCLOSURE_VERSION && (!localSpeech || parsed.engine === 'whisper'));
-  } catch {
-    return false; // private mode / corrupt JSON: default OFF, the safe direction
-  }
-}
-function writeWakePref(on) {
-  try {
-    if (on) {
-      window.localStorage.setItem(WAKE_PREF_KEY, JSON.stringify({ on: true, disclosure: DISCLOSURE_VERSION, engine: localSpeech ? 'whisper' : 'browser' }));
-    } else {
-      window.localStorage.removeItem(WAKE_PREF_KEY);
-    }
-  } catch { /* preference just won't survive a reload */ }
-}
-
 /* ---------------------------------------------------------------- *
- * Capture ownership — one microphone, one owner                     *
+ * Capture ownership — one microphone, one owner. Registered onto     *
+ * `vstate` (in bind(), below) so voice/ptt.js and voice/wake.js can   *
+ * call the SAME functions without importing this file. See the file  *
+ * comment above and voice/state.js.                                  *
  * ------------------------------------------------------------------ */
 
 function externalCaptureOwner() {
@@ -112,172 +107,6 @@ function claimCapture() { document.body.dataset.zenoCapture = CAPTURE_OWNER; }
 function releaseCapture() {
   if (document.body.dataset.zenoCapture === CAPTURE_OWNER) delete document.body.dataset.zenoCapture;
 }
-
-/* ---------------------------------------------------------------- *
- * The eight states — one pill, mirrored onto every mic button        *
- * ------------------------------------------------------------------ */
-
-// Rendered pill text is deliberately SHORT and fixed per state — a spoken
-// outcome can be a full sentence, and stuffing that into this small pill would
-// break its layout. The full detail always still goes into the pill's `title`
-// (a native tooltip), and — while a synthesis engine is available — is SAID
-// aloud, which is the primary channel a spoken reply is meant to use.
-const STATE_INFO = {
-  idle: { cls: 'wt', text: () => 'voice: idle' },
-  permission_needed: { cls: 'am', text: () => 'voice: permission needed' },
-  listening: { cls: 'cy', text: (d) => (d && d.length <= 40 ? `voice: listening · ${d}` : 'voice: listening') },
-  transcribing: { cls: 'cy', text: () => 'voice: transcribing…' },
-  thinking: { cls: 'cy', text: () => 'voice: thinking…' },
-  speaking: { cls: 'cy', text: () => 'voice: speaking…' },
-  stopped: { cls: 'wt', text: () => 'voice: stopped' },
-  error: { cls: 'rd', text: () => 'voice: error' },
-  // Not a state the engine reaches — the state there IS no engine to reach one
-  // from. "voice: idle" reads as "ready, just not listening right now", which is
-  // the one thing this pill must not say when nothing in this window can hear:
-  // the owner would hold the mic, get nothing, and blame the microphone. The
-  // reason is already in the tooltip; the visible word has to agree with it.
-  unavailable: { cls: 'am', text: () => 'voice: unavailable' },
-};
-
-let pillEl = null;
-let micButtons = []; // live, listener-free clones of the four mic controls
-let currentState = 'idle';
-let currentDetail = '';
-let idleTimer = null;
-let engineNote = ''; // the honest "what engine is this / what is missing" line
-
-function engineUnavailableReason() {
-  if (SpeechRecognition) return '';
-  return 'No speech engine is available in this window — local Whisper needs the Zeno desktop app’s speech service, and this browser has no Web Speech API either. Typed chat still works.';
-}
-function engineDescription() {
-  if (localSpeech) return 'Local Whisper — speech is recognized on this PC; no audio is uploaded.';
-  if (SpeechRecognition) return 'Local Whisper is unavailable here (no local speech bridge was detected), so voice is using your browser’s Web Speech API instead — that is not local, and it uploads audio to your browser maker to transcribe.';
-  return engineUnavailableReason();
-}
-
-/** Repaint the pill and every mic button from the one piece of state. Never
- * shows a state the engine did not actually reach. */
-function paintState() {
-  // "idle" is a resting engine. With no engine at all there is nothing resting,
-  // so the pill says so rather than borrowing the word for "ready".
-  const info = (!SpeechRecognition && currentState === 'idle')
-    ? STATE_INFO.unavailable
-    : (STATE_INFO[currentState] || STATE_INFO.idle);
-  if (pillEl) {
-    pillEl.className = `pill ${info.cls}`;
-    fill(pillEl, el('span', 'd'), document.createTextNode(info.text(currentDetail)));
-    pillEl.title = currentDetail || engineNote || '';
-  }
-  const active = currentState === 'listening' || currentState === 'transcribing';
-  const engineOk = !!SpeechRecognition;
-  for (const b of micButtons) {
-    b.classList.toggle('rec', active);
-    if (b.classList.contains('ag-ic')) {
-      // .ag-ic has no .rec rule of its own (that CSS is scoped to .mic); mirror
-      // the same red-pulse look inline rather than leaving this one button dark.
-      b.style.color = active ? 'var(--red,#E5484D)' : '';
-      b.style.borderColor = active ? 'color-mix(in srgb, var(--red,#E5484D) 50%, var(--gl-edge,#2C353B))' : '';
-    }
-    b.setAttribute('aria-pressed', active ? 'true' : 'false');
-    b.disabled = !engineOk || wakeOn;
-    b.style.opacity = b.disabled ? '0.5' : '';
-    b.style.cursor = b.disabled ? 'not-allowed' : '';
-    b.title = !engineOk
-      ? engineUnavailableReason()
-      : wakeOn
-        ? 'Wake mode is on — just say “Zeno”. Turn it off in Settings → Voice to hold this button instead.'
-        : `Hold to talk to Zeno. ${engineDescription()}`;
-  }
-}
-function setState(state, detail) {
-  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-  currentState = STATE_INFO[state] ? state : 'idle';
-  currentDetail = detail || '';
-  paintState();
-}
-/** Wake mode, if still on, keeps the microphone open after a command or a
- * spoken reply finishes — the true rest state is "listening for Zeno", not
- * idle, or the indicator would say the room stopped being heard when it did
- * not. */
-function settleToRest() {
-  if (wakeOn) setState('listening', 'listening for “Zeno”');
-  else setState('idle');
-}
-function settleAfter(ms) {
-  idleTimer = setTimeout(() => { idleTimer = null; settleToRest(); }, ms);
-}
-
-/* ---------------------------------------------------------------- *
- * Spoken replies — speech.js has no synthesis (it is an alternate    *
- * recognizer adapter, imported nowhere else); the standard Web        *
- * Speech Synthesis API is the only reusable surface for "say it back",*
- * the same one ask.js used inline. chooseSystemVoice is reused from   *
- * ask-voice-model.js rather than re-derived.                          *
- * ------------------------------------------------------------------ */
-
-let speechEpoch = 0;
-const MAX_SPOKEN_CHARS = 600;
-
-function stopSpeaking() {
-  speechEpoch += 1;
-  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* engine already gone */ }
-}
-
-/** Speak `text` aloud, then settle to idle (or back to "listening for Zeno" if
- * wake is still on). Caller has already confirmed a synthesis engine exists. */
-function speak(text) {
-  const synth = window.speechSynthesis;
-  const Utter = window.SpeechSynthesisUtterance;
-  const epoch = ++speechEpoch;
-  const clipped = text.length > MAX_SPOKEN_CHARS ? `${text.slice(0, MAX_SPOKEN_CHARS).replace(/\s+\S*$/, '')}…` : text;
-  const utter = new Utter(clipped);
-  let voice = null;
-  try { voice = chooseSystemVoice(synth.getVoices ? synth.getVoices() : [], '', navigator.language || 'en-US'); } catch { voice = null; }
-  if (voice) utter.voice = voice;
-  utter.lang = (voice && voice.lang) || navigator.language || 'en-US';
-  setState('speaking', text);
-  const finish = () => { if (epoch !== speechEpoch) return; settleToRest(); };
-  utter.onend = finish;
-  utter.onerror = finish;
-  try { synth.cancel(); synth.speak(utter); } catch { finish(); }
-}
-
-/**
- * Report the outcome of a command. Spoken aloud when a synthesis engine is
- * available (the primary channel a "spoken reply" is meant to use); when it is
- * not, the exact same words are still shown — held in the pill's `stopped`
- * state and its tooltip — rather than silently dropped just because nothing
- * can say them aloud.
- */
-function reply(text) {
-  const clean = String(text || '').trim();
-  if (!clean) { settleToRest(); return; }
-  const synth = window.speechSynthesis;
-  const Utter = window.SpeechSynthesisUtterance;
-  if (synth && typeof synth.speak === 'function' && typeof Utter === 'function') {
-    speak(clean);
-    return;
-  }
-  setState('stopped', clean);
-  settleAfter(3200);
-}
-
-/* ---------------------------------------------------------------- *
- * Navigation — the artifact's real controls, not an invented one     *
- * ------------------------------------------------------------------ */
-
-function clickProduct(name) {
-  const btn = $(`.seg[aria-label="Product"] [data-product="${name}"]`);
-  if (btn && typeof btn.click === 'function') { btn.click(); return true; }
-  return false;
-}
-function gotoCommandScreen(screenName) {
-  clickProduct('command');
-  const btn = $(`.rail .nav-i[data-screen="${screenName}"]`);
-  if (btn && typeof btn.click === 'function') btn.click();
-}
-function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
 
 /* ---------------------------------------------------------------- *
  * Intent execution — the SAME network calls the old voice.js made,    *
@@ -446,471 +275,6 @@ async function runOutcome(result) {
 }
 
 /* ---------------------------------------------------------------- *
- * Push-to-talk — the three (four) buttons the artifact already ships *
- * ------------------------------------------------------------------ */
-
-let pttRecognition = null;
-let pttHeld = false;
-let pttListening = false;
-let pttFinalText = '';
-let pttInterim = '';
-let pttRestarts = 0;
-let pttErrorMsg = '';
-let pttErrorIsPermission = false;
-let pttSource = '';
-
-function ensurePttRecognition() {
-  if (pttRecognition || !SpeechRecognition) return pttRecognition;
-  const rec = new SpeechRecognition();
-  rec.lang = 'en-US';
-  rec.continuous = false;
-  rec.interimResults = true;
-  rec.maxAlternatives = 1;
-  if (localSpeech) {
-    // Reused verbatim from the app's own vocabulary hint — a held button is an
-    // explicit command capture, so a short bias toward Zeno's own phrases is
-    // safe here in a way it is not for an always-open wake recognizer.
-    rec.initialPrompt = 'Zeno, what is waiting? Show pending items. Show receipts. Verify the ledger. '
-      + 'Open Command. Open Forge. Open Counsel. Add a task. Create a component. Build a feature.';
-  }
-  rec.onresult = (event) => {
-    let final = '';
-    let interim = '';
-    for (let i = 0; i < event.results.length; i += 1) {
-      const res = event.results[i];
-      if (!res || !res[0]) continue;
-      if (res.isFinal) final += (final ? ' ' : '') + res[0].transcript;
-      else interim += res[0].transcript;
-    }
-    pttFinalText = final;
-    if (interim) pttInterim = interim.trim();
-  };
-  rec.onstart = () => {
-    pttListening = true;
-    claimCapture();
-    setState('listening', pttSource);
-  };
-  rec.onerror = (event) => {
-    const err = event && event.error;
-    if (err === 'not-allowed' || err === 'service-not-allowed') {
-      pttErrorMsg = 'Microphone permission was refused.';
-      pttErrorIsPermission = true;
-      pttHeld = false;
-      try { rec.abort(); } catch { /* already stopped */ }
-    } else if (err === 'audio-capture') {
-      pttErrorMsg = 'No working microphone was found.';
-      pttErrorIsPermission = false;
-    } else if (err !== 'no-speech' && err !== 'aborted') {
-      pttErrorMsg = err === 'network' ? 'The speech service is unavailable.' : `Recognition error: ${err}.`;
-      pttErrorIsPermission = false;
-    }
-  };
-  rec.onend = () => {
-    const text = pttFinalText.trim();
-    // The button, not the engine, is the authority: continuous=false ends the
-    // session the instant it settles a result, which can be before the finger
-    // lifts. If it is still down and nothing came back yet, reopen quietly.
-    if (pttHeld && text === '' && pttRestarts < 2 && !pttErrorMsg) {
-      pttRestarts += 1;
-      try { rec.start(); return; } catch { /* fall through to a clean reset */ }
-    }
-    pttListening = false;
-    releaseCapture();
-    if (pttErrorMsg) {
-      const msg = pttErrorMsg;
-      const isPermission = pttErrorIsPermission;
-      pttErrorMsg = '';
-      pttErrorIsPermission = false;
-      setState(isPermission ? 'permission_needed' : 'error', msg);
-      settleAfter(2500);
-      return;
-    }
-    if (text) {
-      void dispatchTranscript(text);
-    } else if (pttInterim) {
-      setState('stopped', 'Did not catch a final transcript — try again.');
-      settleAfter(1500);
-    } else {
-      setState('stopped', 'Released with nothing heard.');
-      settleAfter(1200);
-    }
-  };
-  pttRecognition = rec;
-  return rec;
-}
-
-async function dispatchTranscript(text) {
-  setState('thinking');
-  // The SAME pure pipeline the package's own tests run against.
-  await runOutcome(interpret(text));
-}
-
-function startPtt(source) {
-  stopSpeaking(); // pressing the mic is always allowed to interrupt Zeno talking
-  if (!SpeechRecognition) { setState('error', engineUnavailableReason()); return; }
-  if (wakeOn) return; // one recogniser at a time; the button is disabled too
-  const owner = externalCaptureOwner();
-  if (owner) { setState('error', `${captureOwnerLabel(owner)} is using the microphone.`); settleAfter(2500); return; }
-  const rec = ensurePttRecognition();
-  if (!rec) { setState('error', engineUnavailableReason()); return; }
-  pttHeld = true;
-  pttRestarts = 0;
-  pttErrorMsg = '';
-  pttErrorIsPermission = false;
-  pttFinalText = '';
-  pttInterim = '';
-  pttSource = source;
-  claimCapture();
-  setState('listening', source);
-  (async () => {
-    try {
-      await waitForSpeechIdle();
-      if (!pttHeld) return;
-      rec.start();
-    } catch {
-      pttHeld = false;
-      releaseCapture();
-      setState('error', 'The microphone did not become available. Stop other listening and retry.');
-      settleAfter(2500);
-    }
-  })();
-}
-function stopPtt() {
-  pttHeld = false;
-  if (!pttListening) return;
-  setState('transcribing');
-  try { pttRecognition.stop(); } catch { /* no-op */ }
-}
-/** Close the mic NOW, discarding anything in flight — for a takeover, a page
- * unload, or a wake auto-disarm. `abort()`, not `stop()`: nothing half-said is
- * worth keeping from a microphone someone else just claimed. */
-function abortPttNow() {
-  pttHeld = false;
-  /* An abort must DISCARD whatever was captured — the whole point of aborting
-     (a blur, a takeover by another surface, pagehide, the Type button) is that
-     the owner does NOT want this phrase to act. `abort()` below fires the
-     recogniser's own onend, which reads pttFinalText and dispatches it, so a
-     command captured a moment before the abort would still run. Clearing the
-     pending transcript first is what makes the abort actually mean "cancel".
-     This is the safety guarantee: voice never acts on what you stopped. */
-  pttFinalText = '';
-  pttInterim = '';
-  if (!pttRecognition || !pttListening) return waitForSpeechIdle();
-  return new Promise((resolve) => {
-    const prevOnEnd = pttRecognition.onend;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      pttRecognition.onend = prevOnEnd;
-      pttListening = false;
-      releaseCapture();
-      resolve();
-    };
-    pttRecognition.onend = (e) => { finish(); try { if (prevOnEnd) prevOnEnd.call(pttRecognition, e); } catch { /* ignore */ } };
-    setTimeout(finish, 2000);
-    try { pttRecognition.abort(); } catch { finish(); }
-  }).then(() => waitForSpeechIdle());
-}
-
-/** Wire one mic button for real hold-to-talk. The pointer is captured on the
- * way down so a hand drifting off the button mid-word cannot end the hold —
- * the same reason the original .zv-ptt control did this. */
-function wireMicButton(btn) {
-  if (!btn) return;
-  const label = btn.id === 'home-mic' ? 'mic: Home' : btn.id === 's-mic' ? 'mic: Forge' : btn.closest('[data-screen="chats"]') ? 'mic: Chats' : 'mic: Forge';
-  btn.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    if (btn.disabled) return;
-    try { btn.setPointerCapture(e.pointerId); } catch { /* capture can be refused */ }
-    startPtt(label);
-  });
-  const release = (e) => {
-    try {
-      if (e && e.pointerId !== undefined && btn.hasPointerCapture && btn.hasPointerCapture(e.pointerId)) {
-        btn.releasePointerCapture(e.pointerId);
-      }
-    } catch { /* no-op */ }
-    stopPtt();
-  };
-  btn.addEventListener('pointerup', release);
-  btn.addEventListener('pointercancel', release);
-  btn.addEventListener('keydown', (e) => {
-    if (e.key !== ' ' && e.key !== 'Enter') return;
-    e.preventDefault();
-    if (e.repeat || pttHeld || btn.disabled) return;
-    startPtt(label);
-  });
-  btn.addEventListener('keyup', (e) => {
-    if (e.key !== ' ' && e.key !== 'Enter') return;
-    e.preventDefault();
-    stopPtt();
-  });
-  btn.addEventListener('blur', () => { if (pttHeld) void abortPttNow(); });
-}
-
-/* ---------------------------------------------------------------- *
- * Wake mode — opt-in, disclosed, and never a second capture path     *
- * ------------------------------------------------------------------ */
-
-let wakeListenerObj = null;
-let wakeRecognition = null;
-let wakeOn = false;
-let wakeEngineUp = false;
-let wakeRestartTimer = null;
-let wakeTickTimer = null;
-let wakeFailures = 0;
-
-function wakeConsentText() {
-  const seconds = Math.round(RETENTION_MS / 1000);
-  return 'Turn on “Listen for Zeno”?\n\n'
-    + 'The microphone stays open until you switch this off — it hears the whole room, not only when '
-    + `you are speaking to Zeno. ${engineDescription()}\n\n`
-    + `Only a recognized “Zeno” wake phrase opens a command window. Until then, Zeno holds at most the `
-    + `last ${seconds} seconds of untriggered speech in memory, and drops it the moment you switch off or say “Zeno”.\n\n`
-    + 'Speaking can navigate, read state, and add a Work item directly. File changes still wait for your '
-    + 'approval on screen, and voice can never approve anything.\n\nContinue?';
-}
-
-function applyWakeEvent(ev) {
-  switch (ev.kind) {
-    case 'retained':
-      break; // untriggered room chatter — never shown as "heard"
-    case 'woke':
-      clickProduct('command');
-      setState('listening', `heard “Zeno” — say your command (${Math.round(WAKE_WINDOW_MS / 1000)}s)`);
-      break;
-    case 'capturing':
-      setState('listening', ev.partial ? `hearing “${ev.partial}”` : 'heard “Zeno” — say your command');
-      break;
-    case 'command':
-      // Reached even when "Zeno, <command>" arrives as one settled utterance
-      // (no separate 'woke' event in that case) — the switch to Command must
-      // happen on EVERY wake-triggered command, not only a two-step one.
-      clickProduct('command');
-      setState('thinking');
-      void runOutcome(ev.outcome);
-      break;
-    case 'expired':
-      setState('listening', 'no command followed — listening for “Zeno”');
-      break;
-    default:
-      break; // 'none' — off, or a blank transcript
-  }
-}
-
-function ensureWakeRecognition() {
-  if (wakeRecognition || !SpeechRecognition) return wakeRecognition;
-  const rec = new SpeechRecognition();
-  rec.lang = 'en-US';
-  rec.continuous = true; // the whole difference from push-to-talk
-  rec.interimResults = true;
-  rec.maxAlternatives = 1;
-  rec.onstart = () => {
-    if (!wakeOn) { try { rec.abort(); } catch { /* no-op */ } wakeEngineUp = false; return; }
-    wakeEngineUp = true;
-    wakeFailures = 0;
-    claimCapture();
-    paintState();
-  };
-  rec.onend = () => {
-    wakeEngineUp = false;
-    if (!wakeOn) { releaseCapture(); return; }
-    // Browsers end a continuous session periodically; "on" only stays honest
-    // if it restarts. whisper.js's local engine does not end on its own, so
-    // this branch is effectively unused there — but back off the same way if
-    // it ever does, rather than spin the microphone.
-    wakeFailures += 1;
-    if (wakeFailures > 8) { void disarmWake('The recogniser kept stopping, so wake mode switched itself off.'); return; }
-    if (wakeRestartTimer) return;
-    wakeRestartTimer = setTimeout(() => {
-      wakeRestartTimer = null;
-      if (wakeOn && !wakeEngineUp) startWakeEngine();
-    }, wakeFailures > 3 ? 1500 : 250);
-  };
-  rec.onerror = (event) => {
-    const err = event && event.error;
-    if (err === 'not-allowed' || err === 'service-not-allowed') {
-      void disarmWake('Microphone permission was refused, so wake mode is off.', 'permission_needed');
-      return;
-    }
-    if (err === 'no-speech' || err === 'aborted') return; // ordinary in a continuous session
-    if (err === 'audio-capture') {
-      void disarmWake('No working microphone was found. Wake mode is off.');
-      return;
-    }
-    void disarmWake(err === 'network'
-      ? 'The speech service is unavailable. Wake mode is off and the microphone is closed.'
-      : `Recognition error: ${err}. Wake mode is off and the microphone is closed.`);
-  };
-  rec.onresult = (event) => {
-    if (!wakeOn) return;
-    const now = Date.now();
-    for (let i = event.resultIndex || 0; i < event.results.length; i += 1) {
-      const res = event.results[i];
-      if (!res || !res[0]) continue;
-      applyWakeEvent(wakeListenerObj.hear(res[0].transcript, Boolean(res.isFinal), now));
-    }
-    if (localSpeech && typeof rec.clearResults === 'function') rec.clearResults();
-  };
-  wakeRecognition = rec;
-  return rec;
-}
-
-function startWakeEngine() {
-  const rec = ensureWakeRecognition();
-  if (!rec || !wakeOn || wakeEngineUp) return;
-  try { rec.start(); } catch { /* already starting; onstart/onend settle it */ }
-}
-
-/** True only while at least one place the owner can actually see says a
- * microphone might be open — the Home pill, or a mic button that is visible
- * on whichever screen is showing right now. Wake mode may never run silently
- * behind a screen with neither. */
-function wakeIndicatorVisible() {
-  if (pillEl && pillEl.offsetParent !== null) return true;
-  return micButtons.some((b) => b.offsetParent !== null);
-}
-
-async function turnWakeOn() {
-  if (!SpeechRecognition) return;
-  const owner = externalCaptureOwner();
-  if (owner) { setState('error', `${captureOwnerLabel(owner)} is using the microphone.`); settleAfter(2500); return; }
-  if (!window.confirm(wakeConsentText())) return; // Cancel = nothing changes, ever
-  wakeOn = true;
-  wakeFailures = 0;
-  wakeListenerObj = wakeListenerObj || new WakeListener();
-  wakeListenerObj.arm();
-  writeWakePref(true);
-  // The switch the owner just flipped is the ONLY persistent place that says
-  // the microphone is open — the pill lives on Home and the mic buttons are
-  // per-screen. disarmWake has always synced it down; nothing synced it up, so
-  // an armed wake word read "off" in Settings for the rest of the session, and
-  // flipping it again looked like turning it ON while it actually turned it off.
-  syncSettingsToggle(true);
-  paintState(); // disables the hold buttons immediately — one mic at a time
-  try {
-    await abortPttNow();
-  } catch { /* best-effort */ }
-  if (!wakeOn) return;
-  setState('listening', 'listening for “Zeno”');
-  if (!wakeTickTimer) wakeTickTimer = setInterval(wakeTick, 400);
-  startWakeEngine();
-}
-
-/**
- * Stop listening.
- *
- * `opts.keepPreference` separates the two things this function was doing at
- * once: tearing down a live capture, and revoking the owner's stored consent.
- * Every caller below except one is a real "off" — the owner flipped the switch,
- * permission was refused, no microphone was found, the recogniser kept dying,
- * the owner navigated away from the only screens that show it is listening —
- * and those must clear the preference. The `pagehide` teardown is not an "off":
- * the window is simply going away, and clearing the consent there meant a wake
- * word could never survive a reload at all. bind()'s own restore branch (and
- * its comment, "re-asking every reload would train them to click through it
- * unread") was unreachable, and the Settings switch reported OFF after every
- * reload no matter what the owner had chosen.
- */
-function disarmWake(reason, stateOverride, opts) {
-  const wasOn = wakeOn;
-  wakeOn = false;
-  if (wakeListenerObj) wakeListenerObj.disarm(); // drops the retained transcript
-  if (!(opts && opts.keepPreference)) writeWakePref(false);
-  if (wakeRestartTimer) { clearTimeout(wakeRestartTimer); wakeRestartTimer = null; }
-  if (wakeTickTimer) { clearInterval(wakeTickTimer); wakeTickTimer = null; }
-  syncSettingsToggle(false);
-  const settle = () => {
-    if (reason) { setState(stateOverride || 'stopped', reason); settleAfter(2500); } else settleToRest();
-  };
-  if (!wasOn || !wakeRecognition || !wakeEngineUp) {
-    wakeEngineUp = false;
-    releaseCapture();
-    settle();
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    const prevOnEnd = wakeRecognition.onend;
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      wakeRecognition.onend = prevOnEnd;
-      wakeEngineUp = false;
-      releaseCapture();
-      settle();
-      resolve();
-    };
-    wakeRecognition.onend = (e) => { finish(); try { if (prevOnEnd) prevOnEnd.call(wakeRecognition, e); } catch { /* ignore */ } };
-    setTimeout(finish, 2000);
-    try { wakeRecognition.abort(); } catch { finish(); }
-  }).then(() => waitForSpeechIdle());
-}
-
-/** The clock: closes an expired command window and — the safety net no
- * persistent bar can stand in for in this design — turns wake mode off the
- * instant nothing on screen could show the owner it is still listening. */
-function wakeTick() {
-  if (!wakeOn) return;
-  if (!wakeIndicatorVisible()) {
-    void disarmWake('Wake mode turned off — you left the only screens that show it is listening.');
-    return;
-  }
-  if (wakeListenerObj) applyWakeEvent(wakeListenerObj.tick(Date.now()));
-}
-
-/* ---------------------------------------------------------------- *
- * Settings → Voice → "Wake word" — the opt-in surface the design has *
- * bind/settings.js already reads/writes `zeno.voice.wake` and turns   *
- * the switch off for real; it deliberately leaves turning it ON to    *
- * "the mic control" (its own comment). This finishes that switch      *
- * without editing that file — by re-detaching the SAME node it left   *
- * behind, once bind.js says every binder (including settings.js) has  *
- * already run. If that row is missing, this only quietly does nothing:*
- * the mic buttons' own disabled/enabled state is never gated on it.   *
- * ------------------------------------------------------------------ */
-
-let wakeToggleEl = null;
-
-function findWakeToggle() {
-  const modal = $('#settings-modal');
-  const pane = modal && $('.set-pane[data-setpane="voice"]', modal);
-  if (!pane) return null;
-  const row = $$('.setrow', pane).find((r) => {
-    const lab = $('.lab', r);
-    return lab && lab.textContent.trim() === 'Wake word';
-  });
-  return row ? $('.toggle[role="switch"]', row) : null;
-}
-function syncSettingsToggle(on) {
-  if (wakeToggleEl) wakeToggleEl.setAttribute('aria-checked', on ? 'true' : 'false');
-}
-function wireWakeSettingsToggle() {
-  const original = findWakeToggle();
-  if (!original) return; // Settings not present in this build — degrade quietly
-  const clone = original.cloneNode(true); // drop bind/settings.js's OFF-only handler
-  original.replaceWith(clone);
-  wakeToggleEl = clone;
-  clone.setAttribute('aria-checked', wakeOn ? 'true' : 'false');
-  const flip = () => {
-    if (!SpeechRecognition) return;
-    if (wakeOn) void disarmWake('Wake word turned off.');
-    else void turnWakeOn();
-  };
-  clone.addEventListener('click', flip);
-  clone.addEventListener('keydown', (e) => {
-    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
-  });
-  if (!SpeechRecognition) {
-    clone.setAttribute('aria-disabled', 'true');
-    clone.style.opacity = '0.5';
-    clone.style.cursor = 'not-allowed';
-    clone.title = engineUnavailableReason();
-  }
-}
-
-/* ---------------------------------------------------------------- *
  * Cross-surface handoff — Command only ever YIELDS                   *
  * ------------------------------------------------------------------ */
 
@@ -934,8 +298,16 @@ function onExternalRelease(event) {
 export async function bind() {
   const failed = [];
   try {
-    pillEl = $('#voice-state');
-    if (pillEl) { pillEl.setAttribute('role', 'status'); pillEl.setAttribute('aria-live', 'polite'); }
+    // Register this file's pieces onto the shared state object so
+    // voice/ptt.js and voice/wake.js can reach them — before anything (a
+    // click, a wake word) could possibly call one. See voice/state.js.
+    vstate.externalCaptureOwner = externalCaptureOwner;
+    vstate.claimCapture = claimCapture;
+    vstate.releaseCapture = releaseCapture;
+    vstate.runOutcome = runOutcome;
+
+    vstate.pillEl = $('#voice-state');
+    if (vstate.pillEl) { vstate.pillEl.setAttribute('role', 'status'); vstate.pillEl.setAttribute('aria-live', 'polite'); }
 
     const homeMic = $('#home-mic');
     const sMic = $('#s-mic');
@@ -956,16 +328,16 @@ export async function bind() {
     // Claim each one and strip whatever ui.js's mock (or anything else) already
     // attached, via the same clone+replaceWith trick every other binder in this
     // codebase uses to detach a listener without touching the file that added it.
-    micButtons = found.map((b) => {
+    vstate.micButtons = found.map((b) => {
       b.dataset.wired = '1';
       const clone = b.cloneNode(true);
       clone.dataset.wired = '1';
       b.replaceWith(clone);
       return clone;
     });
-    for (const b of micButtons) wireMicButton(b);
+    for (const b of vstate.micButtons) wireMicButton(b);
 
-    engineNote = engineUnavailableReason();
+    vstate.engineNote = engineUnavailableReason();
     if (!SpeechRecognition) failed.push('no speech recognition engine is available (neither local Whisper nor a Web Speech API)');
 
     paintState(); // draws idle/disabled honestly before any async work below
@@ -979,13 +351,9 @@ export async function bind() {
     // screen can actually show it. No consent dialog on restore: the owner
     // already gave it, and re-asking every reload would train them to click
     // through it unread.
-    if (SpeechRecognition && readWakePref() && !externalCaptureOwner()) {
-      wakeOn = true;
-      wakeListenerObj = wakeListenerObj || new WakeListener();
-      wakeListenerObj.arm();
-      setState('listening', 'listening for “Zeno”');
-      if (!wakeTickTimer) wakeTickTimer = setInterval(wakeTick, 400);
-      startWakeEngine();
+    if (SpeechRecognition && readWakePref()) {
+      const owner = externalCaptureOwner();
+      if (!owner) restoreWakeMode();
     }
 
     // The Settings "Wake word" switch is wired defensively, and only after
