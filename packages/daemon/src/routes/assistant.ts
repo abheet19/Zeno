@@ -58,6 +58,7 @@ import { ensureOllama, installedLocalModels } from './ollama-lifecycle.js';
 import { withoutReasoning } from './forge-local-model.js';
 import { proposeFileWrite } from './approvals.js';
 import { resolveDelegation, type Delegated } from './delegate.js';
+import { probeAgents } from './delegate-probe.js';
 import { searchNeosapienMemories } from './neosapien.js';
 
 /** The model Ask Zeno answers with when the owner has not picked one. */
@@ -166,6 +167,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   }
 
   const work = await ctx.opts.work.list().catch(() => null);
+  const availability = await probeAgents(ctx);
   let repo: { branch: string; head: string; changed: string[] } | null = null;
   try {
     const st = ctx.gitRunner.run(['rev-parse', '--abbrev-ref', 'HEAD'], ctx.opts.sandbox);
@@ -192,6 +194,29 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     repo,
     memory: recalledMemory(ctx, question),
     devices: [{ name: hostname(), paired: true }],
+    agents: [
+      {
+        id: 'local',
+        available: availability.localModels.length > 0,
+        detail: availability.localModels.length > 0
+          ? `installed local models: ${availability.localModels.join(', ')}`
+          : 'Ollama has no installed local model available to Forge.',
+      },
+      {
+        id: 'claude-code',
+        available: availability.claudeOnPath,
+        detail: availability.claudeOnPath
+          ? 'available through the local Claude Code CLI; starting it requires an explicit hosted confirmation.'
+          : 'Claude Code CLI is not runnable from this machine.',
+      },
+      {
+        id: 'codex',
+        available: availability.codexOnPath === true,
+        detail: availability.codexOnPath === true
+          ? 'available through the local Codex CLI; starting it requires an explicit hosted confirmation.'
+          : 'Codex CLI is not runnable from this machine.',
+      },
+    ],
     external: neosapien.ok
       ? neosapien.hits.map((h) => ({ id: h.id, title: h.title, body: h.body, source: 'NeoSapien' }))
       : [],

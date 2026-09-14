@@ -102,6 +102,13 @@ export interface DeviceFact {
   readonly paired: boolean;
 }
 
+/** A Forge provider that Command may describe, never invoke on its own. */
+export interface AgentFact {
+  readonly id: string;
+  readonly available: boolean;
+  readonly detail: string;
+}
+
 /**
  * The sections of a snapshot, used as the key for a truncation notice.
  *
@@ -110,7 +117,7 @@ export interface DeviceFact {
  * timestamp the prompt then states as fact. Every clip in this module has a key
  * to be announced under, with no exceptions — that is what "never silent" costs.
  */
-export type SnapshotSection = 'pending' | 'receipts' | 'work' | 'repo' | 'memory' | 'devices' | 'external' | 'at';
+export type SnapshotSection = 'pending' | 'receipts' | 'work' | 'repo' | 'memory' | 'devices' | 'agents' | 'external' | 'at';
 
 /** One section that did not fit whole. Rendered into the prompt verbatim. */
 export interface Truncation {
@@ -133,6 +140,8 @@ export interface Snapshot {
   readonly repo: RepoFact | null;
   readonly memory: readonly MemoryFact[];
   readonly devices: readonly DeviceFact[];
+  /** Forge providers and their current local availability. */
+  readonly agents: readonly AgentFact[];
   /** Records from a connected external account (e.g. NeoSapien). Empty when
    *  none was consulted, whether because none is connected or none was asked. */
   readonly external: readonly ExternalFact[];
@@ -157,6 +166,7 @@ export interface SnapshotParts {
   readonly repo?: RepoFact | null;
   readonly memory?: readonly MemoryFact[];
   readonly devices?: readonly DeviceFact[];
+  readonly agents?: readonly AgentFact[];
   readonly external?: readonly ExternalFact[];
 }
 
@@ -170,6 +180,8 @@ export const DEFAULT_BUDGET = {
   work: 20,
   memory: 12,
   devices: 8,
+  /** Forge providers shown to Command. */
+  agents: 6,
   /** Records recalled from a connected external account (e.g. NeoSapien). */
   external: 6,
   /** Changed files listed for the repo. */
@@ -192,6 +204,7 @@ function resolveBudget(b: Budget): FullBudget {
     work: b.work ?? DEFAULT_BUDGET.work,
     memory: b.memory ?? DEFAULT_BUDGET.memory,
     devices: b.devices ?? DEFAULT_BUDGET.devices,
+    agents: b.agents ?? DEFAULT_BUDGET.agents,
     external: b.external ?? DEFAULT_BUDGET.external,
     changed: b.changed ?? DEFAULT_BUDGET.changed,
     line: b.line ?? DEFAULT_BUDGET.line,
@@ -329,6 +342,14 @@ export function buildSnapshot(parts: SnapshotParts, budget: Budget = {}): Snapsh
     notices,
   );
 
+  const agents = clipList(
+    parts.agents ?? [],
+    b.agents,
+    'agents',
+    (a, t) => ({ id: clip(a.id, b.line, t), available: a.available === true, detail: clip(a.detail, b.line, t) }),
+    notices,
+  );
+
   const external = clipList(
     parts.external ?? [],
     b.external,
@@ -358,6 +379,7 @@ export function buildSnapshot(parts: SnapshotParts, budget: Budget = {}): Snapsh
     repo: clipRepo(parts.repo ?? null, b, notices),
     memory,
     devices,
+    agents,
     external,
     truncated: notices,
   };

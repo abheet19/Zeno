@@ -39,6 +39,7 @@ export {
   emptySnapshot,
   DEFAULT_BUDGET,
   type Budget,
+  type AgentFact,
   type DeviceFact,
   type ExternalFact,
   type MemoryFact,
