@@ -57,8 +57,10 @@ const rules = createRuleAuthor('lrow');
 const skillsAuthor = createSkillAuthor('lrow');
 // The Yours/Discover choice per section survives a live re-bind too.
 const view = { rules: 'yours', skills: 'yours' };
+let bindGeneration = 0;
 
 export async function bindCustomize() {
+  const generation = ++bindGeneration;
   const screen = screenEl('customize');
   if (!screen) return;
   const listEl = screen.querySelector('[data-mount="customize-list"]');
@@ -170,9 +172,21 @@ export async function bindCustomize() {
   rules.setRerender(render);
   skillsAuthor.setRerender(render);
   render();
-  const [skills, extensions] = await Promise.all([
-    getJSON('/skills'), getJSON('/forge/extensions'), rules.load(), skillsAuthor.load(),
-  ]);
-  skillsRes = skills; extensionsRes = extensions;
+  // Installed rules/skills are the state the owner just changed. Paint that
+  // read as soon as it answers instead of holding it behind the much broader
+  // extension catalog scan. A generation guard prevents an older overlapping
+  // bind from painting after a newer one.
+  const skillsRead = getJSON('/skills');
+  const extensionsRead = getJSON('/forge/extensions');
+  const authorReads = Promise.all([rules.load(), skillsAuthor.load()]);
+
+  const skills = await skillsRead;
+  if (generation !== bindGeneration) return;
+  skillsRes = skills;
+  render();
+
+  const [extensions] = await Promise.all([extensionsRead, authorReads]);
+  if (generation !== bindGeneration) return;
+  extensionsRes = extensions;
   render();
 }

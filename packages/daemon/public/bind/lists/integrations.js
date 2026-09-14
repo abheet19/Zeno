@@ -148,6 +148,7 @@ const view = { connectors: 'yours' };
 let last = null;         // { work, agents, connectors } from the latest completed read
 let container = null;
 let hasOwner = false;
+let bindGeneration = 0;
 
 function render() {
   if (!container || !last) return;
@@ -224,6 +225,7 @@ function render() {
 integrationsMcp.setRerender(render);
 
 export async function bindIntegrations() {
+  const generation = ++bindGeneration;
   const screen = screenEl('integrations');
   if (!screen) return;
   container = screen.querySelector('.live-cards');
@@ -246,6 +248,7 @@ export async function bindIntegrations() {
   const [work, agents, connectors] = await Promise.all([
     getJSON('/work'), getJSON('/forge/agents'), getJSON('/forge/connectors'), integrationsMcp.load(),
   ]);
+  if (generation !== bindGeneration) return;
   last = { work, agents, connectors };
   render();
 }

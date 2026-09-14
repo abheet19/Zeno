@@ -34,6 +34,13 @@ export function createMcpManager(shape) {
   let scrollToForm = false;
   let view = 'yours'; // 'yours' | 'discover' — see viewToggleEl in shared.js
   let rerender = () => {};
+  let loadGeneration = 0;
+
+  async function refreshServers() {
+    const generation = ++loadGeneration;
+    const result = await getJSON('/forge/mcp/servers');
+    if (generation === loadGeneration) mcpRes = result;
+  }
 
   function outer(title, meta, right) {
     return shape === 'lcard' ? lcardOuter(title, meta, right) : lrowEl('mcp', title, meta, right);
@@ -52,7 +59,7 @@ export function createMcpManager(shape) {
       action.addEventListener('click', async () => {
         action.disabled = true;
         const r = await deleteJSON('/forge/mcp/servers/' + encodeURIComponent(s.id));
-        if (r.ok) { toast('MCP server removed.'); mcpRes = await getJSON('/forge/mcp/servers'); rerender(); }
+        if (r.ok) { toast('MCP server removed.'); await refreshServers(); rerender(); }
         else { action.disabled = false; toast('Could not remove: ' + r.error); }
       });
     }
@@ -86,7 +93,7 @@ export function createMcpManager(shape) {
     if (!r.ok) { formStatus = 'Not added: ' + r.error; rerender(); return; }
     formStatus = ''; formOpen = false; draft = { ...EMPTY_DRAFT };
     toast('Recorded "' + payload.name + '" — env var NAME(s) only, no value stored.');
-    mcpRes = await getJSON('/forge/mcp/servers');
+    await refreshServers();
     rerender();
   }
 
@@ -151,7 +158,7 @@ export function createMcpManager(shape) {
 
   return {
     setRerender(fn) { rerender = fn; },
-    async load() { mcpRes = await getJSON('/forge/mcp/servers'); },
+    async load() { await refreshServers(); },
     /** The screen-level "+ Add MCP server" button lands here. */
     openForm() { formOpen = true; formStatus = ''; view = 'yours'; scrollToForm = true; rerender(); },
     nodes(hasOwner) {

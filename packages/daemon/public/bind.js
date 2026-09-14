@@ -363,7 +363,13 @@ function sweepMockRemnants() {
 
 async function boot() {
   bridgeSurfaceAttr();
-  await Promise.all(BINDERS.map(runBinder));
+  // The live binder re-runs other binders as stream events arrive. Starting it
+  // in the same Promise.all as their first read allowed that refresh to overlap
+  // the initial render; under load an older /skills or MCP response could then
+  // paint over newer state. Mount the snapshot binders first, then subscribe.
+  const live = './bind/live.js';
+  await Promise.all(BINDERS.filter((path) => path !== live).map(runBinder));
+  await runBinder(live);
   try { await bindRailBadges(); } catch (err) { failed.push({ path: 'rail-badges', error: String(err && err.message) }); }
 
   /* Nudge the reused modules once their binders have mounted.

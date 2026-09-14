@@ -17,6 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { randomInt } from 'node:crypto';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -29,7 +30,12 @@ const DAEMON_ENTRY = resolve(REPO, 'packages/daemon/dist/src/main.js');
 /* Ports well clear of anything a developer or the desktop app would pick.
    ZENO_E2E_PORT_BASE moves the whole range so two runs (say, two people working
    on different flows at once) cannot collide on a listening socket. */
-const PORT_BASE = Number(process.env.ZENO_E2E_PORT_BASE) || 7600;
+// A fixed default made two independently launched suites fight for the same
+// sockets (and whichever daemon lost looked like a product startup failure).
+// Keep the environment override for deliberate, reproducible allocation, but
+// give each harness process its own block by default. 200 consecutive ports
+// are reserved conceptually because a full suite uses at most that many.
+const PORT_BASE = Number(process.env.ZENO_E2E_PORT_BASE) || randomInt(10_000, 60_000);
 
 export class Daemon {
   constructor({ port, dir, proc, url, token }) {
@@ -90,15 +96,28 @@ export async function startDaemon(flowId, index = 0) {
 
   let out = '';
   const url = await new Promise((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error(`daemon did not announce a window in 40s:\n${out}`)), 40_000);
+    let settled = false;
+    const fail = (message) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(message));
+    };
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch { /* already gone */ }
+      fail(`daemon did not announce a window in 40s:\n${out}`);
+    }, 40_000);
     const onData = (chunk) => {
       out += String(chunk);
       const m = out.match(/http:\/\/127\.0\.0\.1:\d+\/\?k=[A-Za-z0-9_-]+/);
-      if (m) { clearTimeout(timer); resolvePromise(m[0]); }
+      if (m && !settled) { settled = true; clearTimeout(timer); resolvePromise(m[0]); }
     };
     proc.stdout.on('data', onData);
     proc.stderr.on('data', onData);
-    proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`daemon exited ${code} before listening:\n${out}`)); });
+    // `exit` may precede the final stdout/stderr data. `close` is emitted only
+    // after those pipes close, so startup evidence includes the actual reason.
+    proc.on('close', (code) => fail(`daemon exited ${code} before listening:\n${out}`));
+    proc.on('error', (err) => fail(`daemon could not be spawned: ${err.message}\n${out}`));
   });
 
   const token = new URL(url).searchParams.get('k') ?? '';

@@ -129,7 +129,10 @@ export async function run({ daemon, page, ok }) {
   ok('with exactly the text proposed', existsSync(rulePath) && readFileSync(rulePath, 'utf8').trim() === RULE_TEXT);
   const skills1 = await daemon.api('/skills');
   ok('the daemon now reads it as a rule', (skills1.body.rules || []).some((r) => r.path === 'CLAUDE.md'));
-  await page.waitForTimeout(1800); // the live re-bind after the receipt event
+  // The receipt triggers a live re-read. Wait for the state it promises rather
+  // than assuming extension/runtime discovery finishes within a fixed delay.
+  await page.waitForFunction((scope) => [...document.querySelectorAll(`${scope} .lrow .tt`)]
+    .some((t) => t.textContent.trim() === 'CLAUDE.md'), CUST, { timeout: 10_000 }).catch(() => {});
   const yoursRule = await clickRowButton(page, CUST, '.lrow', 'CLAUDE.md', 'Edit');
   ok('the rule shows under Yours with a live Edit', yoursRule.found && yoursRule.button && !yoursRule.disabled, JSON.stringify(yoursRule));
   await page.waitForTimeout(300);
@@ -161,7 +164,8 @@ export async function run({ daemon, page, ok }) {
   const skills2 = await daemon.api('/skills');
   const installed = (skills2.body.skills || []).find((s) => s.id === 'e2e-review');
   ok('the daemon lists it as an installed, screened skill', installed && installed.verdict === 'clean', JSON.stringify(installed));
-  await page.waitForTimeout(1800);
+  await page.waitForFunction((scope) => [...document.querySelectorAll(`${scope} .lrow .tt`)]
+    .some((t) => t.textContent.trim() === 'E2E review'), CUST, { timeout: 10_000 }).catch(() => {});
   const skillRow = await page.evaluate((scope) => {
     const row = [...document.querySelectorAll(`${scope} .lrow`)].find((r) => (r.querySelector('.tt')?.textContent || '').trim() === 'E2E review');
     return row ? (row.querySelector('.pill')?.textContent || '').replace(/\s+/g, ' ').trim() : null;
@@ -204,7 +208,8 @@ export async function run({ daemon, page, ok }) {
     prefill && prefill.name === 'figma' && /figma-developer-mcp/.test(prefill.command) && prefill.env === 'FIGMA_ACCESS_TOKEN' && prefill.transport === 'stdio',
     JSON.stringify(prefill));
   await page.click(`${INTEG} [data-mcp-form] button:has-text("Add server")`);
-  await page.waitForTimeout(1200);
+  await page.waitForFunction((scope) => [...document.querySelectorAll(`${scope} .lcard .lk`)]
+    .some((k) => k.textContent.trim() === 'figma'), INTEG, { timeout: 10_000 }).catch(() => {});
   const servers = await daemon.api('/forge/mcp/servers');
   const rec = (servers.body.servers || []).find((s) => s.name === 'figma');
   ok('GET /forge/mcp/servers lists the recorded server', !!rec, JSON.stringify(servers.body));
