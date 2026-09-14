@@ -20,6 +20,67 @@
 import { $, $$, el, fill, authHeaders } from '../bind.js';
 import { setupCommandMenu } from './command-menu.js';
 
+const COMMAND_MODEL_KEY = 'zeno.command.model';
+let commandModel = null;
+
+function commandModelPill() {
+  return $('.screen[data-screen="home"] [data-model-pill]');
+}
+
+function paintCommandModel(model) {
+  const pill = commandModelPill();
+  if (!pill) return;
+  fill(pill, el('span', 'd'), document.createTextNode(model ? `${model} · local ▾` : 'no local model installed'));
+  pill.disabled = !model;
+  pill.title = model
+    ? `Use ${model} for this Command chat. Click to choose another installed local model.`
+    : 'No local model is installed.';
+}
+
+async function chooseCommandModel() {
+  const pill = commandModelPill();
+  if (!pill || pill.disabled) return;
+  const response = await fetch('/forge/agents?passive=1', {
+    headers: authHeaders(), cache: 'no-store',
+  }).then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, data: {} }));
+  const models = response.ok && Array.isArray(response.data.localModels)
+    ? response.data.localModels.filter((item) => typeof item === 'string' && item)
+    : [];
+  if (models.length === 0) { commandModel = null; paintCommandModel(null); return; }
+  const current = commandModel || models[0];
+  const raw = window.prompt(`Choose the local model for Command:\n${models.map((model, index) => `${index + 1}. ${model}`).join('\n')}`, current);
+  if (raw === null) return;
+  const picked = models.includes(raw.trim()) ? raw.trim() : models[Number(raw) - 1];
+  if (!picked) { pill.title = 'Choose an installed model by its number or exact name.'; return; }
+  commandModel = picked;
+  try { localStorage.setItem(COMMAND_MODEL_KEY, picked); } catch { /* private storage unavailable */ }
+  paintCommandModel(picked);
+}
+
+async function bindCommandModel() {
+  const pill = commandModelPill();
+  if (!pill || pill.dataset.commandModelWired) return;
+  pill.dataset.commandModelWired = '1';
+  const response = await fetch('/forge/agents?passive=1', {
+    headers: authHeaders(), cache: 'no-store',
+  }).then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, data: {} }));
+  const models = response.ok && Array.isArray(response.data.localModels)
+    ? response.data.localModels.filter((item) => typeof item === 'string' && item)
+    : [];
+  let stored = null;
+  try { stored = localStorage.getItem(COMMAND_MODEL_KEY); } catch { /* private storage unavailable */ }
+  commandModel = stored && models.includes(stored) ? stored : (models[0] || null);
+  window.zenoCommandModel = () => commandModel;
+  paintCommandModel(commandModel);
+  pill.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void chooseCommandModel();
+  }, true);
+}
+
 /* ---- navigation: "open receipts", "go to Forge" — pure, client-side ------- *
  *
  * The owner should be able to say where they want to go, not just what they
@@ -251,7 +312,7 @@ async function ask(question) {
     method: 'POST',
     headers: authHeaders({ 'content-type': 'application/json' }),
     cache: 'no-store',
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(commandModel ? { question, model: commandModel } : { question }),
   });
   const payload = await res.json().catch(() => ({}));
   return { ok: res.ok, status: res.status, payload };
@@ -274,7 +335,7 @@ function homeCommands() {
   // there is never draft text left in this composer to carry over — the
   // owner types the task in Forge's own box, same as clicking the product tab.
   out.push({ id: 'task', hint: 'Start a task in Forge', run: () => seedForgeComposer('') });
-  out.push({ id: 'model', hint: 'Choose a model', run: () => { const p = $('[data-model-pill]', $('.screen[data-screen="home"]')); if (p) p.click(); } });
+  out.push({ id: 'model', hint: 'Choose a model', run: () => { void chooseCommandModel(); } });
   // Cross-screen navigation clicks the SAME rail controls a mouse would (see
   // performNav) — no synthetic routing, just the real Command screens.
   out.push({ id: 'approvals', hint: 'Review what needs approval', run: () => performNav({ kind: 'screen', name: 'approvals', label: 'Approvals' }) });
@@ -395,6 +456,7 @@ function wire({ ta, send, turns, thread, onFirstTurn, commands }) {
 }
 
 export async function bind() {
+  await bindCommandModel();
   // HOME — the artifact hides the hero once a conversation starts.
   const heroBlock = $('#hero-block');
   const starters = $('#starters-block');

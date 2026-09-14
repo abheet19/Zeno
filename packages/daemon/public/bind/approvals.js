@@ -37,15 +37,6 @@
 import { getJSON, $, el, fill, authHeaders, token, screenEl } from '../bind.js';
 import { fileReviewModel } from '../capsule.js';
 
-/* Action hashes the owner has dismissed in THIS window (a stale capsule they
- * cleared). Client-only and per-session: the daemon still holds the action, so
- * a reload brings it back — this only stops the live stream (bind/live.js
- * re-runs render() on every state/preview/receipt event) from redrawing a card
- * the owner just cleared. Keyed by actionHash, which binds one exact preview by
- * content hash, so a genuinely NEW or re-proposed action gets a different hash
- * and is never suppressed by this. */
-const dismissed = new Set();
-
 /* ---- tiny, honest formatting — no protocol here, just presentation ---- */
 
 function truncHash(s) {
@@ -172,21 +163,6 @@ function errorBlock(message) {
   return wrap;
 }
 
-/* Everything the queue still holds was dismissed in this window. Say that
- * plainly rather than reusing emptyBlock's "the queue is empty" — the queue is
- * NOT empty, these cards were only cleared from this view, and a reload brings
- * them back. */
-function allDismissedBlock(count) {
-  const wrap = el('div', 'empty');
-  wrap.append(
-    el('b', null, 'Nothing left to show here.'),
-    document.createTextNode(
-      ` ${count} held ${count === 1 ? 'item is' : 'items are'} still in the daemon's queue, but ${count === 1 ? 'it was' : 'they were'} dismissed in this window. Reload this page to see ${count === 1 ? 'it' : 'them'} again.`,
-    ),
-  );
-  return wrap;
-}
-
 /* ---- one real capsule per held effect --------------------------------- */
 
 function capsuleFor(preview, onSettled) {
@@ -242,6 +218,7 @@ function capsuleFor(preview, onSettled) {
       reviewModel = null;
     }
   }
+  const stalePreview = reviewModel && (reviewModel.state === 'drifted' || reviewModel.state === 'unavailable');
 
   if (reviewModel && reviewModel.state === 'ready' && typeof reviewModel.diff === 'string') {
     body.appendChild(buildDiffPre(reviewModel.diff));
@@ -297,6 +274,8 @@ function capsuleFor(preview, onSettled) {
     hnoteText =
       `${preview.tier || 'T0'} · auto — policy owes no decision here. It is listed because this build ` +
       'commits only through POST /approvals, so an auto action still waits rather than committing on its own.';
+  } else if (stalePreview) {
+    hnoteText = reviewModel.blocker;
   } else {
     hnoteText = 'Approving binds this exact effect to this exact preview by content hash — it cannot be reused for a different action.';
   }
@@ -327,6 +306,12 @@ function capsuleFor(preview, onSettled) {
   } else if (readOnly) {
     allowBtn.disabled = true;
     allowBtn.title = 'Read-only view — no owner token on this page. Open this window as the owner to approve.';
+  } else if (stalePreview) {
+    allowBtn.disabled = true;
+    allowBtn.textContent = 'Stale — cannot approve';
+    allowBtn.title = reviewModel.blocker;
+    denyBtn.textContent = 'Discard stale proposal';
+    denyBtn.title = 'Remove this stale proposal from the real queue so it no longer blocks changing the Forge working folder.';
   }
 
   allowBtn.addEventListener('click', async () => {
@@ -356,15 +341,32 @@ function capsuleFor(preview, onSettled) {
           pill.textContent = 'This proposal went stale — the file changed after it was proposed, so approving it is unsafe. Re-propose it to get a fresh one.';
           const acts = allowBtn.parentElement;
           if (acts) {
-            const dismiss = el('button', 'btn g sm', 'Dismiss stale item');
+            const dismiss = el('button', 'btn g sm', 'Discard stale proposal');
             dismiss.type = 'button';
-            dismiss.addEventListener('click', () => {
-              // Remember the dismissal so the next stream event does not redraw
-              // this exact stale capsule (render() filters `dismissed` out).
-              if (typeof preview.actionHash === 'string' && preview.actionHash) dismissed.add(preview.actionHash);
-              const card = dismiss.closest('.caps');
-              if (card) card.remove();
-              window.dispatchEvent(new CustomEvent('zeno:state'));
+            dismiss.addEventListener('click', async () => {
+              dismiss.disabled = true;
+              dismiss.textContent = 'Discarding…';
+              try {
+                const cleared = await fetch(routes.decline, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json', ...authHeaders() },
+                  body: JSON.stringify({ actionHash: preview.actionHash, reason: 'Discarded stale proposal from Command' }),
+                });
+                const clearedData = await cleared.json().catch(() => null);
+                if (!cleared.ok) {
+                  const clearError = (clearedData && clearedData.error) || {};
+                  dismiss.disabled = false;
+                  dismiss.textContent = 'Discard stale proposal';
+                  pill.textContent = `could not discard stale proposal · ${clearError.code || cleared.status}${clearError.message ? ' — ' + clearError.message : ''}`;
+                  return;
+                }
+                pill.textContent = 'stale proposal discarded — the queue was refreshed';
+                onSettled('decline', clearedData || {});
+              } catch (clearErr) {
+                dismiss.disabled = false;
+                dismiss.textContent = 'Discard stale proposal';
+                pill.textContent = `could not discard stale proposal: ${(clearErr && clearErr.message) || clearErr}`;
+              }
             });
             denyBtn.remove();
             acts.append(dismiss);
@@ -420,27 +422,28 @@ function capsuleFor(preview, onSettled) {
     if (denyBtn.disabled) return;
     allowBtn.disabled = true;
     denyBtn.disabled = true;
-    denyBtn.textContent = 'Denying…';
+    const discardingStale = Boolean(stalePreview);
+    denyBtn.textContent = discardingStale ? 'Discarding…' : 'Denying…';
     try {
       const res = await fetch(routes.decline, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ actionHash: preview.actionHash, reason: 'Denied from Command' }),
+        body: JSON.stringify({ actionHash: preview.actionHash, reason: discardingStale ? 'Discarded stale proposal from Command' : 'Denied from Command' }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         const e = (data && data.error) || {};
-        denyBtn.textContent = 'Deny';
+        denyBtn.textContent = discardingStale ? 'Discard stale proposal' : 'Deny';
         denyBtn.disabled = false;
         allowBtn.disabled = false;
         pill.textContent = `deny failed · ${e.code || res.status}${e.message ? ' — ' + e.message : ''}`;
         return;
       }
-      denyBtn.textContent = 'Denied';
-      pill.textContent = 'denied — recorded by the daemon';
-      onSettled('deny', data);
+      denyBtn.textContent = discardingStale ? 'Discarded' : 'Denied';
+      pill.textContent = discardingStale ? 'stale proposal discarded — the queue was refreshed' : 'denied — recorded by the daemon';
+      onSettled(discardingStale ? 'decline' : 'deny', data);
     } catch (err) {
-      denyBtn.textContent = 'Deny';
+      denyBtn.textContent = discardingStale ? 'Discard stale proposal' : 'Deny';
       denyBtn.disabled = false;
       allowBtn.disabled = false;
       pill.textContent = `the request left this machine and no confirmation returned (${err && err.message ? err.message : 'network error'})`;
@@ -467,15 +470,10 @@ async function render() {
   }
 
   const state = result.data && typeof result.data === 'object' ? result.data : {};
-  const rawPending = Array.isArray(state.pending) ? state.pending : [];
-  // Drop only the exact capsules the owner dismissed in this window; a
-  // genuinely new/different actionHash is not in the set, so it still shows.
-  const pending = rawPending.filter(
-    (p) => !(p && typeof p === 'object' && typeof p.actionHash === 'string' && dismissed.has(p.actionHash)),
-  );
+  const pending = Array.isArray(state.pending) ? state.pending : [];
 
   if (pending.length === 0) {
-    fill(pbody, rawPending.length > 0 ? allDismissedBlock(rawPending.length) : emptyBlock());
+    fill(pbody, emptyBlock());
     return;
   }
 

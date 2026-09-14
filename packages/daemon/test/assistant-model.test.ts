@@ -95,6 +95,14 @@ test('ASK — the model field picks an installed local model, falls back honestl
     assert.equal(absent.note, null, 'and nothing is flagged');
     assert.equal(generatedWith.at(-1), DEFAULT_ASSISTANT_MODEL, 'the Ollama request names the default');
 
+    const greeting = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'hey', model: 'llama3.1:8b' }),
+    });
+    assert.equal(greeting.status, 200);
+    assert.equal(generatedWith.at(-1), 'llama3.1:8b', 'a normal greeting is a real model call, not a canned state summary');
+
     const picked = await ask({ model: 'llama3.1:8b' });
     assert.equal(picked.modelUsed, 'llama3.1:8b', 'an installed model is the one that answers');
     assert.equal(picked.note, null);

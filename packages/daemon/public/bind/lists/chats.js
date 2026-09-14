@@ -162,7 +162,8 @@ export async function bindChats() {
     renderList();
     if (turnsEl) turnsEl.scrollTop = turnsEl.scrollHeight;
 
-    const res = await postJSON('/assistant/ask', { question: text });
+    const model = typeof window.zenoCommandModel === 'function' ? window.zenoCommandModel() : null;
+    const res = await postJSON('/assistant/ask', model ? { question: text, model } : { question: text });
     let replyText;
     if (!res.ok) {
       replyText = 'Could not ask: ' + res.error;

@@ -45,7 +45,6 @@ import {
   buildSnapshot,
   CANNOT_ANSWER,
   cleanGroundedReply,
-  conversationalReply,
   describeTruncation,
   fallbackDelegation,
   groundReply,
@@ -200,18 +199,6 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
 
   const prompt = buildAssistantPrompt(question, snapshot);
   const truncationNote = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
-
-  // A greeting, a thank-you, or "what can you do?" has no fact to ground, so
-  // the grounded model can only refuse it — and a chat that answers "hey"
-  // with "I cannot answer that from your Zeno." reads as broken. These are
-  // answered here, deterministically and entirely from the same snapshot the
-  // model would have seen: every number below is the owner's real local
-  // state, so the reply is grounded by construction and no model is asked —
-  // which is why `modelUsed` is honestly null here.
-  const greeting = conversationalReply(question, snapshot);
-  if (greeting !== null) {
-    return json(res, 200, { answer: greeting, cited: [], ungrounded: null, proposal: null, delegated: null, note: truncationNote, modelUsed: null });
-  }
 
   let answer: string;
   await ensureOllama(ctx); // asking a question is the instruction to start the answerer
