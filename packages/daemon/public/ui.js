@@ -109,7 +109,36 @@
   const products=$$('.product'), segBtns=$$('.seg [data-product]'), TITLES={command:'Zeno Command',forge:'Zeno Forge',counsel:'Zeno Counsel'};
   function showProduct(p){ products.forEach(x=> x.classList.toggle('on', x.dataset.product===p)); segBtns.forEach(b=>{ b.dataset.product===p ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'); });
     document.title=TITLES[p]||'Zeno'; if(p==='command'){ setTimeout(()=>{ size(); ORB.kick(); },0); } }
-  segBtns.forEach(b=> b.addEventListener('click', ()=> showProduct(b.dataset.product)));
+  segBtns.forEach(b=> b.addEventListener('click', ()=> showProduct(b.dataset.product)));  // Forge owns the native window chrome. The trusted preload bridge exists only
+  // in Electron; never leave controls that look live in a normal browser tab.
+  (function bindWindowChrome(){
+    const controls=[
+      ['zeno-win-min','minimize'],
+      ['zeno-win-max','toggleMaximize'],
+      ['zeno-win-close','close'],
+    ];
+    const bridge=window.zenoWindow;
+    controls.forEach(([id, action])=>{
+      const button=$('#'+id); if(!button) return;
+      if(!bridge){ button.hidden=true; return; }
+      button.addEventListener('click', async ()=>{
+        try{
+          if(action==='toggleMaximize'){
+            const maximized=await bridge.toggleMaximize();
+            button.textContent=maximized?'❐':'☐';
+            button.title=maximized?'Restore':'Maximize';
+            button.setAttribute('aria-label', maximized?'Restore':'Maximize');
+            return;
+          }
+          await bridge[action]();
+        }catch(_){ toast('Window control unavailable.'); }
+      });
+    });
+    if(bridge&&typeof bridge.isMaximized==='function') bridge.isMaximized().then(maximized=>{
+      const button=$('#zeno-win-max'); if(!button||!maximized) return;
+      button.textContent='❐'; button.title='Restore'; button.setAttribute('aria-label','Restore');
+    }).catch(()=>{});
+  })();
   document.addEventListener('click', e=>{ const g=e.target.closest('[data-product-go]'); if(!g) return; showProduct(g.dataset.productGo); if(g.dataset.then) show(g.dataset.then); });
 
   // ---------- FORGE — native workbench + Zeno session ----------

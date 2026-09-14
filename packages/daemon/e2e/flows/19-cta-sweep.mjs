@@ -121,6 +121,7 @@ export async function run({ daemon, page, ok }) {
             root: rootFp(),
             ls: lsFp(),
             self: selfState(el),
+            layout: [el.closest('.product')?.className || '', document.querySelector('#ide')?.className || ''].join('|'),
           });
           // A view-switch control's job is to make its declared target the
           // active one. When the sweep clicks controls in sequence, an earlier
@@ -151,6 +152,7 @@ export async function run({ daemon, page, ok }) {
             || after.root !== before.root
             || after.ls !== before.ls
             || after.self !== before.self
+            || after.layout !== before.layout
             || targetActive(el);
           return { changed };
         }, c.id);
