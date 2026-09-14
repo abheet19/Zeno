@@ -37,15 +37,18 @@ between what it **proposes** and what actually **happens**.
 > the precise, unglamorous truth.
 
 > [!NOTE]
-> **Recent (2026-09-14): a Devin-style pass on Forge.** Fixed the desktop window occasionally opening
+> **Recent (2026-09-15): the Forge and Command verification pass.** Fixed the desktop window occasionally opening
 > without its owner token (the cause of an apparently-dead UI); Forge now opens to **Agent** view by
 > default and shows an **"Open a project"** prompt instead of silently landing in a scratch repo; the
 > "paired phone" editor lock was a CSS width breakpoint misfiring on a same-machine browser, not a real
-> capability gate, and is fixed; the Command orb no longer draws duplicate nodes and animates reliably;
-> the composer stays on-screen at narrow widths; the `/` command palette and the editor's syntax theme
-> were both expanded. This pass is code-reviewed and gate-tested (daemon 196/196, desktop 107/107) but
-> **not yet live-verified end-to-end** — a further round (per-skill/per-rule slash commands, two
-> remaining dead pills, the orb's accessible list view, the title-bar window buttons) is queued.
+> capability gate, and is fixed; Command uses the selected local model for ordinary conversation;
+> stale persisted approvals are revalidated and removed instead of blocking project selection; Compare
+> reads and runs installed models; the composer stays on-screen at narrow widths; and the orb renderer
+> no longer duplicates its animation loop. The current gates pass **198/198 daemon** and **107/107
+> desktop** checks. A 25-flow headless run first reported 18 passes, two failures and five hardware or
+> environment blocks; focused reruns now pass both failures. The complete 25-flow suite has not been
+> rerun at this exact commit, and native Electron motion, microphone capture and a second-device path
+> still require hands-on verification.
 
 <div align="center">
 
@@ -846,10 +849,10 @@ I would rather you read this here than discover it in a demo.
 - **Direct bounded routine proposals may apply without asking.** The deliberate T0 trade reduces
   approval fatigue. Forge model output is stricter: it remains in the throwaway worktree and each
   resulting file is held for owner review before it reaches the selected repository.
-- **A tool call is approved, or ignored.** The capsule has an Approve control and no Decline
-  control yet, so today a command you do not want is refused by *not clicking* — it lapses, and a
-  lapse is a refusal, never a grant. The route to decline one outright exists (`POST
-  /forge/permissions/decline`, owner only); the button in the window does not.
+- **A tool call is approved, denied, or allowed to lapse.** The owner window exposes Approve and
+  Deny controls; stale file proposals are non-approvable and can be discarded. An unanswered tool
+  request still lapses to refusal, never to permission. Those controls call owner-only decline
+  routes; a proposer token cannot settle its own request.
 - **Subagents are off in Forge.** `Task` would start a second agent, and Forge cannot demonstrate
   from outside the CLI that a subagent's calls arrive at the same permission host. It stays off
   until that can be proved rather than assumed.
