@@ -17,6 +17,8 @@
  * read it back.
  */
 
+import { fieldMotionEnabled } from '../field-model.js';
+
 export const R = document.documentElement;
 
 // ---- auth: the same token the page was handed (empty for a read-only shell) --
@@ -50,10 +52,9 @@ export function clip(s, n) { s = String(s || ''); return s.length > n ? s.slice(
    the DEFAULT, not the verdict. */
 export function motionOn() {
   const explicit = R.getAttribute('data-reduce');
-  if (explicit === '1') return false;
-  if (explicit === '0') return true;
-  try { if (matchMedia('(prefers-reduced-motion: reduce)').matches) return false; } catch { /* no matchMedia */ }
-  return true;
+  let systemPrefersReduced = false;
+  try { systemPrefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* no matchMedia */ }
+  return fieldMotionEnabled({ explicitReduction: explicit, systemPrefersReduced });
 }
 
 // S.emptyNote: a truthful sentence when the field is nearly empty, set by

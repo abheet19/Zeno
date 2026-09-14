@@ -7,9 +7,9 @@
  *   - Reduce motion / Reduce transparency: field.js's own device preferences
  *     (localStorage `zeno-mo` / `zeno-fl`, `data-reduce` / `data-flat` on
  *     <html>, which glass/tokens.css and glass/vendor/glass-base.css already
- *     style for). field.js itself is not mounted any more, so nothing else
- *     applies these at load — this binder does, using the exact same keys,
- *     so a preference set here would survive field.js coming back.
+ *     style for). field.js observes the same root attributes, so changing this
+ *     switch updates the visible Standing Field immediately as well as storing
+ *     the choice for the next launch.
  *   - Launch-to-surface: no persisted preference exists ANYWHERE in this
  *     codebase (field.js's boot() comment: "Command is the always-present
  *     surface"). Disabled, not wired.
@@ -47,11 +47,9 @@ export function bindGeneral(modal) {
       const wantReduced = readReduceMotionPref();
       const isChecked = rm.getAttribute('aria-checked') === 'true';
       if (wantReduced !== isChecked) {
-        // ui.js's own #rm-toggle handler also owns the Home orb's ORB.motion
-        // flag, which lives in ui.js's closure and cannot be reached from
-        // here. A real click runs that handler for real (so the orb honours
-        // this boot-time preference too, not only ones made after boot) —
-        // our observer above then persists whatever it lands on.
+        // A real click keeps the switch's own event and keyboard semantics;
+        // our observer above persists the result, and field.js observes the
+        // corresponding root attribute to update the visible canvas.
         rm.click();
       } else {
         root.setAttribute('data-reduce', wantReduced ? '1' : '0');

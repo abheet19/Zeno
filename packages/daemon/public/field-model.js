@@ -27,3 +27,10 @@ export function shouldAnimateField({ surface, visibilityState, fieldList, motion
     && !fieldList
     && Boolean(motion);
 }
+
+/** Resolve the canvas motion state from the explicit in-app choice and OS default. */
+export function fieldMotionEnabled({ explicitReduction, systemPrefersReduced }) {
+  if (explicitReduction === '1') return false;
+  if (explicitReduction === '0') return true;
+  return !systemPrefersReduced;
+}

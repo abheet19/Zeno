@@ -541,9 +541,12 @@
   }
   ORB.draw=draw;
   let raf=0, last=0, drag=false, mx=0, my=0;
-  function loop(t){ if(!ORB.motion||heroBlock.hidden){ raf=0; return; } const dt=last?Math.min(.05,(t-last)/1000):.016; last=t;
+  // home.js replaces this design-artifact canvas with the real Standing Field.
+  // Stop this legacy loop as soon as that happens: drawing a detached canvas at
+  // 60fps made the app consume GPU/CPU while showing no corresponding motion.
+  function loop(t){ if(!ORB.motion||heroBlock.hidden||!cvs.isConnected){ raf=0; return; } const dt=last?Math.min(.05,(t-last)/1000):.016; last=t;
     if(!drag) F.rot+=dt*0.28; F.tilt=F.tilt0+Math.sin(t/6400)*.06; draw(); raf=requestAnimationFrame(loop); }
-  ORB.kick=function(){ if(ORB.motion && !raf && !heroBlock.hidden){ last=0; raf=requestAnimationFrame(loop); } };
+  ORB.kick=function(){ if(ORB.motion && !raf && !heroBlock.hidden && cvs.isConnected){ last=0; raf=requestAnimationFrame(loop); } };
   const rm=$('#rm-toggle');
   if(rm){ const flip=()=>{ const willReduce=rm.getAttribute('aria-checked')!=='true'; rm.setAttribute('aria-checked', willReduce?'true':'false'); ORB.motion=!willReduce; if(ORB.motion) ORB.kick(); else draw(); };
     rm.addEventListener('click',flip); rm.addEventListener('keydown',e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); flip(); } }); }

@@ -25,7 +25,7 @@
  * the whole surface can never disagree with itself.
  */
 
-import { R, S, F, st, ld, bootMotion } from './field/state.js';
+import { R, S, F, st, ld, bootMotion, motionOn } from './field/state.js';
 import { wire } from './field/interaction.js';
 import { fieldOn, fieldSurfaceVisible, fieldShouldAnimate, startF, stopF, size, draw } from './field/engine.js';
 import { refresh, invalidateAgents } from './field/data.js';
@@ -149,6 +149,12 @@ export function init(section) {
   let lastSurface = R.getAttribute('data-zeno-surface');
   const visibilityObserver = new MutationObserver(() => {
     const surface = R.getAttribute('data-zeno-surface');
+    // Settings owns the visible Reduce motion switch. Keep the live canvas in
+    // sync when that switch changes the root attribute; the previous renderer
+    // only updated its retired, detached canvas, leaving this field frozen
+    // until a reload even after the owner had explicitly enabled motion.
+    S.motion = motionOn();
+    syncControls();
     if (surface === 'command' && lastSurface !== 'command') {
       invalidateAgents();
       if (fieldSurfaceVisible()) refresh(listEl).catch(() => {});
@@ -157,7 +163,7 @@ export function init(section) {
     if (fieldSurfaceVisible()) { size(); if (fieldShouldAnimate()) startF(); else { stopF(); draw(); } }
     else stopF();
   });
-  visibilityObserver.observe(R, { attributes: true, attributeFilter: ['data-zeno-surface'] });
+  visibilityObserver.observe(R, { attributes: true, attributeFilter: ['data-zeno-surface', 'data-reduce'] });
   const hero = document.getElementById('cmd-hero');
   if (hero) visibilityObserver.observe(hero, { attributes: true, attributeFilter: ['hidden'] });
 

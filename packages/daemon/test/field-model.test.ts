@@ -9,6 +9,10 @@ interface TicketAction {
 }
 
 interface FieldModel {
+  fieldMotionEnabled(input: {
+    readonly explicitReduction: string | null;
+    readonly systemPrefersReduced: boolean;
+  }): boolean;
   pendingRepoEdge(id: string, forge: unknown): readonly [string, string] | null;
   shouldAnimateField(input: {
     readonly surface: string | null;
@@ -20,7 +24,7 @@ interface FieldModel {
 }
 
 const moduleUrl = new URL('../../public/field-model.js', import.meta.url).href;
-const { pendingRepoEdge, shouldAnimateField, ticketAction } = await import(moduleUrl) as FieldModel;
+const { fieldMotionEnabled, pendingRepoEdge, shouldAnimateField, ticketAction } = await import(moduleUrl) as FieldModel;
 
 test('pending repository edge is derived from the current Forge read', () => {
   assert.deepEqual(pendingRepoEdge('pend0', { repo: { branch: 'main' } }), ['pend0', 'repo']);
@@ -48,6 +52,13 @@ test('the Command field consumes frames only while its visible animated canvas i
   assert.equal(shouldAnimateField({ ...active, visibilityState: 'hidden' }), false);
   assert.equal(shouldAnimateField({ ...active, fieldList: true }), false);
   assert.equal(shouldAnimateField({ ...active, motion: false }), false);
+});
+
+test('the owner can enable motion explicitly while an unset preference follows the OS', () => {
+  assert.equal(fieldMotionEnabled({ explicitReduction: null, systemPrefersReduced: false }), true);
+  assert.equal(fieldMotionEnabled({ explicitReduction: null, systemPrefersReduced: true }), false);
+  assert.equal(fieldMotionEnabled({ explicitReduction: '1', systemPrefersReduced: false }), false);
+  assert.equal(fieldMotionEnabled({ explicitReduction: '0', systemPrefersReduced: true }), true);
 });
 
 test('opening Command observes local models without starting the Ollama service', () => {
