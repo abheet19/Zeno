@@ -31,4 +31,13 @@ if (process.platform === 'win32') {
   contextBridge.exposeInMainWorld('zenoMeeting', {
     detect: () => ipcRenderer.invoke('zeno:meeting:detect'),
   });
+  // Window chrome for the Forge title bar. The menu bar is hidden and the
+  // artifact draws its own –/☐/× controls, which had no handler behind them;
+  // a plain browser tab has no bridge, so the page hides them there.
+  contextBridge.exposeInMainWorld('zenoWindow', {
+    minimize: () => ipcRenderer.invoke('zeno:window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('zeno:window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('zeno:window:close'),
+    isMaximized: () => ipcRenderer.invoke('zeno:window:is-maximized'),
+  });
 }

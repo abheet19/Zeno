@@ -265,6 +265,20 @@ ipcMain.handle('zeno:project:choose', async (event) => {
   return inspectProject(answer.filePaths[0]);
 });
 
+// Window chrome behind the Forge title bar's –/☐/× controls. Owner-only: the
+// same trusted-frame check as the project picker, so a page that is not this
+// daemon's own window cannot drive the shell. Closing the window closes Zeno
+// (and stops the daemon) — that is the existing window-all-closed contract.
+const liveWin = (event) => (trustedFrame(event) && win && !win.isDestroyed()) ? win : null;
+ipcMain.handle('zeno:window:minimize', (event) => { const w = liveWin(event); if (!w) return false; w.minimize(); return true; });
+ipcMain.handle('zeno:window:toggle-maximize', (event) => {
+  const w = liveWin(event); if (!w) return false;
+  if (w.isMaximized()) w.unmaximize(); else w.maximize();
+  return w.isMaximized();
+});
+ipcMain.handle('zeno:window:close', (event) => { const w = liveWin(event); if (!w) return false; w.close(); return true; });
+ipcMain.handle('zeno:window:is-maximized', (event) => { const w = liveWin(event); return w ? w.isMaximized() : false; });
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
