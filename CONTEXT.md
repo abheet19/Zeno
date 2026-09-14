@@ -1,6 +1,6 @@
 # Zeno — current implementation context
 
-> Evidence snapshot: 14 September 2026 IST. Canonical repository: `D:\Code\Zeno`; branch `phase-0-and-p1-01-kernel`; latest commit `6699aa4` ("Wave-2 splits to ≤500 lines"), with an uncommitted verification pass on top of it (the run-progress SSE consolidation, the CTA-sweep fixes, and the command-ask warm-up described in the evidence section). The last *packaged* installer, `Zeno-Setup-0.1.0-x64.exe`, is still the older `db674c0` build and PRE-DATES this refactor — so the installed binary is stale; the current code runs only via `npm run app`, which rebuilds from the working tree.
+> Evidence snapshot: 14 September 2026 IST. Canonical repository: `D:\Code\Zeno`; branch `phase-0-and-p1-01-kernel`; latest commit `49ad772` ("polish(ui): sandbox→workspace wording sweep"), which sits on top of the **"Devin-feel" pivot** commit `3b4d086` ("feat(kernel): routine agent edits auto-apply, dangerous paths stay gated"). That pivot is the current, committed design: an *ordinary edit to an ordinary file inside the sandbox* now auto-applies (tier T0) and is still receipted, while destructive writes, sensitive paths (config/keys/`.git`/`CLAUDE.md`), rewrites over the 40-line budget, credentials, and every egress or shell action still stop and wait for one exact human approval — see `packages/kernel/src/risk.ts`. The last *packaged* installer, `Zeno-Setup-0.1.0-x64.exe`, is still the older `db674c0` build and PRE-DATES both this pivot and the size refactor — so the installed binary is stale; the current code runs only via `npm run app`, which rebuilds from the working tree.
 >
 > This is the short, AI-readable map, written to be pasted into another AI as project context — so it explains its own jargon inline the first time a term appears. The current source and the retained executable evidence win if an older design note disagrees. A configured URL or a stale packaged binary is not proof that current code is deployed.
 >
@@ -87,6 +87,111 @@ Vault stores readable Markdown memories and uses transparent keyword retrieval w
 | Orchestration / fan-out | Command opens and tracks many Forge agents from one surface; the daemon's `/forge/run-progress` stream is the single source of truth for live status |
 | Stream multiplexing | one shared SSE `EventSource` fans out to several UI subscribers instead of one connection each — leaner, and it fixed real HTTP/1.1 per-origin socket exhaustion across windows |
 
+## Trending terms explained (glossary)
+
+Every buzzword and CS term this document (or the codebase) leans on, defined plainly. If you feed this
+file to another AI, this is the section that lets it reason about Zeno without guessing.
+
+- **Zeno (the core concept)** — a deterministic **approval kernel**: a small, pure state machine that
+  every consequential action an AI agent wants must pass through. It does four things and nothing
+  else: (1) *classify* the action into a risk tier, (2) *hold* the risky ones as a "proposal" until a
+  human approves the exact action, (3) re-check the world hasn't changed and run the effect **exactly
+  once**, (4) write a signed, tamper-evident **receipt**. Its defining property: a model can *propose*
+  anything but can *approve* nothing. Everything else in the product (Command, Forge, Counsel) is a UI
+  on top of this one gate.
+- **Approval kernel / policy kernel** — the component above (`packages/kernel/src`). "Kernel" in the
+  OS sense: the trusted core that mediates access to effects, kept small and auditable (~2,500 lines).
+- **Held proposal / capsule** — an action the kernel has classified as risky and is holding, not yet
+  executed. The UI renders it as a "capsule" showing the summary, action hash, tier, and target.
+- **Content-addressed** — identified by a hash of the content itself, so any change to the content
+  changes its identity. Zeno hashes the action's `Binding` (payload + base + target + kind + tier +
+  provenance); that hash *is* the action's `actionHash`. You approve a hash, so you can't approve one
+  thing and have a different thing execute.
+- **CAS (compare-and-swap)** — apply a change only if the underlying state still matches what it was
+  when the change was prepared. At commit time the kernel re-reads the current base hash; if it
+  drifted, it refuses and — importantly — does **not** spend the approval, so the owner can re-preview
+  against the new base. This is optimistic-concurrency control borrowed from lock-free programming.
+- **Single-use approval** — one approval authorizes one execution attempt, not a standing permission.
+  The approval carries a private kernel-issued **nonce** and an expiry; it's spent *before* the
+  attempt so a crash can't yield a reuse.
+- **Tiers T0–T4** — the five risk levels. **T0** = no external effect / ordinary sandbox write
+  (auto-applies). **T1** = local but consequential (scoped patch, `vcs.commit`, `memory.write`).
+  **T2** = bytes leave the machine (`net.fetch`, `vcs.push`, `message.send`, `jira.write`); first tier
+  that demands an authenticator. **T3** = run-anything / broad blast radius (`shell.exec`,
+  `settings.change`, `vcs.mr`, `destructive`). **T4** = payment / anything touching the `financial`
+  data zone — *permanently prohibited, no toggle, no approval path*.
+- **Fail-closed / round up on ambiguity** — when classification is unsure (an unknown action kind or
+  data zone), it escalates to the *most* restrictive outcome (T4), never the least. The opposite —
+  fail-open — is the mistake that lets an unclassified new tool auto-execute.
+- **Ed25519** — a modern public-key signature scheme (an elliptic curve). The kernel signs each
+  receipt's hash with a private key that never leaves the machine; anyone with the *public* key can
+  verify the whole ledger but cannot alter it. Chosen partly because its signatures are deterministic,
+  so a signed ledger stays byte-identical across a replay.
+- **Hash chain / tamper-evident ledger** — an append-only log where each entry stores the hash of the
+  previous entry, so editing, deleting, or truncating any entry breaks the links downstream and
+  `verify()` reports the first broken index. "Tamper-evident" (you can detect tampering) becomes
+  "tamper-**proof**" (you can't forge it undetected) once the Ed25519 signature is added, because a
+  forger who recomputes the hashes still can't produce a valid signature.
+- **Truncation anchor (writeHead)** — a small separate record of "how many receipts and what the tip
+  hash is", because a pure hash chain cannot detect its own *tail* being cut off (the remaining prefix
+  is still self-consistent).
+- **Capability security / capability token** — authority is carried by unforgeable tokens, not by
+  identity or ambient permission. Zeno mints two scoped tokens: an **owner token** (can approve) and a
+  **proposer token** (can read + propose, approves nothing). The model only ever holds the latter.
+- **Loopback** — the local-only network address `127.0.0.1` that no other machine can reach. The
+  daemon binds here and nowhere else, so there is zero inbound network surface.
+- **Daemon** — a long-running background process; here the local HTTP server that owns Zeno's
+  canonical state and mediates every request.
+- **Nonce** — a single-use random value. The daemon prints a per-boot nonce in its URL so a browser
+  session must present it; the kernel issues a per-approval nonce that a valid approval must match.
+- **SSE (Server-Sent Events)** — a one-way stream where the server pushes messages to the browser over
+  one held-open HTTP connection. Zeno uses it to invalidate/refresh UI state and to fan out live run
+  progress. `Last-Event-ID` lets a dropped stream resume without silently missing events.
+- **MCP (Model Context Protocol)** — an open standard for exposing tools/data to an AI model over a
+  defined interface. Zeno ships its own MCP server that can *propose and read, never approve*, and
+  runs Forge with `--strict-mcp-config` so no ambient third-party MCP server joins a run.
+- **Agentic loop** — the cycle of an AI model reading context, proposing an action, and acting,
+  repeatedly. Zeno's point is to interpose the kernel on the "acting" step.
+- **Devin-feel pivot** — the deliberate move (commit `3b4d086`) to let *routine* agent edits
+  auto-apply (like Devin/Cursor feel fast and unobtrusive) while keeping destructive/egress/config
+  actions gated. Named after the coding-agent products it aims to feel like. The trade is documented
+  in `risk.ts`: a leaked proposer token can now cause small sandbox edits directly, but all are
+  receipted and none can escape the jail.
+- **Worktree** — a `git worktree` is a second working directory attached to one repo. Forge runs each
+  agent in a **disposable** worktree, so the selected repo never changes while the model runs; only
+  approved file output reaches it.
+- **Jailed / path jailing** — file effects are confined to the project root after path, symlink, and
+  junction checks, so a write can't escape via `..`, a symlink, or a Windows junction.
+- **Executor** — the only code the kernel lets touch the real world, and only inside `commit()`, after
+  CAS passes, exactly once. Zeno has a file executor and a git executor.
+- **World (injected)** — the kernel never calls `Date.now`, `Math.random`, or the network directly;
+  all non-determinism arrives through an injected `World` object (clock, id generator, base reader).
+  This is dependency injection, and it's what makes runs **replayable**: swap in a recorded world and
+  the same inputs produce a byte-identical ledger.
+- **Property-based testing** — instead of hand-written examples, tests generate hundreds of randomized
+  inputs and assert an invariant holds for all of them. Zeno's seven laws are property-tested over 400
+  rounds each plus a 1,200-iteration fuzz.
+- **RAG (retrieval-augmented generation)** — answering by first retrieving source snippets and
+  grounding the answer in them. Vault does the retrieve-and-cite part with plain keyword search (no
+  vector embeddings), so every answer carries a clickable citation the owner can audit.
+- **CRDT / LWW-Map** — Conflict-free Replicated Data Type; a Last-Writer-Wins Map is one where
+  concurrent edits from two devices merge deterministically without a central server. Zeno's mesh uses
+  it for convergent replication between paired devices.
+- **X25519 + SAS pairing / AES-GCM envelopes** — the mesh's crypto: X25519 is an elliptic-curve key
+  exchange; SAS (Short Authentication String) is the human-comparable code that confirms two devices
+  paired without a man-in-the-middle; AES-GCM is authenticated encryption used to seal the messages.
+- **Egress** — bytes leaving the machine (a web fetch, a hosted-model call, a push). In Zeno every
+  egress path is explicit, per-run, tiered T2+, and off by default.
+- **Electron / Monaco / Ollama / whisper.cpp** — Electron is the framework that wraps an HTML UI in a
+  native desktop window (same as VS Code); Monaco is VS Code's editor component, used in Forge; Ollama
+  is a local LLM runtime Zeno drives over loopback; whisper.cpp is a local speech-to-text engine used
+  for voice/Counsel when the owner installs it.
+- **VAD (voice activity detection)** — detecting when someone is actually speaking to trim silence;
+  note it is *not* speaker identification, so Zeno cannot tell *who* is talking.
+- **Nonce-authenticated / owner vs proposer role** — a request's role is decided by which token it
+  presents; the `/approvals` route rejects any non-owner role with `403 self-approval-forbidden`
+  before doing anything else.
+
 ## CI, packaging, deployment, and rollback
 
 `npm run check` executes all 16 workspace gates. `npm run build` compiles the workspace chain and vendors Monaco/Voice/Glass assets. `npm run build:app` runs electron-builder and emits an x64 portable executable and NSIS installer under `dist-app`. `.github/workflows/ci.yml` runs on Windows with Node 22 and rejects unexpected external runtime dependencies; it does not package or publish a release.
@@ -162,6 +267,10 @@ These are the questions this project is most likely to draw, with answers ground
 **Q: How did you keep a large codebase maintainable?** A hard rule of ≤500 lines per file. `server.ts` went from ~5,700 lines to ~420 by extracting ~27 focused route modules; the big client binders were each split into their own directory. The refactor pattern for shared mutable state was to extract it into a `state.js` module that sub-modules import by reference and mutate in place, keeping the entry file thin. Roughly 16K lines of dead/mock code were deleted. Crucially, I did *not* shrink the approval kernel — that ~2,500 lines is the product's reason to exist; cutting it would be cutting the point.
 
 **Q: How does voice stay safe?** One capture owner at a time. Wake mode ("Listen for Zeno") requires an explicit disclosure the owner must accept before the mic ever opens, and disarming closes the mic immediately (not at next restart). The hard boundary is enforced and stated in words: voice can *ask* and *propose* (e.g. add a task via `POST /work`) but can never approve, send, delete, or pay. Counsel takes exclusive mic ownership, requires declared consent, stores transcript text only, and only enables cited Q&A after a meeting is ended and saved.
+
+**Q: What is the "Devin-feel" pivot, and what does it trade away?** Originally a proposer token could only *queue* an action; every effect, however trivial, needed an owner click. That is safe but it interrupts constantly, and a safety gate that interrupts fifty times a day gets clicked through without reading — the exact failure this product exists to prevent. So `packages/kernel/src/risk.ts` now assesses a write on what it *actually does*: an ordinary edit to an ordinary file inside the sandbox auto-applies at T0 (and is still receipted), while destructive writes, sensitive paths (config, keys, `.git`, `CLAUDE.md`), rewrites past the 40-line budget, credential-bearing content, and every shell/egress action still stop for one exact approval. The trade, stated in the code: a leaked proposer token can now cause small sandbox edits directly — but every one is on the tamper-evident record, and none can touch config, delete, rewrite, run a command, or leave the jail.
+
+**Q: Explain the tier model and why it "rounds up".** Five tiers: T0 auto-safe (reads, ordinary sandbox writes), T1 local-but-consequential (patch, `vcs.commit`, `memory.write`), T2 "bytes leave the machine" (`net.fetch`, `vcs.push`, `message.send`, `jira.write`) which is the first tier to demand an authenticator, T3 broad blast radius (`shell.exec`, `settings.change`, `vcs.mr`, `destructive`), and T4 payment/financial which is permanently unreachable. `classify()` rounds *up* on ambiguity: an unknown action kind or unrecognised data zone becomes T4, not "no rules apply", because an undefined tier would otherwise sail past both the T2 authenticator gate and the T4 denial. `validatePolicy` even refuses to load a policy that drops the payment or financial-zone T4 floor — a policy that reads stricter than it behaves is the dangerous kind.
 
 **Q: What are the current limits / what would you do next?** No speaker biometrics or acoustic wake engine, so clear nearby speech could trigger a turn; the retained voice probes are functional, not accuracy benchmarks. No external VSIX marketplace, persistent PTY, external debugger, or CI runner in Forge. Mobile/device sync is designed but needs a second built client to complete. No public web deployment or remote observability — current observability is local logs, timings, state, and receipts. Codex's ambient global-skill discovery is still an open boundary. Next: re-package and re-verify a fresh installer against the post-refactor source, then the multi-device path.
 
