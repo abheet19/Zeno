@@ -134,6 +134,12 @@ export async function openWindow(browser, daemon) {
   await page.goto(daemon.url, { waitUntil: 'domcontentloaded' });
   // The binders are async; wait for the signal bind.js fires when they settle.
   await page.waitForFunction(() => window.__zenoBind !== undefined, { timeout: 20_000 }).catch(() => {});
+  // A bound renderer can still be a fraction of a second ahead of its
+  // EventSource connection. Starting a flow in that gap makes a new proposal
+  // invisible until a later event arrives, which tests the race rather than
+  // the product. Every owner-window flow therefore waits for the stream's
+  // explicit ready marker before it creates or settles state.
+  await page.waitForFunction(() => window.__zenoStreamReady === true, { timeout: 10_000 });
 
   /* Take the OWNER token from the window, the way the window itself got it.
      The `?k=` in the URL is a single-use LAUNCH NONCE, not a credential: the

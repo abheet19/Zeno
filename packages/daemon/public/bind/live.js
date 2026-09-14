@@ -83,6 +83,7 @@ function connect() {
   const note = (kind) => () => { pendingKinds.add(kind); flush(); };
 
   try {
+    window.__zenoStreamReady = false;
     source = new EventSource('/stream');
   } catch {
     return; // no EventSource in this runtime: the window stays a snapshot, honestly
@@ -100,6 +101,10 @@ function connect() {
 
   source.addEventListener('open', () => {
     backoff = 1000;
+    // Exposed for the isolated browser harness. A flow must not propose an
+    // action while the renderer still has no event stream to hear it on.
+    window.__zenoStreamReady = true;
+    window.dispatchEvent(new CustomEvent('zeno:stream-ready'));
     // An effect may have been proposed after the initial bind but before this
     // EventSource finished connecting. Streams only deliver later events, so
     // re-read once at connection time: a pending approval can never remain
