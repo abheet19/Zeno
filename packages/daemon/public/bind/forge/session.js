@@ -481,6 +481,10 @@ export function setupSession(S) {
       task, ok: run.ok === true, cancelled: run.cancelled === true,
       agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
       files: changed.length, waiting, applied, planSteps, note: run.ok === false ? (run.note || '') : '',
+      // Only local (Ollama) runs measure these; hosted CLIs return null and the
+      // Runs tab shows nothing rather than a fabricated count.
+      tokensIn: Number.isFinite(run.tokensIn) ? run.tokensIn : null,
+      tokensOut: Number.isFinite(run.tokensOut) ? run.tokensOut : null,
     });
     renderSessionHeader(session); renderChat(session); S.renderRuns(session); S.renderActions(session); S.renderPlan(session); renderHistoryIfOpen();
     void S.loadStatus();

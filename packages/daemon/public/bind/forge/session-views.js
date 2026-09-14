@@ -59,6 +59,17 @@ export function setupSessionViews(S) {
       const planned = r.planSteps ? ` · planned (${r.planSteps} steps)` : '';
       const m = el('div', 'frm', `${r.agentId}${r.model ? ' · ' + r.model : ''} · ${r.effort || ''} · ${r.files} file(s) · ${r.waiting} waiting · ${r.applied} applied${planned}${r.note ? ' · ' + r.note : ''}`);
       add(card, h, m);
+      // Token usage is measured only for local (Ollama) runs; /forge/run reports
+      // null for hosted CLIs. Show exactly what the run returned — never a guess,
+      // and nothing at all when neither count came back.
+      const inN = Number.isFinite(r.tokensIn) ? r.tokensIn : null;
+      const outN = Number.isFinite(r.tokensOut) ? r.tokensOut : null;
+      if (inN !== null || outN !== null) {
+        const parts = [];
+        if (inN !== null) parts.push(`${inN.toLocaleString()} in`);
+        if (outN !== null) parts.push(`${outN.toLocaleString()} out`);
+        add(card, el('div', 'frm', `${parts.join(' / ')} tokens · measured by the local model`));
+      }
       return card;
     }));
   };

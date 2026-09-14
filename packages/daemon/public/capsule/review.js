@@ -35,14 +35,14 @@ export function fileReviewModel(review, payload) {
     return fail('mismatch', 'the file review is bound to different proposed bytes than the payload');
   }
   if (review.state === 'drifted') {
-    return fail('drifted', 'the sandbox base drifted after this action was proposed; re-propose before approving');
+    return fail('drifted', 'the workspace base drifted after this action was proposed; re-propose before approving');
   }
   if (review.state === 'unavailable') {
-    return fail('unavailable', 'the sandbox base could not be read and verified; re-propose before approving');
+    return fail('unavailable', 'the workspace base could not be read and verified; re-propose before approving');
   }
   if (review.state !== 'ready') return fail('mismatch', 'the file review carries an unknown state');
   if (review.observedBaseHash !== payload.expectBaseHash) {
-    return fail('mismatch', 'the reviewed sandbox bytes do not match the payload’s expected base hash');
+    return fail('mismatch', 'the reviewed workspace bytes do not match the payload’s expected base hash');
   }
   if (typeof review.diff !== 'string' || typeof review.truncated !== 'boolean') {
     return fail('mismatch', 'the ready file review does not carry a bounded diff and truncation state');

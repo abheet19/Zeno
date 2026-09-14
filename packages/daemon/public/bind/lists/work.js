@@ -26,7 +26,7 @@ export async function bindWork() {
   let forgeRes = null;
 
   function render() {
-    if (!workRes) { fill(listEl, loadingEl('Reading your backlog and the sandbox…')); return; }
+    if (!workRes) { fill(listEl, loadingEl('Reading your backlog and the workspace…')); return; }
     if (!workRes.ok) { fill(listEl, unreadableEl('Work', workRes.error)); return; }
 
     const data = workRes.data || {};
@@ -66,20 +66,20 @@ export async function bindWork() {
     }
 
     if (showSandbox) {
-      if (filter === 'all') nodes.push(headingEl('sandbox'));
+      if (filter === 'all') nodes.push(headingEl('workspace'));
       if (!forgeRes) {
-        nodes.push(loadingEl('Reading the sandbox…'));
+        nodes.push(loadingEl('Reading the workspace…'));
       } else if (!forgeRes.ok) {
-        nodes.push(unreadableEl('The sandbox', forgeRes.error));
+        nodes.push(unreadableEl('The workspace', forgeRes.error));
       } else if (forgeData && forgeData.repo === false) {
-        nodes.push(emptyEl('The sandbox is not a git repository.', String(forgeData.note || '')));
+        nodes.push(emptyEl('The workspace is not a git repository.', String(forgeData.note || '')));
       } else {
         const matched = q ? changed.filter((c) => {
           const word = gitWord(c.status) || '';
           return [c.path, c.status, word].join(' ').toLowerCase().includes(q);
         }) : changed;
         if (changed.length === 0) {
-          nodes.push(emptyEl('Nothing uncommitted.', 'The sandbox working tree is clean.'));
+          nodes.push(emptyEl('Nothing uncommitted.', 'The workspace working tree is clean.'));
         } else if (matched.length === 0) {
           nodes.push(emptyEl('No changed file matches that.', ''));
         } else {

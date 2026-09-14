@@ -37,6 +37,15 @@
 import { getJSON, $, el, fill, authHeaders, token, screenEl } from '../bind.js';
 import { fileReviewModel } from '../capsule.js';
 
+/* Action hashes the owner has dismissed in THIS window (a stale capsule they
+ * cleared). Client-only and per-session: the daemon still holds the action, so
+ * a reload brings it back — this only stops the live stream (bind/live.js
+ * re-runs render() on every state/preview/receipt event) from redrawing a card
+ * the owner just cleared. Keyed by actionHash, which binds one exact preview by
+ * content hash, so a genuinely NEW or re-proposed action gets a different hash
+ * and is never suppressed by this. */
+const dismissed = new Set();
+
 /* ---- tiny, honest formatting — no protocol here, just presentation ---- */
 
 function truncHash(s) {
@@ -158,6 +167,21 @@ function errorBlock(message) {
     el('b', null, 'The approval queue could not be read.'),
     document.createTextNode(
       ' ' + (message || '/state did not answer.') + ' This is not the same as "nothing is waiting" — it means this window could not check.',
+    ),
+  );
+  return wrap;
+}
+
+/* Everything the queue still holds was dismissed in this window. Say that
+ * plainly rather than reusing emptyBlock's "the queue is empty" — the queue is
+ * NOT empty, these cards were only cleared from this view, and a reload brings
+ * them back. */
+function allDismissedBlock(count) {
+  const wrap = el('div', 'empty');
+  wrap.append(
+    el('b', null, 'Nothing left to show here.'),
+    document.createTextNode(
+      ` ${count} held ${count === 1 ? 'item is' : 'items are'} still in the daemon's queue, but ${count === 1 ? 'it was' : 'they were'} dismissed in this window. Reload this page to see ${count === 1 ? 'it' : 'them'} again.`,
     ),
   );
   return wrap;
@@ -335,6 +359,9 @@ function capsuleFor(preview, onSettled) {
             const dismiss = el('button', 'btn g sm', 'Dismiss stale item');
             dismiss.type = 'button';
             dismiss.addEventListener('click', () => {
+              // Remember the dismissal so the next stream event does not redraw
+              // this exact stale capsule (render() filters `dismissed` out).
+              if (typeof preview.actionHash === 'string' && preview.actionHash) dismissed.add(preview.actionHash);
               const card = dismiss.closest('.caps');
               if (card) card.remove();
               window.dispatchEvent(new CustomEvent('zeno:state'));
@@ -440,10 +467,15 @@ async function render() {
   }
 
   const state = result.data && typeof result.data === 'object' ? result.data : {};
-  const pending = Array.isArray(state.pending) ? state.pending : [];
+  const rawPending = Array.isArray(state.pending) ? state.pending : [];
+  // Drop only the exact capsules the owner dismissed in this window; a
+  // genuinely new/different actionHash is not in the set, so it still shows.
+  const pending = rawPending.filter(
+    (p) => !(p && typeof p === 'object' && typeof p.actionHash === 'string' && dismissed.has(p.actionHash)),
+  );
 
   if (pending.length === 0) {
-    fill(pbody, emptyBlock());
+    fill(pbody, rawPending.length > 0 ? allDismissedBlock(rawPending.length) : emptyBlock());
     return;
   }
 

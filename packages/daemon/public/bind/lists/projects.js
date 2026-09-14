@@ -24,20 +24,20 @@ export async function bindProjects() {
   const addBtn = screen.querySelector('[data-projects-add]');
   if (addBtn) {
     addBtn.addEventListener('click', () => {
-      toast('This daemon has no endpoint to register another project — Forge always works in the one sandbox repository below.');
+      toast('This daemon has no endpoint to register another project — Forge always works in the one workspace below.');
     });
   }
 
-  fill(listEl, loadingEl('Reading the sandbox repository…'));
+  fill(listEl, loadingEl('Reading the workspace…'));
   const st = await getJSON('/forge/status');
   const nodes = [];
 
   if (!st.ok) {
-    nodes.push(unreadableEl('The sandbox repository', st.error));
+    nodes.push(unreadableEl('The workspace', st.error));
   } else {
     const d = st.data || {};
     if (d.repo === false) {
-      nodes.push(emptyEl('The sandbox is not a git repository.', String(d.note || '')));
+      nodes.push(emptyEl('The workspace is not a git repository.', String(d.note || '')));
     } else {
       const changed = Array.isArray(d.changed) ? d.changed.length : null;
       const meta = [
@@ -48,11 +48,11 @@ export async function bindProjects() {
       const openBtn = el('button', 'laction cy', 'Open in Forge');
       openBtn.type = 'button';
       openBtn.setAttribute('data-product-go', 'forge');
-      nodes.push(lrowEl('repo', clip(d.root || 'the sandbox', 90), meta, openBtn));
+      nodes.push(lrowEl('repo', clip(d.root || 'the workspace', 90), meta, openBtn));
     }
   }
 
-  nodes.push(noteEl('This daemon reports only the one sandbox repository Forge operates in — there is no '
+  nodes.push(noteEl('This daemon reports only the one workspace Forge operates in — there is no '
     + '/projects or /repos endpoint that lists more than that, so nothing else is drawn here. Multiple, '
     + 'switchable projects are not a feature this daemon exposes yet.'));
 

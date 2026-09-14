@@ -37,6 +37,7 @@ export function setupMenuBar(S) {
   const REGISTRY = {
     File: [
       { label: 'New File', kbd: 'Ctrl+N', run: () => S.askNewFile(), disabled: noOwner },
+      { label: 'New Folder', run: () => S.askNewFolder(), disabled: noOwner },
       { label: 'New Window', kbd: 'Ctrl+Shift+N', disabled: () => 'Zeno runs in one window — a second window would carry no owner token and could approve nothing.' },
       { label: 'Open Folder…', kbd: 'Ctrl+K Ctrl+O', run: () => S.chooseProject(), disabled: () => noOwner() || (S.project && S.project.canChange === false ? S.project.changeBlockedBy : null) },
       { label: 'Save', kbd: 'Ctrl+S', run: () => S.proposeSaveFromFocusedGroup(), disabled: () => noOwner() || noEditor() },

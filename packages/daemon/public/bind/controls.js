@@ -122,7 +122,7 @@ export async function bind() {
   /* ---- Forge: the working-folder chip ---------------------------------
      It should say which repository the run will touch, and be a real way to
      see it — not a decorative chip. Point it at the Explorer, which shows the
-     actual sandbox, and label it from real status. */
+     actual workspace, and label it from real status. */
   const proj = $('.ag-proj');
   if (proj && !proj.dataset.wired) {
     proj.dataset.wired = '1';
@@ -143,7 +143,7 @@ export async function bind() {
         // name — reading it as a label printed the literal "true · master" in the
         // chip. The name is the last segment of the real root path.
         const root = typeof s.root === 'string' ? s.root : '';
-        const repo = root ? root.split(/[\\/]/).filter(Boolean).pop() : 'sandbox';
+        const repo = root ? root.split(/[\\/]/).filter(Boolean).pop() : 'workspace';
         const branch = s.branch ? ` · ${s.branch}` : '';
         const label = proj.querySelector('span') || proj;
         if (label === proj) {
