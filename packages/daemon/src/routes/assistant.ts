@@ -321,11 +321,15 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   } else if (intent !== null && intent.kind === 'delegate') {
     delegated = await resolveDelegation(ctx, intent.task, role);
   }
-  // The bare refusal is honest but reads as a dead end. When nothing was
-  // delegated either, say what CAN be answered instead — a guide, not a shrug.
-  // It makes no factual claim, so it needs no citation to stay grounded.
+  // A greeting or ordinary question can reach this point when the grounded
+  // model emits its conservative refusal. It is not a request to act, so use
+  // the separate general prompt rather than replacing a real model answer with
+  // canned product copy. General answers carry an explicit flag in the UI.
   if (answer.trim() === CANNOT_ANSWER && intent === null) {
-    answer = 'I only answer from your local state — I don’t guess. Ask me what’s waiting on you, what’s in the workspace, what ran today, or what you’ve saved to memory. Or describe a task and I’ll run it in Forge.';
+    const general = await askGeneral(ctx, question, modelUsed);
+    if (general !== null) {
+      return json(res, 200, { answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note, modelUsed });
+    }
   }
   json(res, 200, { answer, cited: grounding.cited, ungrounded: null, proposal, delegated, note, modelUsed });
 }
