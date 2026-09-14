@@ -24,21 +24,65 @@ import { readUtf8Bounded } from './forge-text.js';
 
 /** A malformed client cannot ask the daemon to load an unbounded number of skills. */
 const MAX_FORGE_SKILL_IDS = 16;
+/** `projectRules` never scans more than this many files, so a selection cannot name more either. */
+const MAX_FORGE_RULE_IDS = 32;
 
 /**
- * The installed Agent Skills, with their screening verdict.
+ * One repository rule file, as scanned by `projectRules`.
  *
- * A skill is third-party prose that gets fed to a model — the skills CLI itself
- * warns they "run with full agent permissions". The screener never BLOCKS one;
- * it tells the owner what it found so the choice is informed. The real
- * protection is unchanged and sits downstream: whatever the agent then writes
- * is still an approval capsule.
+ * `id` is the STABLE handle a client selects a rule by (`ruleIds` on a run):
+ * a slug of the project-relative path, so it survives a daemon restart and a
+ * re-scan alike, and `name` is what a picker shows for it (`/react`). Both are
+ * derived from the path — nothing is minted — so the same repository always
+ * yields the same ids.
  */
-interface ProjectRule {
+export interface ProjectRule {
+  readonly id: string;
+  readonly name: string;
   readonly path: string;
   readonly bytes: number;
   readonly body: string;
   readonly truncated: boolean;
+}
+
+/**
+ * The stable id of a rule: its project-relative path as a slug —
+ * `.cursor/rules/react.mdc` → `cursor-rules-react-mdc`. Pure, so a client can
+ * predict an id from a path and a test can pin the mapping.
+ */
+export function ruleIdFor(relativePath: string): string {
+  const slug = relativePath
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug === '' ? 'rule' : slug;
+}
+
+/** The display name of a rule: its file stem — `AGENTS.md` → `AGENTS`, `.cursor/rules/react.mdc` → `react`. */
+export function ruleNameFor(relativePath: string): string {
+  const base = relativePath.split('/').pop() ?? relativePath;
+  const stem = base.replace(/\.(md|mdc)$/i, '');
+  return stem === '' ? base : stem;
+}
+
+/**
+ * Keep only the rules the caller named, in scan order (never the caller's
+ * order, so the prompt a rule lands in does not depend on how a picker sorted
+ * its chips). `undefined` means "no selection was made" and keeps every rule —
+ * the behaviour every existing client relies on. Ids that match nothing are
+ * reported back rather than silently dropped.
+ */
+export function selectRules(
+  rules: readonly ProjectRule[],
+  ruleIds: readonly string[] | undefined,
+): { readonly rules: ProjectRule[]; readonly unknownIds: string[] } {
+  if (ruleIds === undefined) return { rules: [...rules], unknownIds: [] };
+  const wanted = new Set(ruleIds);
+  const known = new Set(rules.map((rule) => rule.id));
+  return {
+    rules: rules.filter((rule) => wanted.has(rule.id)),
+    unknownIds: ruleIds.filter((id) => !known.has(id)),
+  };
 }
 
 /**
@@ -91,11 +135,18 @@ export function projectRules(ctx: ServerCtx): ProjectRule[] {
     }
   }
   const rules: ProjectRule[] = [];
-  for (const rel of relativePaths.slice(0, 32)) {
+  // Two distinct paths can slug to one id (`a-b.md` and `a_b.md`). Scan order
+  // is deterministic, so a numbered suffix on the later one is stable too.
+  const taken = new Set<string>();
+  for (const rel of relativePaths.slice(0, MAX_FORGE_RULE_IDS)) {
     try {
       const abs = jail(ctx.opts.fs, ctx.opts.sandbox, rel);
       const source = readUtf8Bounded(abs, 64_000);
-      rules.push({ path: rel, bytes: source.bytes, body: source.text, truncated: source.truncated });
+      const base = ruleIdFor(rel);
+      let id = base;
+      for (let n = 2; taken.has(id); n += 1) id = `${base}-${n}`;
+      taken.add(id);
+      rules.push({ id, name: ruleNameFor(rel), path: rel, bytes: source.bytes, body: source.text, truncated: source.truncated });
     } catch {
       /* Missing, unreadable, or escaping rule files are absent, never followed. */
     }
@@ -158,7 +209,12 @@ interface ForgeContextView {
     readonly entries: readonly Record<string, unknown>[];
     readonly note: string;
   };
-  readonly rules: readonly { readonly path: string; readonly bytes: number; readonly truncated: boolean }[];
+  /** The rules that ENTER this prompt — every scanned rule unless `ruleIds` narrowed them. */
+  readonly rules: readonly { readonly id: string; readonly name: string; readonly path: string; readonly bytes: number; readonly truncated: boolean }[];
+  /** The ids of `rules`, in scan order — what a picker should show as selected. */
+  readonly ruleIds: readonly string[];
+  /** Selected ids that matched no scanned rule. Ignored, and reported so a stale chip is visible. */
+  readonly unknownRuleIds: readonly string[];
   readonly skillIds: readonly string[];
   readonly sanitization: { readonly redacted: number };
 }
@@ -218,7 +274,34 @@ export function prepareForgeContext(ctx: ServerCtx, body: Record<string, unknown
     return forgeContextFailure(413, 'skill-selection-too-large', 'The skill selection is too large.', 'Select at most 16 installed skills with valid ids.');
   }
 
-  const rules = projectRules(ctx);
+  // `ruleIds` mirrors `skillIds`, with one deliberate difference: ABSENT means
+  // every rule (what every run did before a rule could be picked), while an
+  // empty array is a real choice of none. `undefined` is therefore preserved
+  // rather than normalised to `[]`.
+  if (body['ruleIds'] !== undefined && !Array.isArray(body['ruleIds'])) {
+    return forgeContextFailure(400, 'bad-rule-ids', 'ruleIds must be an array.', 'Choose rules from the repository Rules panel, or omit ruleIds to apply every rule.');
+  }
+  const ruleIds = body['ruleIds'] === undefined
+    ? undefined
+    : [...new Set(
+        (body['ruleIds'] as unknown[])
+          .filter((value): value is string => typeof value === 'string')
+          .map((id) => id.trim())
+          .filter((id) => id !== ''),
+      )];
+  if (ruleIds !== undefined && (ruleIds.length > MAX_FORGE_RULE_IDS || ruleIds.some((id) => id.length > 128 || id.includes(String.fromCharCode(0))))) {
+    return forgeContextFailure(413, 'rule-selection-too-large', 'The rule selection is too large.', 'Select at most 32 repository rules with valid ids.');
+  }
+
+  const scannedRules = projectRules(ctx);
+  const selected = selectRules(scannedRules, ruleIds);
+  const rules = selected.rules;
+  if (selected.unknownIds.length > 0) {
+    // A stale chip (the file was renamed or deleted since the panel loaded) is
+    // not a reason to refuse the run — the owner asked for rules, not for a
+    // missing one — but it is not silently swallowed either.
+    process.stderr.write(`[zeno] forge context: ignoring unknown rule id(s) ${selected.unknownIds.join(', ')}\n`);
+  }
   let memoryContext;
   try {
     memoryContext = assembleMemoryContext({ memory: ctx.memory, projectRoot: ctx.opts.sandbox, task, memoryEnabled });
@@ -308,7 +391,9 @@ export function prepareForgeContext(ctx: ServerCtx, body: Record<string, unknown
           ? `${entries.length} task-relevant Vault record${entries.length === 1 ? '' : 's'} will be sent.`
           : 'No Vault is attached to this daemon, so no durable memory can be sent.',
     },
-    rules: rules.map((rule) => ({ path: rule.path, bytes: rule.bytes, truncated: rule.truncated })),
+    rules: rules.map((rule) => ({ id: rule.id, name: rule.name, path: rule.path, bytes: rule.bytes, truncated: rule.truncated })),
+    ruleIds: rules.map((rule) => rule.id),
+    unknownRuleIds: selected.unknownIds.map((id) => sanitize(id).clean),
     skillIds: skillIds.map((id) => sanitize(id).clean),
     sanitization: { redacted: memoryContext.redacted + sanitizedPrompt.findings.length },
   };

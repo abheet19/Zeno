@@ -55,11 +55,49 @@ import {
 import type { Role } from '../tokens.js';
 import { ollamaEndpoint, type ServerCtx } from '../server/context.js';
 import { json, readJson, str } from './http.js';
-import { ensureOllama } from './ollama-lifecycle.js';
+import { ensureOllama, installedLocalModels } from './ollama-lifecycle.js';
 import { withoutReasoning } from './forge-local-model.js';
 import { proposeFileWrite } from './approvals.js';
 import { resolveDelegation, type Delegated } from './delegate.js';
 import { searchNeosapienMemories } from './neosapien.js';
+
+/** The model Ask Zeno answers with when the owner has not picked one. */
+export const DEFAULT_ASSISTANT_MODEL = 'qwen3:8b';
+
+/**
+ * The local models this machine can answer with — the same list
+ * `GET /forge/agents` shows in the picker. An injected probe (the tests' fixed
+ * one) is honoured; otherwise Ollama is asked directly rather than through
+ * `probeAgents`, which would also spawn the hosted CLIs' `--version` checks for
+ * a question that will never leave this machine.
+ */
+async function installedModels(ctx: ServerCtx): Promise<readonly string[]> {
+  if (ctx.opts.delegateProbe !== undefined) return (await ctx.opts.delegateProbe.available()).localModels;
+  return await installedLocalModels(ctx);
+}
+
+/**
+ * Which local model answers this question, and what to tell the owner about it.
+ *
+ * An absent `model` is today's behaviour. A named one is used only when Ollama
+ * actually lists it: an uninstalled name falls back to the default AND says so
+ * in the reply, because an answer silently produced by a different model than
+ * the one on the picker would be a small lie about the owner's own machine.
+ * Whatever is chosen only ever goes into the loopback Ollama request — this
+ * field cannot route a question anywhere else.
+ */
+export async function resolveAssistantModel(
+  ctx: ServerCtx,
+  requested: string | undefined,
+): Promise<{ readonly modelUsed: string; readonly note: string | null }> {
+  if (requested === undefined) return { modelUsed: DEFAULT_ASSISTANT_MODEL, note: null };
+  const installed = await installedModels(ctx);
+  if (installed.includes(requested)) return { modelUsed: requested, note: null };
+  return {
+    modelUsed: DEFAULT_ASSISTANT_MODEL,
+    note: `model ${requested} is not installed; answered with ${DEFAULT_ASSISTANT_MODEL}`,
+  };
+}
 
 /**
  * The recalled-first, recent-second Vault memory Ask Zeno is shown.
@@ -97,12 +135,12 @@ function recalledMemory(ctx: ServerCtx, question: string): readonly { id: string
  * empty reply) so the caller falls through to the honest final refusal rather
  * than rendering nothing as something.
  */
-async function askGeneral(ctx: ServerCtx, question: string): Promise<string | null> {
+async function askGeneral(ctx: ServerCtx, question: string, model: string): Promise<string | null> {
   try {
     const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'qwen3:8b', prompt: buildGeneralPrompt(question), stream: false, think: false }),
+      body: JSON.stringify({ model, prompt: buildGeneralPrompt(question), stream: false, think: false }),
     });
     if (!r.ok) return null;
     const text = withoutReasoning(((await r.json()) as { response?: string }).response ?? '').trim();
@@ -117,6 +155,15 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   const question = str(body, 'question');
   if (question === null || question.trim() === '') {
     return json(res, 400, { error: { code: 'bad-request', message: 'Ask a question.', resolve: 'POST {"question":"what is waiting on me?"}.' } });
+  }
+  // An optional local model id from the picker. Validated as a NAME here;
+  // whether it is installed is decided against Ollama's own list below.
+  if (body['model'] !== undefined && typeof body['model'] !== 'string') {
+    return json(res, 400, { error: { code: 'bad-model', message: 'model must be a string.', resolve: 'Send an installed local model id from GET /forge/agents, or omit it.' } });
+  }
+  const requestedModel = str(body, 'model')?.trim() || undefined;
+  if (requestedModel !== undefined && (requestedModel.length > 128 || /\s/.test(requestedModel) || requestedModel.includes(String.fromCharCode(0)))) {
+    return json(res, 400, { error: { code: 'bad-model', message: 'model is not a valid local model id.', resolve: 'Send an installed local model id from GET /forge/agents, or omit it.' } });
   }
 
   const work = await ctx.opts.work.list().catch(() => null);
@@ -152,36 +199,43 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   });
 
   const prompt = buildAssistantPrompt(question, snapshot);
-  const note = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
+  const truncationNote = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
 
   // A greeting, a thank-you, or "what can you do?" has no fact to ground, so
   // the grounded model can only refuse it — and a chat that answers "hey"
   // with "I cannot answer that from your Zeno." reads as broken. These are
   // answered here, deterministically and entirely from the same snapshot the
   // model would have seen: every number below is the owner's real local
-  // state, so the reply is grounded by construction and no model is asked.
+  // state, so the reply is grounded by construction and no model is asked —
+  // which is why `modelUsed` is honestly null here.
   const greeting = conversationalReply(question, snapshot);
   if (greeting !== null) {
-    return json(res, 200, { answer: greeting, cited: [], ungrounded: null, proposal: null, delegated: null, note });
+    return json(res, 200, { answer: greeting, cited: [], ungrounded: null, proposal: null, delegated: null, note: truncationNote, modelUsed: null });
   }
 
   let answer: string;
   await ensureOllama(ctx); // asking a question is the instruction to start the answerer
+  const chosen = await resolveAssistantModel(ctx, requestedModel);
+  const modelUsed = chosen.modelUsed;
+  // `note` keeps carrying truncation; a model fallback is appended to it so the
+  // window shows it without a new field, and `modelUsed` names the model on
+  // every reply so a picker can confirm what actually answered.
+  const note = [truncationNote, chosen.note].filter((part): part is string => part !== null).join(' · ') || null;
   try {
     const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'qwen3:8b', prompt, stream: false, think: false }),
+      body: JSON.stringify({ model: modelUsed, prompt, stream: false, think: false }),
     });
     if (!r.ok) {
-      return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `The local model answered ${r.status}. Is qwen3:8b pulled?` });
+      return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `The local model answered ${r.status}. Is ${modelUsed} pulled?`, modelUsed });
     }
     answer = cleanGroundedReply(
       withoutReasoning(((await r.json()) as { response?: string }).response ?? ''),
       snapshot,
     );
   } catch {
-    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: 'Ollama is not running, so nobody can answer this. Start it, then pull a model (ollama pull qwen3:8b). Your Zeno state is unaffected.' });
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `Ollama is not running, so nobody can answer this. Start it, then pull a model (ollama pull ${modelUsed}). Your Zeno state is unaffected.`, modelUsed });
   }
 
   const grounding = groundReply(answer, snapshot);
@@ -201,7 +255,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
       return json(res, 200, {
         answer: null, flagged: answer, cited: grounding.cited,
         ungrounded: { unknownIds: grounding.unknownIds, claimsWithoutCitation: grounding.claimsWithoutCitation },
-        proposal: null, delegated: delegatedOffer, note,
+        proposal: null, delegated: delegatedOffer, note, modelUsed,
       });
     }
 
@@ -224,7 +278,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
       return json(res, 200, {
         answer: 'That needs something current or external — nothing in your local state answers it, and my own '
           + 'knowledge may be stale or wrong for it. Forge can look it up.',
-        cited: [], ungrounded: null, proposal: null, delegated: delegatedOffer, note,
+        cited: [], ungrounded: null, proposal: null, delegated: delegatedOffer, note, modelUsed,
       });
     }
 
@@ -235,20 +289,21 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     // sees the snapshot and is never checked by `groundReply`, and the caller
     // is told plainly which kind of answer it is (`general: true`) — grounded
     // and general are never allowed to look the same on screen.
-    const general = await askGeneral(ctx, question);
+    const general = await askGeneral(ctx, question, modelUsed);
     if (general !== null) {
       // `note` stays exactly what it means everywhere else in this response —
-      // truncation, and nothing else. The UI labels a general answer from the
-      // `general` flag alone (bind/ask.js), so the two are never duplicated.
+      // truncation plus, at most, the model fallback. The UI labels a general
+      // answer from the `general` flag alone (bind/ask.js), so the two are
+      // never duplicated.
       return json(res, 200, {
-        answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note,
+        answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note, modelUsed,
       });
     }
 
     return json(res, 200, {
       answer: null, flagged: answer, cited: grounding.cited,
       ungrounded: { unknownIds: grounding.unknownIds, claimsWithoutCitation: grounding.claimsWithoutCitation },
-      proposal: null, delegated: null, note,
+      proposal: null, delegated: null, note, modelUsed,
     });
   }
 
@@ -285,5 +340,5 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   if (answer.trim() === CANNOT_ANSWER && intent === null) {
     answer = 'I only answer from your local state — I don’t guess. Ask me what’s waiting on you, what’s in the workspace, what ran today, or what you’ve saved to memory. Or describe a task and I’ll run it in Forge.';
   }
-  json(res, 200, { answer, cited: grounding.cited, ungrounded: null, proposal, delegated, note });
+  json(res, 200, { answer, cited: grounding.cited, ungrounded: null, proposal, delegated, note, modelUsed });
 }
