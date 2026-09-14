@@ -11,7 +11,7 @@
  *
  * This is also the closest thing to a "vibe-code" integration test in the
  * suite: it asks a real local model to change a real file, and follows the run
- * from dispatch to a held proposal.
+ * through the governed T0 auto-apply path to its signed receipt.
  */
 
 export const id = 'forge-progress';
@@ -37,17 +37,26 @@ export async function run({ daemon, page, ok, Blocked }) {
   await page.click('[data-product="forge"]');
   await page.waitForTimeout(800);
 
+  const beforeFile = await daemon.api('/forge/file?path=README.md');
+
   // Start a run WITHOUT awaiting it — we need to observe it mid-flight. Drive
   // POST /forge/run from the page so the owner cookie authenticates it, and do
   // not await the promise: a local run can take a while.
   const runId = `e2e-progress-${Date.now().toString(36)}`;
   await page.evaluate(({ model: m, runId: rid }) => {
     window.__runDone = false;
+    window.__runResult = null;
     fetch('/forge/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-zeno-token': document.querySelector('meta[name="zeno-token"]').content },
       body: JSON.stringify({ task: 'Add a comment line at the very top of README.md that says what this repository is for.', agentId: 'local', model: m, runId: rid }),
-    }).then(() => { window.__runDone = true; }).catch(() => { window.__runDone = true; });
+    }).then(async (response) => {
+      window.__runResult = { status: response.status, body: await response.json() };
+      window.__runDone = true;
+    }).catch((error) => {
+      window.__runResult = { status: 0, error: String(error) };
+      window.__runDone = true;
+    });
   }, { model, runId });
 
   // The progress line must appear and show a real orchestration phase.
@@ -56,6 +65,7 @@ export async function run({ daemon, page, ok, Blocked }) {
       const h = document.querySelector('.forge-progress');
       return h && !h.hidden && /Checking|Preparing|working|Inspecting|approvals/i.test(h.textContent || '');
     },
+    undefined,
     { timeout: 30_000 },
   ).then(() => true).catch(() => false);
   ok('a live progress line appears during the run', shown);
@@ -74,27 +84,41 @@ export async function run({ daemon, page, ok, Blocked }) {
     ok('the percent is shown', await page.evaluate(() => /\d+%/.test(document.querySelector('.forge-progress')?.textContent || '')));
   }
 
-  // Wait for the run to finish (or time out generously), then assert the change
-  // is HELD, not applied — the whole point of the loop.
-  await page.waitForFunction(() => window.__runDone === true, { timeout: 180_000 }).catch(() => {});
+  // Wait for the run to finish (or time out generously), then assert the
+  // governed result. A one-line README edit is an ordinary sandbox write under
+  // the documented Devin-feel policy: T0 auto-applies and is still receipted.
+  // Forge output only waits when its assessed effect is T1+ (sensitive path,
+  // destructive edit, rewrite, secret, or another explicitly held change).
+  await page.waitForFunction(() => window.__runDone === true, undefined, { timeout: 180_000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
+  const runResult = await page.evaluate(() => window.__runResult);
   const st = await daemon.api('/state');
   const held = st.body.pending || [];
   const receipts = st.body.receipts || [];
-  ok('the run proposed a change that is HELD, not applied', held.length >= 1 || receipts.length === 0,
-    `pending=${held.length} receipts=${receipts.length}`);
-  if (held.length) {
-    ok('the held change is a patch.task from the agent, awaiting approval',
-      held.some((p) => (p.kind === 'patch.task') || (p.binding && p.binding.kind === 'patch.task') || p.tier),
-      JSON.stringify(held.map((p) => ({ tier: p.tier, kind: p.kind || (p.binding && p.binding.kind) }))));
+  const proposed = runResult?.body?.proposed || [];
+  ok('the run returned a successful governed result', runResult?.status === 200,
+    JSON.stringify(runResult));
+  ok('the ordinary README edit was assessed as T0 auto-apply',
+    proposed.length === 1 && proposed[0].path === 'README.md' && proposed[0].tier === 'T0' && proposed[0].auto === true,
+    JSON.stringify(proposed));
+  ok('the T0 edit left no approval pending and sealed one verified receipt',
+    held.length === 0 && receipts.length === 1 && receipts[0].outcome === 'verified',
+    `pending=${held.length} receipts=${JSON.stringify(receipts.map((r) => ({ outcome: r.outcome, actionHash: r.actionHash })))}`);
+  if (proposed.length === 1 && receipts.length === 1) {
+    ok('the receipt belongs to the exact Forge proposal',
+      receipts[0].actionHash === proposed[0].actionHash,
+      `proposal=${proposed[0].actionHash} receipt=${receipts[0].actionHash}`);
   }
 
-  // The sandbox file must NOT have changed yet — nothing lands without approval.
+  // The committed receipt must correspond to an observable effect in the
+  // sandbox. Comparing the complete seeded contents catches any valid model
+  // wording instead of guessing the exact comment it chose.
   const file = await daemon.api('/forge/file?path=README.md');
-  if (file.status === 200 && typeof file.body.contents === 'string') {
-    ok('the sandbox file is untouched until the owner approves',
-      !/what this repository is for/i.test(file.body.contents),
+  if (beforeFile.status === 200 && typeof beforeFile.body.contents === 'string'
+      && file.status === 200 && typeof file.body.contents === 'string') {
+    ok('the T0 Forge edit changed the sandbox file without an approval click',
+      file.body.contents !== beforeFile.body.contents,
       file.body.contents.slice(0, 80));
   }
 }

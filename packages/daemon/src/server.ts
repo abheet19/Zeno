@@ -21,14 +21,14 @@
  */
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
-import { nodeGitRunner, nodeSandboxFs } from '@abheet19/zeno-kernel';
+import { fileHash, jail, nodeGitRunner, nodeSandboxFs, samePath } from '@abheet19/zeno-kernel';
 import { Stream } from './stream.js';
 import { installBeforeServerClose } from './lifecycle.js';
 import { Memory } from '@abheet19/zeno-vault';
 import { createMemoryRoutes } from './memory-routes.js';
 import { ALLOWLIST_FILE, chromeDesk, readOriginPolicy, type ChromeDesk } from '@abheet19/zeno-chrome';
 import { TrustStore } from '@abheet19/zeno-mesh';
-import { parseHeld } from './held-store.js';
+import { parseHeld, serializeHeld } from './held-store.js';
 import { publishMemoryChanged, publishPending, type ServerCtx } from './server/context.js';
 import type { DaemonOptions } from './server/options.js';
 import { cookie, fail, header, json, readJson } from './routes/http.js';
@@ -135,18 +135,28 @@ export function createServer(opts: DaemonOptions): Server {
   // re-registered with the kernel by re-previewing its exact request — the
   // binding is content-addressed, so the same request regenerates the same
   // actionHash and the kernel can approve it again. A record whose action the
-  // ledger already settled is dropped rather than resurrected.
+  // ledger already settled is dropped rather than resurrected. The target and
+  // base are revalidated here too: a persisted capsule whose repository moved
+  // or whose file changed cannot ever be safely approved, so retaining it only
+  // leaves an impossible decision blocking project changes forever.
   if (opts.heldStore) {
-    for (const rec of parseHeld(opts.heldStore.readAll())) {
+    const restored = parseHeld(opts.heldStore.readAll());
+    for (const rec of restored) {
       try {
         const fresh = opts.kernel.preview(rec.req);
         if (fresh.actionHash !== rec.preview.actionHash || fresh.auto || fresh.denied) continue;
+        const target = jail(opts.fs, opts.sandbox, rec.payload.relPath);
+        if (!samePath(target, rec.req.targetRef)) continue;
+        if (fileHash(opts.fs.readFile(target)) !== rec.payload.expectBaseHash) continue;
         held.set(fresh.actionHash, { preview: fresh, payload: rec.payload, req: rec.req });
       } catch {
         // A record that no longer previews cleanly (a policy change moved it) is
         // dropped: the owner re-proposes, which is a harmless cost.
       }
     }
+    // Make pruning durable. Otherwise the same invalid capsule is reconsidered
+    // on every restart and keeps reappearing as an old pending approval.
+    if (held.size !== restored.length) opts.heldStore.writeAll(serializeHeld(held.values()));
   }
 
   // `ctx` is assigned once, below, after every piece of state it holds has

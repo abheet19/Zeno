@@ -558,6 +558,56 @@ test('a waiting proposal survives a daemon restart and is still approvable', asy
   }
 });
 
+test('a persisted proposal whose base drifted is pruned and cannot block the project forever', async () => {
+  const { nodeHeldStore } = await import('../src/held-store.js');
+  const { nodeWorkDesk } = await import('../src/work.js');
+  const dir = mkdtempSync(join(tmpdir(), 'zeno-persist-drift-'));
+  const sandbox = join(dir, 'sandbox');
+  const heldPath = join(dir, 'pending.jsonl');
+  const ledgerPath = join(dir, 'ledger.jsonl');
+  const tokens = mintTokens();
+  const stand = () => {
+    const fs = nodeSandboxFs();
+    const kernel = new Kernel(nodeWorld(fs), { store: nodeLedgerStore(ledgerPath) });
+    const server = createServer({
+      kernel, sandbox, fs, tokens,
+      stream: new Stream(), publicDir: join(dir, 'public'),
+      work: nodeWorkDesk(dir), heldStore: nodeHeldStore(heldPath),
+    });
+    return server;
+  };
+  const post = (base: string, path: string, token: string, body: unknown) => fetch(base + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-zeno-token': token },
+    body: JSON.stringify(body),
+  });
+
+  try {
+    const first = stand();
+    await new Promise<void>((ok) => first.listen(0, '127.0.0.1', ok));
+    const base1 = `http://127.0.0.1:${(first.address() as AddressInfo).port}`;
+    const made = await post(base1, '/previews', tokens.proposer, RISKY);
+    assert.equal(made.status, 200);
+    await new Promise<void>((ok) => first.close(() => ok()));
+    assert.notEqual(readFileSync(heldPath, 'utf8').trim(), '', 'the undecided proposal was persisted');
+
+    mkdirSync(sandbox, { recursive: true });
+    writeFileSync(join(sandbox, 'package.json'), '{"moved":true}\n', 'utf8');
+
+    const second = stand();
+    await new Promise<void>((ok) => second.listen(0, '127.0.0.1', ok));
+    const base2 = `http://127.0.0.1:${(second.address() as AddressInfo).port}`;
+    const state = await (await fetch(base2 + '/state', { headers: { 'x-zeno-token': tokens.owner } })).json() as { pending: unknown[] };
+    assert.equal(state.pending.length, 0, 'an action bound to old bytes is no longer offered as approvable');
+    const project = await (await fetch(base2 + '/forge/project', { headers: { 'x-zeno-token': tokens.owner } })).json() as { project: { canChange: boolean } };
+    assert.equal(project.project.canChange, true, 'the impossible old decision does not block choosing a project');
+    assert.equal(readFileSync(heldPath, 'utf8').trim(), '', 'the stale record is durably pruned');
+    await new Promise<void>((ok) => second.close(() => ok()));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── memory: the Vault, served ───────────────────────────────────────────────
 
 test('memory can be remembered and recalled, and a brief reflects it', async () => {
