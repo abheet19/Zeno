@@ -36,6 +36,17 @@ between what it **proposes** and what actually **happens**.
 > no inbound surface at all. See [what can reach the internet](#-what-can-reach-the-internet) for
 > the precise, unglamorous truth.
 
+> [!NOTE]
+> **Recent (2026-09-14): a Devin-style pass on Forge.** Fixed the desktop window occasionally opening
+> without its owner token (the cause of an apparently-dead UI); Forge now opens to **Agent** view by
+> default and shows an **"Open a project"** prompt instead of silently landing in a scratch repo; the
+> "paired phone" editor lock was a CSS width breakpoint misfiring on a same-machine browser, not a real
+> capability gate, and is fixed; the Command orb no longer draws duplicate nodes and animates reliably;
+> the composer stays on-screen at narrow widths; the `/` command palette and the editor's syntax theme
+> were both expanded. This pass is code-reviewed and gate-tested (daemon 196/196, desktop 107/107) but
+> **not yet live-verified end-to-end** — a further round (per-skill/per-rule slash commands, two
+> remaining dead pills, the orb's accessible list view, the title-bar window buttons) is queued.
+
 <div align="center">
 
 `⌘ Command` &nbsp;·&nbsp; `⚒ Forge` &nbsp;·&nbsp; `◎ Counsel`
