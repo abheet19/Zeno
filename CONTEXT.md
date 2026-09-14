@@ -295,3 +295,241 @@ Use `docs/SANITY.md` in the repository, or `09_SANITY_CHECK.md` in the Study Pac
 4. Use one capture owner at a time and keep Counsel consent-gated, microphone-only, and post-meeting for Q&A.
 5. Exercise a CTA and verify canonical state/receipt; visible controls alone are not evidence.
 6. Keep changes small. Never reset unreviewed work. Require the owner’s explicit authorization for new hosted-provider egress, public distribution, or a release that spends money.
+
+
+## Annotated core code + knowledge graph
+
+> Purpose of this section: let an interview-assist AI explain the *actual* kernel code on Abheet's screen — not the pitch. Everything below is quoted verbatim from `packages/kernel/src/*` on branch `phase-0-and-p1-01-kernel`. Real file, function, and field names only; nothing invented. The kernel has **no UI, no LLM, no network** — it is a pure, deterministic state machine (`classify -> preview -> approve -> commit`) with all non-determinism injected through a `World` interface, which is what makes it replayable and unit-testable.
+
+### Knowledge graph / structure summary
+
+```mermaid
+flowchart TD
+    subgraph AGENT["proposer (agent) channel"]
+      REQ["ActionRequest<br/>kind, payload, baseHash, targetRef, requestedBy"]
+    end
+    subgraph OWNER["owner channel"]
+      APR["approve() + AuthEvidence"]
+    end
+
+    REQ --> PREVIEW
+
+    subgraph KERNEL["kernel.ts — the state machine + 7 laws"]
+      PREVIEW["preview()<br/>build Binding, actionHash = hashOf(binding)<br/>state = AUTO(T0) / PREVIEWED / DENIED(T4)"]
+      APPROVE["approve()<br/>L6 self-approval guard, T4 denied,<br/>T2+ needs authenticator, single-use nonce"]
+      COMMIT["commit()<br/>CAS recheck -> spend -> ONE attempt -> receipt"]
+    end
+
+    APR --> APPROVE
+    PREVIEW --> APPROVE --> COMMIT
+
+    POLICY["policy.ts<br/>classify() rounds UP; validatePolicy()<br/>payment=T4, financial-zone=T4 enforced"]
+    RISK["risk.ts<br/>assessWrite() tiering:<br/>destructive / sensitive-path / >40-line / routine"]
+    TYPES["types.ts<br/>Tier, ActionKind, Binding, Receipt,<br/>World, Executor, PolicyError"]
+
+    PREVIEW -. classify .-> POLICY
+    POLICY -. per-write escalation .-> RISK
+    KERNEL -. all shapes .-> TYPES
+
+    subgraph EXEC["executor.ts — the 'hand' (JAILED / ATOMIC / PROVEN)"]
+      JAIL["jail(): path containment,<br/>Windows traps, symlink realpath check"]
+      WRITE["worktreeExecutor(): payload-hash match,<br/>base-check, writeAtomic, reconcile"]
+    end
+    COMMIT -->|"exec(binding)"| WRITE
+    WRITE --> JAIL
+
+    subgraph LEDGER["ledger.ts — append-only receipts"]
+      APPEND["append(): link prevReceipt,<br/>selfHash = sign(hashOf(body))"]
+      VERIFY["verify(): re-hash each line,<br/>check chain link + truncation anchor"]
+    end
+    COMMIT -->|"write() every outcome"| APPEND
+    APPEND -. Ed25519 detached sig .-> SIGNER["signer.ts<br/>ed25519Signer.signHash(selfHash)"]
+    HASH["hash.ts<br/>canonicalJSON (sorted keys, __proto__-safe)<br/>sha256 / hashOf"]
+    APPEND -. hashOf .-> HASH
+    PREVIEW -. hashOf(binding) .-> HASH
+
+    WORLD["World (injected)<br/>now() id() readBase() approvalTtlMs<br/>— the only non-determinism"]
+    WORLD -. CAS readBase .-> COMMIT
+
+    classDef kern fill:#1e3a8a,stroke:#93c5fd,color:#fff
+    classDef pol fill:#065f46,stroke:#6ee7b7,color:#fff
+    classDef exec fill:#7c2d12,stroke:#fdba74,color:#fff
+    classDef led fill:#4c1d95,stroke:#c4b5fd,color:#fff
+    classDef ext fill:#334155,stroke:#94a3b8,color:#fff
+    class PREVIEW,APPROVE,COMMIT kern
+    class POLICY,RISK pol
+    class JAIL,WRITE exec
+    class APPEND,VERIFY,SIGNER,HASH led
+    class REQ,APR,WORLD,TYPES ext
+```
+
+**One line per file that matters (`packages/kernel/src/`):**
+
+| File | Owns |
+| --- | --- |
+| `types.ts` | Single source of truth for shapes: `Tier`, the `ACTION_KINDS`/`DATA_ZONES` const arrays (types derived from them), `ActionRequest`, `Binding`, `Approval`, `Receipt`, injected `World`/`Executor`, and `PolicyError`. |
+| `policy.ts` | Policy-as-data: `DEFAULT_POLICY`, `classify()` (deterministic, rounds **up** on ambiguity), `validatePolicy()` (refuses to load a policy that drops the payment/financial T4 floor), `policyHash()`. |
+| `risk.ts` | The "Devin-feel" per-write tiering: `assessWrite()` + `SENSITIVE_PATHS` + `ROUTINE_LINE_BUDGET`. Decides which writes auto-apply vs. escalate. Pure strings-in, kind-out. |
+| `kernel.ts` | The state machine and the seven laws: `preview()` (content-addresses the action), `approve()` (owner-only, single-use, L6 guard), `commit()` (CAS → spend → one attempt → receipt), boot-time chain verify. |
+| `executor.ts` | The file-write "hand": `jail()`/`jailPath()` (containment + Windows traps + symlink realpath), `worktreeExecutor()` (payload-hash match, base-check, `writeAtomic`, reconcile), `fileHash()`. |
+| `ledger.ts` | Append-only hash-chained receipt log: `Ledger.append()`, `verify()` (localizes first break + truncation anchor), `verifySignatures()`, terminal-action memory for "one attempt, ever". |
+| `signer.ts` | `ed25519Signer()` / `verifyReceiptSignature()` — detached Ed25519 over each `selfHash`; the step from tamper-**evident** to tamper-**proof**. |
+| `hash.ts` | `canonicalJSON()` (recursively sorted keys, `Object.create(null)` to defeat a `__proto__` splice), `sha256()`, `hashOf()` — the deterministic identity function everything else leans on. |
+| `*-node-fs.ts` / `signer-node.ts` | Thin `node:fs` / `node:crypto` adapters kept OUT of the pure files, so the kernel logic itself never touches ambient I/O. |
+
+**Data/control flow in one breath:** an agent's `ActionRequest` enters `preview()`, which asks `policy.classify()` for a tier (and `risk.assessWrite()` for whether a file write is routine), then computes the action's identity as `hashOf(Binding)`. The owner (a *different* channel) calls `approve()`, minting a single-use nonce. `commit()` re-reads the world via `World.readBase()` (compare-and-swap), and only if the base is unchanged does it spend the approval and run the injected `Executor` **exactly once**; the `executor.ts` hand writes atomically inside a jail and proves the result. Every outcome — success, refusal, denial, unknown — is written to `ledger.ts`, which links it into an Ed25519-signed hash chain via `signer.ts` and `hash.ts`.
+
+---
+
+### Excerpt 1 — the tiering: `risk.assessWrite()` (`risk.ts`, the "Devin-feel" core)
+
+The escalation ladder that decides which writes auto-apply and which stop for a human. Rules are ordered **most-severe first**; the first match wins, so escalation only ever goes up.
+
+```ts
+export function assessWrite(relPath: string, before: string | null, after: string): WriteRisk {
+  const existed = before !== null;
+
+  // 1. Destroying work already there -> the loudest tier (T3 'destructive').
+  if (existed && before.trim().length > 0 && after.trim().length === 0) {
+    return { kind: 'destructive', reasons: [`"${relPath}" would be emptied ...`], routine: false };
+  }
+  if (existed && before.length > 200 && after.length < before.length / 4) {
+    return { kind: 'destructive', reasons: [`"${relPath}" would lose most of its content ...`], routine: false };
+  }
+
+  // 2. Files where one character changes what every future run does -> T1, never routine.
+  if (isSensitivePath(relPath)) {
+    return { kind: 'patch.task', reasons: [`"${relPath}" is configuration, credentials or build setup ...`], routine: false };
+  }
+
+  // 3. A rewrite wearing an edit's clothes: past the 40-line budget -> T1.
+  const delta = changedLines(before ?? '', after);
+  if (delta > ROUTINE_LINE_BUDGET) {
+    return { kind: 'patch.task', reasons: [`${delta} lines change — past the ${ROUTINE_LINE_BUDGET}-line budget ...`], routine: false };
+  }
+
+  // 4. Everything else: an ordinary edit inside the sandbox. It happens, and it is
+  //    receipted like everything else — "routine" means unattended, not unrecorded.
+  return { kind: 'local.write', reasons: [ /* "... routine" */ ], routine: true };
+}
+```
+
+Line-by-line intent:
+- `existed = before !== null` — a `null` base means the file does not exist yet (a create), which can never be a "destroy".
+- **Rule 1 (empty-out / shrink-to-a-quarter)** returns `kind: 'destructive'`, which the policy rates **T3** — the highest *approvable* tier — because deleting existing work is the one case worth the loudest interrupt.
+- **Rule 2** `isSensitivePath()` tests `relPath` against `SENSITIVE_PATHS` (regexes for `package.json`, lockfiles, `.env`, `.git/`, `.github/`, `Dockerfile`, `tsconfig`/`vite.config`, `*.key`/`*.pem`, `id_rsa`, `CLAUDE.md`/`AGENTS.md`, dotfiles). Any hit is `patch.task` = **T1**, so it stops even for a one-character change: "one character in any of these can execute code, leak a secret, or change what every future build does."
+- **Rule 3** `changedLines()` computes added+removed lines by trimming the common prefix and suffix (the cheapest honest diff size). Over `ROUTINE_LINE_BUDGET` (40) it is treated as a rewrite, not an edit.
+- **Rule 4** is the only path that returns `routine: true` — an ordinary source edit inside the jail. It auto-applies at **T0** but is still written to the receipt ledger. The comment is the whole thesis: *routine means unattended, not unrecorded.*
+
+**Interviewer might ask — "Why not just require approval on every write? Isn't that safer?"** No — that is the failure mode the product exists to prevent. The file header says it directly: "An approval that is always asked for is an approval nobody reads." If you interrupt on trivial edits, the owner learns to click Approve reflexively, and then the *dangerous* approval also gets clicked through. So the design trades a real reduction in blast-radius safety (a leaked proposer token can now cause small sandbox edits directly) for a large gain in *approval attention* — and it bounds that trade explicitly: routine writes can never touch config, delete content, exceed 40 lines, or leave the jail, and every one is on the tamper-evident record. Complexity is O(n) in file length (two `split('\n')` + a prefix/suffix scan); the rule set is deliberately tiny so "you can hold all of them in your head", which matters for code that decides when to interrupt a human.
+
+---
+
+### Excerpt 2 — the approval kernel: L6 self-approval guard + CAS / one-attempt / receipt (`kernel.ts`)
+
+The two rules the whole trust boundary rests on. First, **L6 — proposing is not approving** — enforced in the type system inside `approve()`:
+
+```ts
+// L6, in the type system rather than by convention: whoever proposed an
+// action can never be the one who approves it.
+if (opts.approver !== undefined && opts.approver === rec.req.requestedBy) {
+  throw new PolicyError(
+    'self-approval-forbidden',
+    `"${opts.approver}" proposed this action and so cannot also approve it.`,
+    'An approval must come from the owner channel, never from the agent that asked for it.',
+  );
+}
+```
+
+`rec.req.requestedBy` was captured at `preview()` from the agent; `opts.approver` is who is granting now. If they are the same principal, it throws before any nonce is minted. (The daemon *also* makes this a process boundary via separate proposer/owner tokens — this is the same rule enforced a second time, in the core.)
+
+Then the heart of `commit()` — compare-and-swap, spend-before-attempt, exactly one attempt, receipt-derived-from-return:
+
+```ts
+// Compare-and-swap: re-read the CURRENT base. If it drifted, refuse — and do
+// NOT spend the approval, so the owner can re-preview against the new base. (L3)
+const observed = this.world.readBase(rec.binding.targetRef);
+if (observed !== rec.binding.baseHash) {
+  if (rec.state === 'APPROVED') rec.state = 'PREVIEWED';
+  return this.write(rec, 'refused', `Base drifted (...); nothing applied.`, observed, { effect: 'none' });
+}
+
+// Spend BEFORE the attempt, so a crash cannot yield a reuse. (L4)
+rec.state = 'SPENT';
+
+// Exactly one attempt. No retry loop — an unprovable result is OUTCOME_UNKNOWN. (L2)
+let proof: EffectProof;
+try {
+  proof = await exec(rec.binding);
+} catch (err) {
+  const reason = err instanceof Error ? `executor error: ${err.message}` : 'executor failed';
+  return this.write(rec, 'outcome-unknown', reason, observed, { effect: 'none' });
+}
+// Deliberately OUTSIDE that catch. A failure to RECORD a real effect must
+// surface as a thrown error; recording it as "nothing happened" would be the
+// exact opposite of the truth.
+return this.write(rec, 'verified', null, observed, proof);
+```
+
+Line-by-line intent:
+- `this.world.readBase(...)` — the world is re-read *now*, at commit, not trusted from preview time. `world` is injected, so this is deterministic in tests.
+- **If `observed !== baseHash`** the underlying file/ticket moved since approval → outcome `refused`, and crucially the approval is **left unspent** (state goes back to `PREVIEWED`). `refused` is the *only* non-terminal outcome, so the owner can re-preview against the new base. This is optimistic concurrency (CAS), not a lock.
+- **`rec.state = 'SPENT'` happens BEFORE `exec()`** — the ordering is the point. If the process crashes mid-attempt, the action is already marked spent (and the ledger records terminal actions durably), so recovery can never grant it a second attempt (law L4/L2, "one attempt, ever").
+- **The single `await exec(rec.binding)`** is the only place an external effect can occur. There is no retry loop: a thrown executor error becomes `outcome-unknown` — the honest state when you cannot prove what happened — never a silent retry.
+- **The final `return this.write(..., 'verified', ..., proof)` is deliberately OUTSIDE the catch.** If recording the receipt itself fails after a real effect landed, that must throw loudly — logging "nothing happened" over a real effect would be the worst possible lie in an audit system (law L5: success derives only from the receipt).
+
+**Interviewer might ask — "Why compare-and-swap instead of locking the file while it's approved?"** A lock would have to be held across a human decision that might take minutes or be abandoned, blocking everything else and risking stale locks on crash. CAS is lock-free and optimistic: it lets many proposals coexist and only refuses at the last instant if the world actually moved, at which point re-previewing is cheap and correct. The trade is a wasted proposal on genuine contention — acceptable, because a stale *write* is the thing you must never allow. **"Why spend the approval before running, not after?"** Because the dangerous failure is *reuse*, not *waste*: spending-after leaves a window where a crash-and-restart could replay the approval; spending-before means the worst case is a spent approval with an unknown outcome (recorded as `outcome-unknown`), which is safe and auditable.
+
+---
+
+### Excerpt 3 — the tamper-evident chain + Ed25519 signing (`ledger.ts`, `signer.ts`)
+
+Every receipt links to the previous one by hash; a signer stamps each link. `append()`:
+
+```ts
+append(r: NewReceipt): Receipt {
+  const prevReceipt = this.entries.at(-1)?.selfHash ?? null;   // link to current tip (null at genesis)
+  const body = { ...r, prevReceipt };
+  const selfHash = this.sign(hashOf(body));                    // hash covers the WHOLE receipt incl. prevReceipt
+  const signature = this.receiptSigner ? this.receiptSigner.signHash(selfHash) : undefined;
+  const receipt: Receipt = signature === undefined ? { ...body, selfHash } : { ...body, selfHash, signature };
+
+  // DURABLE FIRST, then in memory. If the store throws, nothing enters the
+  // in-memory chain, so it can never run ahead of the file and fork it.
+  this.store?.append(JSON.stringify(receipt));
+  this.entries.push(receipt);
+  this.remember(receipt);   // record terminal actions so "one attempt" survives a restart
+  this.anchor();            // persist {count, tip} so tail-truncation is detectable
+  return receipt;
+}
+```
+
+And the check that makes it *evident*, inside `verify()`:
+
+```ts
+if (e.selfHash !== this.sign(hashOf(bodyOf(e)))) {
+  return { ok: false, firstBreakAt: i, reason: 'that record no longer matches its own hash' };
+}
+if ((e.prevReceipt ?? null) !== prev) {
+  return { ok: false, firstBreakAt: i, reason: 'that record does not link to the one before it' };
+}
+prev = e.selfHash;
+```
+
+The signer that upgrades evident → proof (`signer.ts`):
+
+```ts
+signHash(selfHashHex: string): string {
+  // Ed25519 takes `null` for the digest algorithm — it hashes internally.
+  return cryptoSign(null, Buffer.from(selfHashHex, 'utf8'), key).toString('hex');
+}
+```
+
+Line-by-line intent:
+- `prevReceipt = this.entries.at(-1)?.selfHash ?? null` — each receipt names the hash of the one before it; the first ("genesis") receipt has `null`. That is what makes it a *chain*: change any earlier receipt and every later `prevReceipt` stops matching.
+- `selfHash = this.sign(hashOf(body))` — `hashOf` canonicalizes (sorted keys) then SHA-256s the *entire* body including `prevReceipt`. `bodyOf()` in `verify()` re-derives the covered bytes by *excluding* `selfHash` and `signature`, so append and verify can never drift, and a pre-v2 receipt with fewer fields still verifies (the hash covers exactly the keys that line carries).
+- **Durable-first ordering** (`store.append` before `entries.push`) guarantees the in-memory chain can never be ahead of the file — if the disk write throws, the caller sees the failure instead of holding a receipt that exists nowhere.
+- `anchor()` writes a tiny `{count, tip}` head record. A hash chain *cannot see its own tail being cut off* — lop off the last N lines and the remaining prefix is still self-consistent — so this external anchor is what lets `verify()` catch truncation.
+- The Ed25519 `signHash` produces a *detached* signature over `selfHash`. `verify()` proves internal consistency; `verifySignatures(pubKey)` proves **authenticity** — because anyone who can rewrite the file can also recompute the SHA-256 hashes, but only the holder of the private key can produce a valid signature. Ed25519 is deterministic, so a signed ledger stays byte-identical across a replay — the property the whole kernel depends on.
+
+**Interviewer might ask — "Tamper-evident vs tamper-proof — what's the real difference here, and why both?"** The hash chain is tamper-*evident*: it detects and localizes any edit, deletion, or reorder, and `verify()` reports the first break in plain words. But it is not tamper-*proof* on its own, because an attacker with write access can rewrite a receipt *and* recompute every downstream hash to produce a fresh internally-consistent chain. The Ed25519 detached signature closes exactly that hole: forging requires the private key, and any verifier needs only the public key. **"Why hash the canonical JSON rather than the raw string?"** Determinism — `canonicalJSON` in `hash.ts` sorts object keys recursively so two equal objects always hash identically regardless of key order, and it builds the sorted object with `Object.create(null)` specifically so a spliced `__proto__` key can't vanish into `Object.prototype` and escape the hash (a subtle way a hand-edited receipt could otherwise still verify). Complexity: `verify()` is a single O(n) pass over the receipts, one SHA-256 per line; `verifySignatures()` adds one Ed25519 verify per line.
