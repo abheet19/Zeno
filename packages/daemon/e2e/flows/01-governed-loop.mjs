@@ -38,7 +38,10 @@ export async function run({ daemon, page, ok }) {
 
   // --- both appear on the owner's Approvals screen, with live controls
   await page.click('.nav-i[data-screen="approvals"]');
-  await page.waitForTimeout(1200);
+  await page.waitForFunction(
+    () => document.querySelectorAll('.screen[data-screen="approvals"] .caps').length === 2,
+    { timeout: 15_000 },
+  );
   const cards = await page.$$eval('.screen[data-screen="approvals"] .caps', (els) => els.map((c) => ({
     text: c.textContent.replace(/\s+/g, ' ').slice(0, 90),
     buttons: [...c.querySelectorAll('.caps-acts button')].map((b) => ({ label: b.textContent.trim(), disabled: b.disabled })),

@@ -234,6 +234,11 @@ export async function run({ daemon, page, ok }) {
   const briefCards = await page.$$eval('.screen[data-screen="vault"] .pbody .card',
     (els) => els.filter((c) => /today.s brief/i.test(c.textContent)).length);
   ok.eq('the Vault keeps exactly one brief card through live updates', briefCards, 1);
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.screen[data-screen="vault"] .row-list .lrow')]
+      .filter((r) => /Model access/.test(r.textContent)).length === 1,
+    { timeout: 15_000 },
+  ).catch(() => {});
   const finalRows = await vaultRows(page);
   ok.eq('and lists each stored note exactly once', finalRows.filter((r) => /Model access/.test(r)).length, 1);
 }
