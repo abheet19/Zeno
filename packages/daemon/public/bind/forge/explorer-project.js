@@ -103,10 +103,13 @@ export function setupExplorerProject(S) {
   S.chooseProject = chooseProject;
 
   let menuEl = null;
-  function closeProjectMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  let menuAnchor = null;
+  let menuRefreshTimer = 0;
+  function closeProjectMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } menuAnchor = null; }
   function openProjectMenu(anchor) {
     if (menuEl) { closeProjectMenu(); return; }
     const p = S.project;
+    menuAnchor = anchor;
     menuEl = el('div', 'menu');
     menuEl.setAttribute('role', 'menu');
     menuEl.dataset.projectMenu = '1';
@@ -140,6 +143,18 @@ export function setupExplorerProject(S) {
     menuEl.style.top = `${r.bottom + 4 + menuEl.offsetHeight > window.innerHeight ? Math.max(8, r.top - menuEl.offsetHeight - 4) : r.bottom + 4}px`;
   }
   S.openProjectMenu = openProjectMenu;
+  // The menu is a snapshot of `S.project`. A decision can settle while it is
+  // open, so rebuild it after Explorer has re-read the daemon; otherwise a
+  // button can remain disabled even though the queue is now empty.
+  window.addEventListener('zeno:state', () => {
+    clearTimeout(menuRefreshTimer);
+    menuRefreshTimer = setTimeout(() => {
+      if (!menuEl || !menuAnchor) return;
+      const anchor = menuAnchor;
+      closeProjectMenu();
+      openProjectMenu(anchor);
+    }, 360);
+  });
   document.addEventListener('click', (e) => { if (menuEl && !e.target.closest('[data-project-menu]') && !e.target.closest('[data-explorer-project]')) closeProjectMenu(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeProjectMenu(); });
   if (projBtn) projBtn.addEventListener('click', (e) => { e.stopPropagation(); openProjectMenu(projBtn); });
