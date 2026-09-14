@@ -49,6 +49,8 @@ function selected() {
   return $$('.mp .mp-row[aria-checked="true"][data-mid]')
     .map((b) => ({
       id: b.dataset.mid,
+      model: b.dataset.model !== undefined ? b.dataset.model : b.dataset.mid,
+      agentId: b.dataset.agentId || (b.dataset.where === 'local' ? 'local' : HOSTED_AGENT[b.dataset.mid]),
       where: b.dataset.where,
       name: (b.querySelector('.mn')?.childNodes[0]?.textContent || b.dataset.mid).trim(),
     }))
@@ -184,7 +186,7 @@ async function runOne(c, task, onDone) {
       ? 'Running on this machine, in an isolated worktree.'
       : 'Running on a hosted agent, in an isolated worktree.'));
 
-  const agentId = m.where === 'local' ? 'local' : HOSTED_AGENT[m.id];
+  const agentId = m.agentId || (m.where === 'local' ? 'local' : HOSTED_AGENT[m.id]);
   if (!agentId) {
     setStat(c, 'rd', 'not runnable');
     c.body.replaceChildren(el('div', 'fnote',
@@ -194,7 +196,7 @@ async function runOne(c, task, onDone) {
   }
 
   const payload = { task, agentId, runId: `cmp-${m.id.replace(/[^A-Za-z0-9._:-]/g, '-')}-${Math.floor(performance.now())}` };
-  if (m.where === 'local') payload.model = m.id;
+  if (m.model) payload.model = m.model;
   else payload.hostedConfirmed = true; // the owner confirmed at the Compare button
 
   const res = await post('/forge/run', payload);

@@ -80,7 +80,10 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('Forge has a composer to compare a task from', typed);
 
   const opened = await page.evaluate(() => {
-    const pill = document.querySelector('#ide [data-model-pill], .ag-composer [data-model-pill], [data-model-pill]');
+    // Forge deliberately removes ui.js's shared data-model-pill hook and owns
+    // this control itself. Click Forge's actual composer control; falling back
+    // to a shared pill opens the unrelated legacy picker and tests the wrong UI.
+    const pill = document.querySelector('#s-model');
     if (!pill) return false;
     pill.click();
     return true;

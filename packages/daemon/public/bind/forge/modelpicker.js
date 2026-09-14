@@ -252,19 +252,9 @@ export function setupModelPicker(S) {
     const frow = el('div', 'mp-foot-row');
     add(frow, el('span', null, selected.length ? `One task · ${selected.length} model(s) · isolated worktrees` : 'Select 2 or 3 models to run side by side'));
     const runBtn = el('button', 'btn p sm', selected.length ? `Compare ${selected.length} →` : 'Compare →');
+    runBtn.id = 'mp-run';
     runBtn.type = 'button';
     runBtn.disabled = selected.length < 2;
-    runBtn.addEventListener('click', () => {
-      // The daemon has no multi-model comparison endpoint. Stay honest: start
-      // a real single run on the first pick rather than faking a comparison.
-      const first = rows.find((r) => r.key === [...CMP][0]);
-      if (!first) return;
-      session.agentId = first.agentId; session.model = first.model; session.autoRoute = false;
-      closeMp(); paintModelPills();
-      const composer = $('#s-ta');
-      const text = (composer && composer.value.trim()) || '';
-      if (text) void S.sendTask(session, text);
-    });
     add(frow, runBtn);
     add(foot, frow);
   }
@@ -321,6 +311,13 @@ export function setupModelPicker(S) {
       if (m.group && m.group !== lastG) { nodes.push(el('div', 'mp-g', m.group)); lastG = m.group; }
       const b = el('button', 'mp-row');
       b.type = 'button';
+      // Compare is a separate binder because it owns the isolated multi-run
+      // lifecycle. Give it the daemon-native provider and model identities;
+      // model names alone cannot preserve the hosted provider boundary.
+      b.dataset.mid = m.model || m.key;
+      b.dataset.model = m.model || '';
+      b.dataset.agentId = m.agentId;
+      b.dataset.where = m.where;
       const checked = mpMode === 'compare' ? CMP.has(m.key) : m.key === curKey;
       b.setAttribute('aria-checked', checked ? 'true' : 'false');
       /* The row's CSS grid reserves a leading 18px icon column (it is shared with
