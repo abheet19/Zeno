@@ -153,8 +153,18 @@ function startDaemon() {
     child.stdout.on('data', (b) => {
       const text = String(b);
       remember(text);
-      const m = text.match(/http:\/\/127\.0\.0\.1:\d+\/\?k=[a-f0-9]+/);
-      if (m) done(m[0]);
+      // Match against everything the daemon has said so far, not just this
+      // chunk: a pipe can split the banner line across two `data` events, and a
+      // per-chunk match would then never see the token at all.
+      const m = said.match(/http:\/\/127\.0\.0\.1:\d+\/\?k=[a-f0-9]+/);
+      if (!m) return;
+      launchUrl = m[0];
+      if (!settled) return done(m[0]);
+      // The banner arrived AFTER the fallback below already opened a window on
+      // the bare origin — i.e. a read-only window with no owner token, where
+      // chat, Forge and every approval silently fail. That is the one failure
+      // this handoff exists to prevent, so upgrade the open window in place.
+      if (win && !win.isDestroyed()) void win.loadURL(m[0]);
     });
     child.stderr.on('data', (b) => {
       const text = String(b);
@@ -172,7 +182,11 @@ function startDaemon() {
 
     // If the banner never arrives, fall back to the bare origin rather than
     // hanging forever — a read-only window beats no window, and it says so.
-    setTimeout(() => done(ORIGIN), 12_000);
+    // 12s was too short: receipt-chain verification, model detection and the
+    // speech runtime can take longer on a cold start, and losing that race
+    // produced a window with no owner token. Wait longer, and rely on the
+    // late-upgrade above to authorise the window whenever the token does land.
+    setTimeout(() => done(ORIGIN), 45_000);
   });
 }
 
