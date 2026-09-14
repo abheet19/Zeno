@@ -100,6 +100,8 @@ export async function run({ daemon, page, ok, network, Blocked }) {
    * 4 · the bottom panel: every tab reveals a real pane
    * ============================================================ */
   await page.click('.seg [data-product="forge"]');
+  await page.click('#forge-viewseg [data-forge-view="editor"]');
+  await page.waitForFunction(() => !document.querySelector('#ide')?.classList.contains('mode-agent'));
   await page.waitForTimeout(1200);
 
   for (const name of PANELS) {

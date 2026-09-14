@@ -101,6 +101,13 @@ export async function run({ daemon, page, ok, network }) {
    * 1 · open Forge and make it re-read the sandbox                     *
    * ---------------------------------------------------------------- */
   await page.click('[data-product="forge"]');
+  await page.click('#forge-viewseg [data-forge-view="editor"]');
+  await page.waitForFunction(() => !document.querySelector('#ide')?.classList.contains('mode-agent'));
+  await page.waitForTimeout(400);
+  // Forge intentionally starts at the explicit Open-project state. This suite uses
+  // the visible scratch CTA rather than assuming the protected scratch repository
+  // is opened silently.
+  await page.getByRole('button', { name: 'use the Zeno scratch repository' }).click();
   await page.waitForTimeout(400);
   // The SANDBOX header's actions only exist on hover (`.vssect:hover .vsvh-a`),
   // so this is the real gesture: hover the section, then click its Refresh.

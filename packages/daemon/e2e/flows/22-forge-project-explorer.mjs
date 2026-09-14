@@ -101,6 +101,8 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     else { alerts.push(d.message()); await d.accept(); }
   });
   await page.click('.seg [data-product="forge"]');
+  await page.click('#forge-viewseg [data-forge-view="editor"]');
+  await page.waitForFunction(() => !document.querySelector('#ide')?.classList.contains('mode-agent'));
   await page.waitForTimeout(400);
   const rootSect = '#ide [data-explorer-root]';
   await page.hover(rootSect);
