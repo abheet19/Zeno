@@ -114,6 +114,17 @@
 
   // ---------- FORGE — native workbench + Zeno session ----------
   const ide=$('#ide');
+  // A workstation — the desktop app, or a browser on this same machine — is
+  // never a paired phone. The "Paired phone · editing needs your workstation"
+  // watch-frame below is a pure viewport gate (@media max-width:820px), so a
+  // narrow workstation window would otherwise be misread as a phone and lock
+  // Forge to read-only with an empty editor. Mark the real workstation so the
+  // full workbench (activity bar, explorer, editor + session panel) renders and
+  // editing works. Detection stays conservative: the desktop preload bridges
+  // (zenoProject / zenoLocalSpeech), or a same-machine localhost origin. A
+  // paired phone reaches the daemon over the network — never as localhost — and
+  // has no desktop bridge, so it is not matched and its watch-frame is intact.
+  if(window.zenoProject || window.zenoLocalSpeech || /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(location.hostname)) ide.classList.add('workstation');
   const IDE_VISIBLE=()=> $('.product[data-product="forge"]').classList.contains('on');
   // Agent | Editor
   // The agent lives in the secondary side panel (Ctrl+Alt+B toggles it) — it is not a mode, so there is no Agent/Editor switch.

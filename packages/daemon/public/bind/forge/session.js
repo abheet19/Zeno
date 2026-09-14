@@ -64,12 +64,11 @@ export function setupSession(S) {
      panel a fixed strip) — index.html's .ide.mode-agent rule is the only
      CSS either mode needs, so switching is just toggling that one class.
 
-     Two different "defaults" are both true at once, deliberately: the
-     screen an owner opens Forge to (before any session exists) is the
-     classic workbench — untouched — but the first session ever started on
-     this device goes chat-first (see startNewSession() below), UNLESS the
-     owner already told this device otherwise, which is remembered
-     (localStorage) and always wins over either default. */
+     Agent is the default view on first load (Devin-style): Forge opens
+     chat-first before any session exists, and the first session ever started
+     on this device stays chat-first too (see startNewSession() below), UNLESS
+     the owner already told this device otherwise, which is remembered
+     (localStorage) and always wins over the default. */
   const VIEW_KEY = 'zeno-forge-view';
   const viewSegBtns = $$('#forge-viewseg [data-forge-view]');
   let viewChosen = false; // an explicit choice — this boot's restore, or a click — has been applied
@@ -89,7 +88,8 @@ export function setupSession(S) {
   try {
     const v = localStorage.getItem(VIEW_KEY);
     if (v === 'agent' || v === 'editor') { viewChosen = true; applyForgeView(v); }
-  } catch { /* no persisted choice — the classic layout stands until a session starts */ }
+    else applyForgeView('agent'); // first load, no explicit choice yet: Agent is the default (only a persisted choice above overrides it)
+  } catch { applyForgeView('agent'); /* storage unavailable — still default to Agent */ }
   for (const b of viewSegBtns) b.addEventListener('click', () => setForgeView(b.dataset.forgeView));
 
   function makeSession() {

@@ -211,32 +211,77 @@ export function applyZenoTheme(monaco) {
     base: dark ? 'vs-dark' : 'vs',
     inherit: true,
     rules: [
-      // The prototype's three code colours, kept: keyword cyan, string gold,
-      // comment secondary-ink. Everything added below is an extension of that
-      // vocabulary into tokens the hand-rolled lexer never had a name for.
+      // A VS Code / Devin-style dark vocabulary, drawn entirely from the five
+      // glass accents so it tracks tokens.css and both grounds: keywords cyan
+      // (the palette's blue), types a lighter teal so they read APART from
+      // keywords, strings green, numbers/constants amber (orange), functions
+      // gold (yellow), comments muted secondary-ink. Every colour below is one
+      // of the resolved palette tokens — no hex is invented here.
       { token: '', foreground: ink.slice(1) },
       { token: 'comment', foreground: ink2.slice(1), fontStyle: 'italic' },
-      { token: 'string', foreground: gold.slice(1) },
+      { token: 'comment.doc', foreground: ink2.slice(1), fontStyle: 'italic' },
+
+      // Strings green; escapes and interpolation delimiters amber so they pop
+      // out of the string body.
+      { token: 'string', foreground: green.slice(1) },
       { token: 'string.escape', foreground: amber.slice(1) },
+      { token: 'string.escape.invalid', foreground: red.slice(1) },
+      { token: 'regexp', foreground: amber.slice(1) },
+
+      // Keywords, operators-as-words, and language constants.
       { token: 'keyword', foreground: cyan.slice(1) },
-      { token: 'keyword.json', foreground: cyan.slice(1) },
-      { token: 'number', foreground: green.slice(1) },
-      { token: 'regexp', foreground: green.slice(1) },
-      { token: 'type', foreground: cyan.slice(1) },
-      { token: 'type.identifier', foreground: cyan.slice(1) },
+      { token: 'keyword.operator', foreground: cyan.slice(1) },
+      { token: 'keyword.flow', foreground: cyan.slice(1) },
+      { token: 'keyword.json', foreground: amber.slice(1) }, // true / false / null
+      { token: 'constant', foreground: amber.slice(1) },
+      { token: 'constant.language', foreground: amber.slice(1) },
+
+      // Numbers and their radices — orange, like a constant.
+      { token: 'number', foreground: amber.slice(1) },
+      { token: 'number.hex', foreground: amber.slice(1) },
+      { token: 'number.float', foreground: amber.slice(1) },
+      { token: 'number.binary', foreground: amber.slice(1) },
+      { token: 'number.octal', foreground: amber.slice(1) },
+
+      // Types, classes, namespaces, decorators — teal, distinct from keywords.
+      { token: 'type', foreground: focus.slice(1) },
+      { token: 'type.identifier', foreground: focus.slice(1) },
+      { token: 'namespace', foreground: focus.slice(1) },
+      { token: 'annotation', foreground: focus.slice(1) },
+      { token: 'predefined', foreground: focus.slice(1) }, // python builtins, etc.
+      { token: 'support.type', foreground: focus.slice(1) },
+      { token: 'support.class', foreground: focus.slice(1) },
+
+      // Functions — yellow. Fires wherever a tokenizer names a call site
+      // (python, css @-functions, and any Monarch grammar that emits it).
+      { token: 'function', foreground: gold.slice(1) },
+      { token: 'entity.name.function', foreground: gold.slice(1) },
+      { token: 'support.function', foreground: gold.slice(1) },
+
       { token: 'identifier', foreground: ink.slice(1) },
+      { token: 'variable', foreground: ink.slice(1) },
+      { token: 'variable.parameter', foreground: ink.slice(1) },
       { token: 'delimiter', foreground: ink2.slice(1) },
+      { token: 'delimiter.bracket', foreground: ink2.slice(1) },
       { token: 'operator', foreground: ink2.slice(1) },
+      { token: 'invalid', foreground: red.slice(1) },
+
+      // JSON reads best when keys and values differ: keys cyan, values green,
+      // numbers/booleans/null already covered above.
+      { token: 'string.key.json', foreground: cyan.slice(1) },
+      { token: 'string.value.json', foreground: green.slice(1) },
+
+      // Markup: HTML/JSX tags cyan, attribute names amber, attribute values
+      // green, the same law the code side uses.
       { token: 'tag', foreground: cyan.slice(1) },
       { token: 'metatag', foreground: ink2.slice(1) },
       { token: 'attribute.name', foreground: amber.slice(1) },
-      { token: 'attribute.value', foreground: gold.slice(1) },
-      { token: 'variable', foreground: ink.slice(1) },
-      { token: 'invalid', foreground: red.slice(1) },
+      { token: 'attribute.value', foreground: green.slice(1) },
+
       // Markdown, so a README is legible rather than a wall of one colour.
       { token: 'keyword.md', foreground: cyan.slice(1), fontStyle: 'bold' },
       { token: 'string.link.md', foreground: gold.slice(1) },
-      { token: 'variable.md', foreground: green.slice(1) },
+      { token: 'variable.md', foreground: focus.slice(1) },
       { token: 'emphasis', fontStyle: 'italic' },
       { token: 'strong', fontStyle: 'bold' },
     ],

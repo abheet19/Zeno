@@ -274,7 +274,14 @@ export function setupExplorer(S) {
     renderExplorer();
     renderStatusBar();
     search.renderScm();
-    if (S.statusData && S.statusData.repo && S.currentFile === null) {
+    if (S.project && S.project.scratch && S.currentFile === null) {
+      // No real project folder is open — the daemon fell back to the scratch
+      // repository. Present the Devin-style empty state (Open project / Choose
+      // folder / Clone / SSH) instead of silently landing the owner in the
+      // scratch editor. The scratch repo stays one click away in that state.
+      if (S.renderForgeWelcome) S.renderForgeWelcome();
+      else S.renderEditorEmpty('No project folder is open. Use Open Folder to choose your repository.');
+    } else if (S.statusData && S.statusData.repo && S.currentFile === null) {
       const first = treePaths()[0];
       if (first) void S.openFile(first);
       else S.renderEditorEmpty('This repository has no files yet — use New File in the Explorer to propose one.');

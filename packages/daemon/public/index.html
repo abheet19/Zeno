@@ -685,7 +685,14 @@ button{font:inherit; color:inherit}
 .ag-composer{background:var(--g2); border:1px solid var(--gl-edge); border-radius:16px; padding:14px 14px 10px; box-shadow:0 18px 50px -22px #000, inset 0 1px 0 var(--wash-hi)}
 .ag-composer:focus-within{border-color:color-mix(in srgb,var(--cyan) 42%,var(--gl-edge)); box-shadow:0 18px 50px -20px #000,0 0 0 3px color-mix(in srgb,var(--cyan) 15%,transparent)}
 .ag-composer textarea{display:block; width:100%; min-height:46px; max-height:200px; resize:none; border:0; background:transparent; -webkit-appearance:none; appearance:none; color:var(--ink); font:inherit; font-size:15px; outline:none; line-height:1.5; padding:0; margin:0; box-shadow:none} .ag-composer textarea::placeholder{color:var(--ink-3); opacity:1}
-.ag-row{display:flex; align-items:center; gap:8px; margin-top:8px}
+/* wrap so the mic + send controls stay INSIDE the composer at every width —
+   the model / plan pills drop to their own line rather than shoving the send
+   button off the right edge (was off-viewport below ~560px). */
+.ag-row{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; min-width:0}
+.ag-row > .pill{min-width:0; max-width:100%}
+/* keep the mic + send pair together and hard against the right edge, on
+   whichever line they end up on once the pills wrap. */
+.ag-row .ag-ic:has(+ .ag-send){margin-left:auto}
 .ag-ic{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:8px;border:1px solid var(--gl-edge);background:var(--g3);color:var(--ink-2);cursor:pointer} .ag-ic:hover{color:var(--ink);border-color:var(--rule-2)} .ag-ic svg{width:16px;height:16px}
 .ag-send{width:30px;height:30px;flex:none;display:grid;place-items:center;border-radius:8px;border:0;background:var(--cyan);color:var(--g1);cursor:pointer} .ag-send:hover{filter:brightness(1.08)} .ag-send svg{width:16px;height:16px}
 .ag-foot{display:flex; gap:8px; margin-top:9px; padding-top:9px; border-top:1px solid var(--rule)}
@@ -997,6 +1004,16 @@ button{font:inherit; color:inherit}
   .vsact, .vsside{display:none}
   .vsstat{display:none} .vsblame{display:none} .vspanel{height:160px}
   .sess{border-left:0} .sessview{padding:10px 12px 14px} .sesstip{display:none}
+  /* Workstation (desktop app or same-machine localhost — see ui.js) is never a
+     paired phone: keep the real Forge workbench even in a narrow window. Hide
+     the phone watch-frame and restore the activity bar, editor and session
+     panel side by side; the explorer still follows the ≤1040px rule above. */
+  .ide.workstation .mfbar{display:none}
+  .ide.workstation .vsact{display:flex}
+  .ide.workstation:not(.mode-agent) .vsed{display:flex}
+  .ide.workstation:not(.mode-agent) .sess{display:flex; border-left:1px solid var(--gl-edge)}
+  .ide.workstation:not(.mode-agent) .wb{grid-template-columns:44px 0 minmax(0,1fr) var(--sessw)}
+  .ide.workstation.mode-agent .wb{grid-template-columns:44px 0 0 minmax(0,1fr)}
   .composer.compact .foot{overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none}
   /* Counsel */
   .cn{grid-template-columns:1fr; grid-template-rows:auto 1fr}

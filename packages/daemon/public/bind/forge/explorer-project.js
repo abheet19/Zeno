@@ -144,6 +144,66 @@ export function setupExplorerProject(S) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeProjectMenu(); });
   if (projBtn) projBtn.addEventListener('click', (e) => { e.stopPropagation(); openProjectMenu(projBtn); });
 
+  /* ---- the empty state: open a real folder, not a silent sandbox -------- */
+
+  /** The Devin-style empty state shown in the editor when no real project
+   *  folder is open (the daemon fell back to the scratch repository). The
+   *  scratch repo stays one click away — it is just no longer the silent
+   *  default the owner lands in without ever choosing it. "Choose folder"
+   *  reuses chooseProject() (the native folder dialog in the desktop app, a
+   *  prompt in a plain browser); Clone / SSH are shown but honestly marked as
+   *  not part of this local-first build rather than faked. */
+  function renderForgeWelcome() {
+    const wrap = el('div');
+    wrap.style.cssText = 'margin:auto;max-width:520px;width:100%;display:flex;flex-direction:column;gap:12px;padding:32px 8px;white-space:normal;font-family:var(--font)';
+    const h = el('div', null, 'Open a project');
+    h.style.cssText = 'font-size:20px;font-weight:600;color:var(--ink)';
+    const lead = el('div', null, 'Forge works inside a real Git repository. Open one to get the full editor, explorer and agent — nothing is written to disk until you approve it in Command.');
+    lead.style.cssText = 'font-size:13px;line-height:1.6;color:var(--ink-2)';
+    add(wrap, h, lead);
+
+    const blocked = !S.OWNER
+      ? 'This window has no owner token, so it cannot change the working folder.'
+      : (S.project && S.project.canChange === false ? S.project.changeBlockedBy : null);
+
+    const grid = el('div');
+    grid.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-top:4px';
+    const act = (label, desc, onClick, disabledReason) => {
+      const b = el('button', 'btn g');
+      b.type = 'button';
+      b.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:12px 14px;width:100%';
+      const t = el('span', null, label); t.style.cssText = 'font-size:13.5px;font-weight:600;color:var(--ink)';
+      const s = el('span', null, desc); s.style.cssText = 'font-size:11.5px;color:var(--ink-3)';
+      add(b, t, s);
+      if (disabledReason) disableCtl(b, disabledReason);
+      else b.addEventListener('click', onClick);
+      return b;
+    };
+    add(grid,
+      act('Choose folder…', 'Open a Git repository already on this machine', () => void chooseProject(), blocked),
+      act('Clone repository…', 'Clone with git in the Terminal, then Choose folder to open it', null, 'Clone a repository with git in the Terminal, then use Choose folder to open it here.'),
+      act('Connect via SSH', 'Work on a remote host over SSH', null, 'Remote SSH is not part of this local-first build — Forge works on repositories on this machine.'));
+    add(wrap, grid);
+
+    // The scratch repository stays available — just not as the silent default.
+    // We are already on it here, so this simply dismisses the empty state and
+    // opens the scratch tree rather than re-selecting the same folder.
+    const scratchRow = el('div');
+    scratchRow.style.cssText = 'font-size:12px;color:var(--ink-3);margin-top:6px';
+    const scratchBtn = el('button', 'laction', 'use the Zeno scratch repository');
+    scratchBtn.type = 'button';
+    scratchBtn.addEventListener('click', () => {
+      const first = S.treePaths ? S.treePaths()[0] : null;
+      if (first) void S.openFile(first);
+      else if (S.renderEditorEmpty) S.renderEditorEmpty('This repository has no files yet — use New File in the Explorer to propose one.');
+    });
+    add(scratchRow, document.createTextNode('Just exploring? You can '), scratchBtn, document.createTextNode('.'));
+    add(wrap, scratchRow);
+
+    if (S.renderEditorEmpty) S.renderEditorEmpty(wrap);
+  }
+  S.renderForgeWelcome = renderForgeWelcome;
+
   /* ---- New File / New Folder: proposals, never writes ------------------- */
 
   async function proposeCreate(relPath, summary, openAfter) {

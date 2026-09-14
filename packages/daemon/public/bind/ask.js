@@ -268,15 +268,37 @@ function homeCommands() {
   if (newChat && newChat.offsetParent !== null) {
     out.push({ id: 'new', hint: 'Start a new chat', run: () => newChat.click() });
   }
-  out.push({ id: 'model', hint: 'Choose a model', run: () => { const p = $('[data-model-pill]', $('.screen[data-screen="home"]')); if (p) p.click(); } });
   // Reuses the exact hand-off `d.task`'s "Open in Forge" button below uses:
   // switch product and focus Forge's own composer. The command menu only
-  // ever fires on a bare "/forge" (see command-menu.js's input regex), so
+  // ever fires on a bare "/task" (see command-menu.js's input regex), so
   // there is never draft text left in this composer to carry over — the
   // owner types the task in Forge's own box, same as clicking the product tab.
+  out.push({ id: 'task', hint: 'Start a task in Forge', run: () => seedForgeComposer('') });
+  out.push({ id: 'model', hint: 'Choose a model', run: () => { const p = $('[data-model-pill]', $('.screen[data-screen="home"]')); if (p) p.click(); } });
+  // Cross-screen navigation clicks the SAME rail controls a mouse would (see
+  // performNav) — no synthetic routing, just the real Command screens.
+  out.push({ id: 'approvals', hint: 'Review what needs approval', run: () => performNav({ kind: 'screen', name: 'approvals', label: 'Approvals' }) });
+  out.push({ id: 'receipts', hint: 'Open the receipt ledger', run: () => performNav({ kind: 'screen', name: 'receipts', label: 'Receipts' }) });
+  out.push({ id: 'vault', hint: 'Search Vault memory', run: () => performNav({ kind: 'screen', name: 'vault', label: 'Vault' }) });
+  out.push({ id: 'projects', hint: 'Open a project or repository', run: () => performNav({ kind: 'screen', name: 'projects', label: 'Projects' }) });
+  out.push({ id: 'devices', hint: 'Paired devices', run: () => performNav({ kind: 'screen', name: 'devices', label: 'Devices' }) });
+  out.push({ id: 'record', hint: 'Record a meeting in Counsel', run: () => startCounselRecording() });
   out.push({ id: 'forge', hint: 'Switch to Forge', run: () => seedForgeComposer('') });
   out.push({ id: 'help', hint: 'What can Zeno do?', run: () => { const ta = $('#home-ta'); if (ta) { ta.value = 'help'; ta.dispatchEvent(new Event('input', { bubbles: true })); const s = $('#home-send'); if (s) s.click(); } } });
   return out;
+}
+
+/**
+ * Switch to Counsel and open its record flow — the exact controls the owner's
+ * own click uses: the Counsel product tab, then its "Record a meeting" button,
+ * which lands on the consent preflight (Counsel never records without it).
+ */
+function startCounselRecording() {
+  const c = document.querySelector('.seg [data-product="counsel"]');
+  if (c) c.click();
+  const rec = document.querySelector('#cn-record');
+  if (rec) rec.click();
+  return !!(c || rec);
 }
 
 /**

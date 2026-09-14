@@ -9,7 +9,7 @@ import { authHeaders, S, F } from './state.js';
 import { g } from './attention.js';
 import { buildTopology } from './topology.js';
 import { renderReadouts } from './readouts.js';
-import { draw } from './engine.js';
+import { draw, startF } from './engine.js';
 import { renderList } from './list.js';
 import { renderNodeCard } from './card.js';
 import { liveRuns, startRunStream } from './runs.js';
@@ -55,6 +55,13 @@ function paintRuns() {
   buildTopology(state, work, forge, mem, meetings, agents, liveRuns());
   if (S.sel && !g(S.sel)) S.sel = null;
   if (F.c) draw();
+  // Self-heal the rest-rotation: if the rAF loop was left stopped (a transient
+  // fieldShouldAnimate()===false during boot, a panel flip, a returned tab)
+  // while the field should in fact be animating, restart it. startF() is
+  // idempotent and carries its own guard — it is a no-op when a loop is already
+  // running, and it stays honest under reduced motion (fieldShouldAnimate()
+  // consults S.motion), so it never spins a field the owner asked to hold still.
+  startF();
   renderList(lastListEl);
   renderNodeCard();
 }
@@ -95,6 +102,11 @@ export async function refresh(listEl) {
   renderReadouts(state, work, forge, mem, agents);
   if (S.sel && !g(S.sel)) S.sel = null;   // the thing you had selected is gone
   if (F.c) draw();
+  // Guarantee the rest-rotation is running after a mount/bind and heal any
+  // transient stop on the recurring poll and on every zeno:state signal.
+  // startF() no-ops when a loop already runs and stays silent under reduced
+  // motion, so this only ever REVIVES a field that should be turning.
+  startF();
   renderList(listEl);
   renderNodeCard();
 }

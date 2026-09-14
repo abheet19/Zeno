@@ -206,7 +206,9 @@ export function createEditorView(E, S, deps) {
   function renderEditorEmptyIn(g, message) {
     if (!g) return;
     if (g.editor) g.editor.setModel(null);
-    showAux(g, [el('span', null, message)]);
+    // `message` is usually a string, but the Forge welcome (explorer-project.js)
+    // passes a whole DOM node so it can render its Open-project actions here.
+    showAux(g, [message instanceof Node ? message : el('span', null, message)]);
     if (g.trunc) g.trunc.hidden = true;
     if (g === E.groups[0]) {
       const bc = $('.vscrumbs');

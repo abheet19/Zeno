@@ -66,6 +66,23 @@ function sourceAtt(s) {
   return s.state === 'failed' ? 'error' : s.state === 'partial' ? 'needs' : null;
 }
 
+/* A Forge run's summary is the FULL system-wrapped prompt, and every run opens
+   with the same "Forge (agent): PROJECT RULES FROM THE SELECTED REPOSITORY
+   follow. Apply the …" preamble. Clipped to a node label that boilerplate is
+   all you see, so three genuinely different runs drew three identical
+   "Forge (local): PROJECT…" nodes — the "duplicate nodes" the owner reported.
+   When the receipt names a concrete target file, its basename is the honest
+   distinguisher; otherwise the summary stands unchanged. */
+function ticketLabel(summary, targetRef) {
+  const s = String(summary || '');
+  const m = s.match(/^(Forge \([^)]+\)):\s*PROJECT RULES\b/i);
+  if (m && targetRef && !/^tool:/.test(String(targetRef))) {
+    const base = String(targetRef).split(/[\\/]/).pop();
+    if (base) return `${m[1]}: ${base}`;
+  }
+  return s;
+}
+
 export function buildTopology(state, work, forge, mem, meetings, agents, runs = []) {
   const nodes = [];
   const edges = [];
@@ -129,12 +146,19 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   });
 
   // 6 · pending approvals — the things actually waiting on you.
+  //     `pendingHashes` records every action already drawn here so section 8
+  //     never draws the SAME action a second time as a receipt: a held capsule
+  //     and its later receipt share one actionHash, and the owner was seeing
+  //     both — one real action, two identical nodes.
   const pending = (state && Array.isArray(state.pending)) ? state.pending : [];
+  const pendingHashes = new Set();
   pending.forEach((p, i) => {
+    if (p.actionHash && pendingHashes.has(p.actionHash)) return; // same capsule twice
+    if (p.actionHash) pendingHashes.add(p.actionHash);
     const id = 'pend' + i;
     const summary = p.summary || (p.request && p.request.summary) || p.actionHash || `pending ${i + 1}`;
     nodes.push({
-      id, k: 'ticket', l: clip(summary, 26), hash: p.actionHash,
+      id, k: 'ticket', l: clip(ticketLabel(summary, p.targetRef), 26), hash: p.actionHash,
       /* Attention comes from what the capsule ACTUALLY carries. A /state
          pending item exposes { actionHash, auto, binding, denied, payload,
          reasons, summary, tier } and NO `state` field — so reading p.state made
@@ -180,11 +204,24 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
   });
 
   // 8 · the trail — the last few receipts Zeno actually wrote, verified or not.
+  //     Deduped by actionHash first: an action still held above is not redrawn
+  //     as a receipt (the pending/receipt double-node the owner reported), and a
+  //     hash the ledger happens to repeat is drawn once. Dedupe runs BEFORE the
+  //     slice so the trailing window is the last few DISTINCT receipts, not a
+  //     window that a duplicate could crowd a real receipt out of.
   const receipts = (state && Array.isArray(state.receipts)) ? state.receipts : [];
-  receipts.slice(quiet ? -QUIET_CAP : -4).forEach((r, i) => {
+  const seenReceiptHashes = new Set();
+  const distinctReceipts = receipts.filter((r) => {
+    const h = r.actionHash;
+    if (!h) return true;                       // no hash: cannot dedupe, keep it honestly
+    if (pendingHashes.has(h) || seenReceiptHashes.has(h)) return false;
+    seenReceiptHashes.add(h);
+    return true;
+  });
+  distinctReceipts.slice(quiet ? -QUIET_CAP : -4).forEach((r, i) => {
     const id = 'rc' + i;
     const ok = (r.outcome || r.state) === 'verified';
-    const lab = r.summary || r.targetRef || r.actionHash || 'receipt';
+    const lab = ticketLabel(r.summary, r.targetRef) || r.targetRef || r.actionHash || 'receipt';
     const age = minutesSince(r.at);
     nodes.push({
       id, k: 'ticket', l: clip(lab, 22), att: ok ? 'verified' : 'error',
