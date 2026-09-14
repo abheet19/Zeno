@@ -440,10 +440,13 @@ Then follow [the hands-on test guide](35-HOW-TO-TEST.md). It covers lifecycle, e
 control, Forge local/hosted/chat/edit/context/cancel flows, terminal/tests, both speech paths, Counsel,
 Vault, MCP/browser bridges, receipts and clean installation.
 
-Current end-to-end result (as of this snapshot): 18 flows pass, 0 fail, 3 honestly BLOCKED rather than
-faked — Counsel and voice both need a real microphone/audio device that this environment does not
-have, and the work-devices flow needs a second paired client to exercise Mesh sync. A BLOCKED flow is
-reported as untested, never counted as passed.
+There are now 25 flow scripts on disk (`e2e/flows/01`–`25`). Last recorded result (as of that
+snapshot): 18 flows pass, 0 fail, 3 honestly BLOCKED rather than faked — Counsel and voice both need
+a real microphone/audio device that this environment does not have, and the work-devices flow needs
+a second paired client to exercise Mesh sync. A BLOCKED flow is reported as untested, never counted
+as passed. 4 flows added since (`22-forge-project-explorer`, `23-add-capabilities`, `24-plan-first`,
+`25-call-banner`) have not yet been re-run through the harness — do not quote a pass count for them
+until `node packages/daemon/e2e/run.mjs` is re-run.
 
 `npm run build:app` creates Windows portable and NSIS artifacts under `dist-app/`. A local build does
 not prove a clean install, signing, updater, Whisper provisioning or public deployment. The current
