@@ -18,6 +18,10 @@ export const title = 'Every action in the queue can actually be decided, at any 
 export const criteria = ['kernel: held means decidable'];
 
 export async function run({ daemon, page, ok }) {
+  const warnings = [];
+  page.on('console', (message) => {
+    if (message.type() === 'warning') warnings.push(message.text());
+  });
   // A local.write OUTSIDE the sandbox is exactly the T0-but-held shape.
   const outside = await daemon.agent('/previews', {
     method: 'POST',
@@ -49,7 +53,11 @@ export async function run({ daemon, page, ok }) {
     JSON.stringify(queue.map((p) => ({ tier: p.tier, auto: p.auto }))));
 
   await page.click('.nav-i[data-screen="approvals"]');
-  await page.waitForTimeout(1200);
+  await page.waitForFunction(
+    (expected) => document.querySelectorAll('.screen[data-screen="approvals"] .caps').length === expected,
+    queue.length,
+    { timeout: 5_000 },
+  ).catch(() => {});
 
   const cards = await page.$$eval('.screen[data-screen="approvals"] .caps', (els) => els.map((c) => ({
     tier: c.querySelector('.tier')?.textContent || '',
@@ -57,7 +65,8 @@ export async function run({ daemon, page, ok }) {
       label: b.textContent.trim(), disabled: b.disabled, title: b.title,
     })),
   })));
-  ok.eq('every held action is on screen', cards.length, queue.length);
+  const approvalBody = await page.$eval('.screen[data-screen="approvals"] .pbody', (node) => node.textContent || '').catch(() => 'approval body unavailable');
+  ok.eq('every held action is on screen', cards.length, queue.length, JSON.stringify({ approvalBody, warnings }));
 
   for (const c of cards) {
     const allow = c.buttons.find((b) => /Allow/.test(b.label));

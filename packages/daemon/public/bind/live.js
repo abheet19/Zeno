@@ -98,7 +98,14 @@ function connect() {
   // DOM event so that binder need not open a second stream to hear it.
   source.addEventListener('call', () => document.dispatchEvent(new CustomEvent('zeno:call')));
 
-  source.addEventListener('open', () => { backoff = 1000; });
+  source.addEventListener('open', () => {
+    backoff = 1000;
+    // An effect may have been proposed after the initial bind but before this
+    // EventSource finished connecting. Streams only deliver later events, so
+    // re-read once at connection time: a pending approval can never remain
+    // invisible merely because this window opened a fraction too slowly.
+    void rerun(new Set(['state', 'receipt', 'chain', 'preview']));
+  });
   source.addEventListener('error', () => {
     /* EventSource retries on its own AND replays from Last-Event-ID, which is
        strictly better than anything done by hand — so a transient drop is left

@@ -353,7 +353,9 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('the project cannot be changed with a proposal waiting, and says why', busy.body.project.canChange === false && /proposal/.test(busy.body.project.changeBlockedBy), JSON.stringify(busy.body.project));
   const refused = await daemon.api('/forge/project', { method: 'POST', body: JSON.stringify({ path: null }) });
   ok.eq('…and a switch is refused', refused.status, 409);
-  await daemon.api('/approvals/decline', { method: 'POST', body: JSON.stringify({ actionHash: heldEdit.body.preview.actionHash }) });
+  const declined = await daemon.api('/approvals/decline', { method: 'POST', body: JSON.stringify({ actionHash: heldEdit.body.preview.actionHash }) });
+  ok.eq('the owner can decline the held edit', declined.status, 200, JSON.stringify(declined.body));
+  ok('the daemon queue is empty after that decline', await until(async () => ((await daemon.api('/state')).body.pending || []).length === 0));
 
   await page.click('.vsact [data-vsview="explorer"]'); // earlier items left the sidebar on the Zeno view
   await page.click('#ide [data-explorer-project]');
