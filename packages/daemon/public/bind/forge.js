@@ -45,7 +45,6 @@ import { setupSession } from './forge/session.js';
 // build" rather than a fabricated control or number.
 const NOT_WIRED_NOTES = [
   'Terminal: commands run exactly as typed. This daemon has no server-side or client-side gate that holds a write/push/rm/curl/deploy command for approval before it runs (only file writes from an agent run go through the approval gate) — the task description assumed one exists; it does not.',
-  'Compare mode "Run": starts a single run on the first selected model only. There is no daemon endpoint for a true side-by-side multi-model run.',
   'Output panel: this daemon publishes no output channel for the Output view, so it says so. A run\'s real transcript is rendered by the Session panel from /forge/run.',
   'Testing view: lists the package scripts GET /forge/tests discovered and runs one at a time via POST /forge/tests/run. There is no "run all" route and no per-test breakdown — a script\'s exit code and output are all the daemon reports.',
 ];

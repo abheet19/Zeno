@@ -79,6 +79,27 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   });
   ok('Forge has a composer to compare a task from', typed);
 
+  // Route mode must name the model the deterministic router will actually use.
+  // Ollama lists most-recently-modified first on this machine (14B), while
+  // Forge deliberately prefers the proven 8B default. Showing list order here
+  // would make the pre-run explanation disagree with the run itself.
+  const routePreview = await page.evaluate(() => {
+    const pill = document.querySelector('#s-model');
+    if (!pill) return null;
+    pill.click();
+    const route = [...document.querySelectorAll('.mp .mp-mode button')]
+      .find((button) => button.textContent.trim() === 'Route');
+    if (route) route.click();
+    const text = document.querySelector('.mp .rt-step.local .rt-t')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    document.body.click();
+    return text;
+  });
+  const expectedAutomatic = ['qwen3:8b', 'qwen3:14b', 'qwen3:4b'].find((name) => installed.includes(name))
+    ?? installed[0];
+  ok('Route previews the same local model the deterministic runner prefers',
+    routePreview !== null && routePreview.includes(expectedAutomatic),
+    `Route previewed "${routePreview}"; expected ${expectedAutomatic}`);
+
   const opened = await page.evaluate(() => {
     // Forge deliberately removes ui.js's shared data-model-pill hook and owns
     // this control itself. Click Forge's actual composer control; falling back

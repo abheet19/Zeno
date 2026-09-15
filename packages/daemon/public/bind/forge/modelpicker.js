@@ -3,9 +3,9 @@
  * Route picker popup, and the VRAM meter Compare mode shows.
  *
  * Registers `S.paintModelPills` (session.js repaints the pills whenever it
- * switches sessions) and reads `S.sendTask` (Compare's "Run" button starts a
- * real single run on the first pick — there is no multi-model comparison
- * endpoint on this daemon, so it stays honest rather than faking one).
+ * switches sessions). Compare is bound separately by bind/compare.js: it runs
+ * each selected provider in an isolated worktree, measures real elapsed time,
+ * and leaves every proposed effect behind the normal approval gate.
  */
 import {
   $, $$, el, fill, getJSON,
@@ -267,7 +267,11 @@ export function setupModelPicker(S) {
     if (!list) return;
     if (mpMode === 'route') {
       const locals = (S.agentsData && Array.isArray(S.agentsData.localModels)) ? S.agentsData.localModels : [];
-      const localName = locals[0] || 'a local model';
+      // Keep the preview aligned with packages/forge/src/routing.ts and
+      // routes/forge-run.ts. Ollama returns its most recently modified model
+      // first, which is not Zeno's deterministic choice for an automatic run.
+      const localName = ['qwen3:8b', 'qwen3:14b', 'qwen3:4b'].find((name) => locals.includes(name))
+        || locals[0] || 'a local model';
       const clouds = ((S.agentsData && S.agentsData.agents) || []).filter((a) => a.id !== 'local' && a.hosted !== false);
       const wrap = el('div', 'rt');
       // The owner's own complaint about this screen: "Route mode UI, can't
