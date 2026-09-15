@@ -57,14 +57,15 @@ export async function runLocalModel(
   ownerTask = task,
 ): Promise<{ ok: boolean; agentId: 'local'; model: string | null; effort: typeof effort | null; log: string; note?: string; cancelled?: boolean; tokensIn?: number | null; tokensOut?: number | null }> {
   const chosen = model && model.trim() ? model.trim() : 'qwen3:8b';
-  const base = { agentId: 'local' as const, model: chosen, effort: effort ?? null };
+  const effectiveEffort = effort ?? 'medium';
+  const base = { agentId: 'local' as const, model: chosen, effort: effectiveEffort };
   const answerOnly = localTaskAllowsPlainAnswer(ownerTask);
   const standaloneAnswer = answerOnly && !localTaskNeedsRepositoryContext(ownerTask);
   const ownerCancelled = (): boolean => signal?.aborted === true;
   if (ownerCancelled()) {
     return { ...base, ok: false, cancelled: true, log: '', note: 'The owner cancelled this local run before it started.' };
   }
-  const think = effort !== 'low'; // low = no_think (fast); medium/high = reason first
+  const think = effectiveEffort !== 'low'; // low = no_think (fast); medium/high = reason first
   // THE CONTEXT PACK. Without this the model received the task string and
   // nothing else, so "optimise the code" could only be answered with "which
   // code?" — an agent that cannot see the repository can do nothing but create
@@ -169,14 +170,12 @@ export async function runLocalModel(
   signal?.addEventListener('abort', cancel, { once: true });
   if (ownerCancelled()) cancel();
   try {
-    const lowEffortQwen = effort === 'low' && /^qwen3(?:[:-]|$)/i.test(chosen);
-    const numPredict = answerOnly && effort === 'low'
+    const lowEffortQwen = effectiveEffort === 'low' && /^qwen3(?:[:-]|$)/i.test(chosen);
+    const numPredict = answerOnly && effectiveEffort === 'low'
       ? 512
-      : effort === 'high'
+      : effectiveEffort === 'high'
         ? 4096
-        : effort === 'medium'
-          ? 2048
-          : 1024;
+        : 2048;
     // Ollama's bundled Qwen3 template always appends an open <think> tag, even
     // when `think:false` is requested. In low-effort mode use Qwen's documented
     // empty-thinking assistant prefill through the structured chat API. This

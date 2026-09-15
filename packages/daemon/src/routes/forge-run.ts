@@ -323,7 +323,8 @@ export async function postForgeCancel(ctx: ServerCtx, req: IncomingMessage, res:
  */
 export function pickLocalModel(installed: readonly string[]): string | null {
   if (installed.length === 0) return null;
-  const preferred = installed.find((m) => m === 'qwen3:8b' || m.startsWith('qwen3:'));
+  const preferred = installed.find((m) => m === 'qwen3:8b')
+    ?? installed.find((m) => m.startsWith('qwen3:'));
   return preferred ?? installed[0] ?? null;
 }
 

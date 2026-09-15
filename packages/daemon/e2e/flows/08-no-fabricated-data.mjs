@@ -41,7 +41,6 @@ const FIXTURES = [
    be gone — not merely different, gone. */
 const FIXTURE_COUNTS = [
   { re: /\b7\s+receipts\b/, what: '"7 receipts"' },
-  { re: /\bqwen3:8b · local\b/, what: 'the hardcoded model chip' },
 ];
 
 export async function run({ daemon, page, ok }) {
@@ -53,6 +52,17 @@ export async function run({ daemon, page, ok }) {
   ok.eq('nothing is held', st.body.pending.length, 0);
   ok.eq('the Vault is empty', mem.body.notes.length, 0);
   ok.eq('the backlog is empty', (work.body.items || []).length, 0);
+
+  // A real installed model may legitimately be qwen3:8b. The honesty claim is
+  // that the shipped shell does not invent it before discovery, so inspect the
+  // raw HTML rather than rejecting the truthful value the binder later reads.
+  const shell = await page.evaluate(async () => {
+    const response = await fetch('/', { cache: 'no-store' });
+    return response.ok ? await response.text() : '';
+  });
+  ok('the shipped shell has no hardcoded local-model identity',
+    !/data-model-pill[^>]*>[\s\S]{0,200}?qwen3:8b · local/.test(shell),
+    'a model name appeared before /forge/agents discovery');
 
   const products = ['command', 'forge', 'counsel'];
   for (const product of products) {

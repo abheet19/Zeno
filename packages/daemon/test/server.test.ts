@@ -14,11 +14,19 @@ import type { AddressInfo } from 'node:net';
 import { DEFAULT_POLICY, Kernel, makeWritePayload, nodeLedgerStore, nodeSandboxFs } from '@abheet19/zeno-kernel';
 import { boundForgePrompt, buildForgeFileReview, canAutoStartOllama, createServer, decodeForgeText, MAX_FORGE_EFFECTIVE_PROMPT_CHARS, readForgeProposalCandidate, resolveOllamaBaseUrl, resolveOllamaExecutable, shouldRetryOllamaStart, type DelegateProbe } from '../src/server.js';
 import { ForgeRunProgressReporter, type ForgeRunProgressEvent } from '../src/forge-run-progress.js';
+import { pickLocalModel } from '../src/routes/forge-run.js';
 import { Stream, frame } from '../src/stream.js';
 import { mintTokens } from '../src/tokens.js';
 import { nodeWorkDesk } from '../src/work.js';
 import { nodeWorld } from '../src/world.js';
 import type { Spawner } from '@abheet19/zeno-forge';
+
+test('Forge — automatic local routing prefers the exact 8B default regardless of Ollama order', () => {
+  assert.equal(pickLocalModel(['qwen3:14b', 'qwen3:8b']), 'qwen3:8b');
+  assert.equal(pickLocalModel(['qwen3:14b', 'llama3.2:3b']), 'qwen3:14b');
+  assert.equal(pickLocalModel(['llama3.2:3b']), 'llama3.2:3b');
+  assert.equal(pickLocalModel([]), null);
+});
 
 interface Harness {
   readonly base: string;
@@ -1736,7 +1744,7 @@ test('Forge — a local model can answer without inventing a file, while edits a
     });
     assert.equal(response.status, 200);
     return await response.json() as {
-      run: { ok: boolean; log: string; note: string | null; tokensIn: number | null; tokensOut: number | null };
+      run: { ok: boolean; effort: string | null; log: string; note: string | null; tokensIn: number | null; tokensOut: number | null };
       changed: string[];
       proposed: { path: string; auto: boolean }[];
     };
@@ -1745,6 +1753,7 @@ test('Forge — a local model can answer without inventing a file, while edits a
   try {
     const answered = await run('local-answer', 'WRITE A for loop. Do not edit or create files.');
     assert.equal(answered.run.ok, true);
+    assert.equal(answered.run.effort, 'medium', 'normal mode defaults to medium effort when the caller omits it');
     assert.equal(answered.run.log, '```js\nfor (let i = 0; i < 3; i++) console.log(i);\n```');
     assert.deepEqual(answered.changed, []);
     assert.deepEqual(answered.proposed, []);

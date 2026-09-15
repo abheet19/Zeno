@@ -21,8 +21,11 @@ export const criteria = ['GAP-FORGE-REASONING', 'owner: see and stop a run'];
 export async function run({ daemon, page, ok, Blocked }) {
   const agents = await daemon.api('/forge/agents?passive=1');
   const locals = agents.body?.localModels || [];
-  // qwen3:4b exhausts its budget and proposes nothing; prefer 8b/14b.
-  const model = locals.find((m) => /8b|14b/.test(m)) || locals[0];
+  // Match the product's automatic route: exact qwen3:8b first, then another
+  // Qwen model, then whatever Ollama actually reports as installed.
+  const model = locals.find((m) => m === 'qwen3:8b')
+    || locals.find((m) => m.startsWith('qwen3:'))
+    || locals[0];
   if (!model) throw new Blocked('an installed Ollama model (e.g. `ollama pull qwen3:8b`) — Forge cannot run a local agent without one');
 
   // The progress binder must be shipped and own the SSE + cancel.
@@ -72,16 +75,21 @@ export async function run({ daemon, page, ok, Blocked }) {
 
   if (shown) {
     const seen = new Set();
-    // Sample the phase text for a few seconds; a real run advances.
+    let sawPercent = false;
+    // Capture phase and percentage together. A quick local run may clear the
+    // finished progress line before a later, separate assertion can read it.
     for (let i = 0; i < 20; i += 1) {
-      const t = await page.evaluate(() => document.querySelector('.forge-progress .forge-progress-text')?.textContent || '');
-      if (t) seen.add(t.replace(/\d+%.*/, '').trim());
+      const snapshot = await page.evaluate(() => document.querySelector('.forge-progress')?.textContent || '');
+      if (snapshot) {
+        sawPercent ||= /\d+%/.test(snapshot);
+        seen.add(snapshot.replace(/\d+%.*/, '').trim());
+      }
       const done = await page.evaluate(() => window.__runDone === true);
       if (done) break;
       await page.waitForTimeout(500);
     }
     ok('it names a real orchestration phase', [...seen].some((p) => /Checking|Preparing|working|Inspecting|approvals/i.test(p)), [...seen].join(' | '));
-    ok('the percent is shown', await page.evaluate(() => /\d+%/.test(document.querySelector('.forge-progress')?.textContent || '')));
+    ok('the percent is shown', sawPercent);
   }
 
   // Wait for the run to finish (or time out generously), then assert the

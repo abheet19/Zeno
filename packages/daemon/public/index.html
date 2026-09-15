@@ -1123,7 +1123,7 @@ button{font:inherit; color:inherit}
                 <button class="cbtn mic" id="home-mic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button>
                 <button class="cbtn send" id="home-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
               </div>
-              <div class="foot"><button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><span class="pill wt" id="voice-state"><span class="d"></span>voice: idle</span><span class="pill wt" title="What this chat may use">memory: Vault · local only</span><span class="grow"></span><span>Enter to send · Shift+Enter for a new line</span></div>
+              <div class="foot"><button class="pill cy" data-model-pill="caret"><span class="d"></span>detecting local model…</button><span class="pill wt" id="voice-state"><span class="d"></span>voice: idle</span><span class="pill wt" title="What this chat may use">memory: Vault · local only</span><span class="grow"></span><span>Enter to send · Shift+Enter for a new line</span></div>
             </div>
             <div class="kernel"><span><span class="ok"></span><b>chain verified</b></span><span class="sep"></span><span><b>7</b> receipts</span><span class="sep"></span><span><b>Ed25519</b> signed</span><span class="sep"></span><span><b>owner token</b> held</span><span class="sep"></span><span>policy <b>built-in</b></span></div>
           </div>
@@ -1169,7 +1169,7 @@ button{font:inherit; color:inherit}
                 <textarea id="chats-ta" rows="1" placeholder="Continue this conversation…"></textarea>
                 <button class="cbtn mic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button>
                 <button class="cbtn send" id="chats-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
-              <div class="foot"><button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><span class="grow"></span><span>grounded · cites sources · never approves</span></div>
+              <div class="foot"><button class="pill cy" data-model-pill="caret"><span class="d"></span>detecting local model…</button><span class="grow"></span><span>grounded · cites sources · never approves</span></div>
             </div>
           </div>
         </div>
@@ -1505,7 +1505,7 @@ PS D:\Code\Zeno\.zeno\workspace&gt; <span id="vs-termecho"></span><span class="c
                 <textarea id="ag-ta" rows="1" placeholder="Describe your task to Zeno"></textarea>
                 <div class="ag-row">
                   <button class="ag-ic" id="ag-plus" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
-                  <button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button>
+                  <button class="pill cy" data-model-pill="caret"><span class="d"></span>detecting local model…</button>
                   <button class="pill cy" id="ag-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button>
                   <span class="grow"></span>
                   <button class="ag-ic" title="Voice"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button>
@@ -1549,7 +1549,7 @@ PS D:\Code\Zeno\.zeno\workspace&gt; <span id="vs-termecho"></span><span class="c
         <div class="sesscompose">
           <div class="composer compact">
             <div class="row"><button class="cbtn attach" id="s-attach" title="Add context"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><textarea id="s-ta" rows="1" placeholder="Ask Zeno to change the codebase…"></textarea><button class="cbtn mic" id="s-mic" title="Voice (mic: Forge)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4M8 21h8"/></svg></button><button class="cbtn send" id="s-send" title="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
-            <div class="foot"><button class="pill wt" id="s-kind" title="What this run may do">&lt;/&gt; Code ▾</button><button class="pill cy" id="s-model" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button><button class="pill wt" data-effort-pill title="Effort — higher consumes more tokens">effort: medium ▾</button><button class="pill cy" id="s-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button><span class="grow"></span><button class="pill wt" id="s-skills" title="Skills, rules and MCP loaded for this run" data-vsgo="zeno">2 skills · 8 tools ▾</button></div>
+            <div class="foot"><button class="pill wt" id="s-kind" title="What this run may do">&lt;/&gt; Code ▾</button><button class="pill cy" id="s-model" data-model-pill="caret"><span class="d"></span>detecting local model…</button><button class="pill wt" data-effort-pill title="Effort — higher consumes more tokens">effort: medium ▾</button><button class="pill cy" id="s-planfirst" data-plan-first aria-pressed="true" title="Plan first: Zeno reads the repository (without touching it) and shows a plan you approve before the run starts">Plan first: on</button><span class="grow"></span><button class="pill wt" id="s-skills" title="Skills, rules and MCP loaded for this run" data-vsgo="zeno">2 skills · 8 tools ▾</button></div>
           </div>
           <div class="sessfoot"><span class="pill wt">⌂ Local</span><span class="pill wt">▣ workspace</span><span class="grow"></span><span>Vault memory: on</span></div>
         </div>
@@ -1694,7 +1694,7 @@ Open questions (2): …</pre><div class="caps-acts" style="padding:12px 0 0;bord
           <div class="setrow"><div><div class="lab">Density</div><div class="sub">Compact tightens list rows and cards for smaller screens.</div></div><div class="segsm"><button aria-current="page">Comfortable</button><button>Compact</button></div></div>
         </div>
         <div class="set-pane" data-setpane="models" data-sub="Which model runs first, and your cloud keys.">
-          <div class="setrow"><div><div class="lab">Default model</div><div class="sub">The model Command and Forge reach first. Local models never leave this machine.</div></div><button class="pill cy" data-model-pill="caret"><span class="d"></span>qwen3:8b · local ▾</button></div>
+          <div class="setrow"><div><div class="lab">Default model</div><div class="sub">The model Command and Forge reach first. Local models never leave this machine.</div></div><button class="pill cy" data-model-pill="caret"><span class="d"></span>detecting local model…</button></div>
           <div class="setrow"><div><div class="lab">Manage models</div><div class="sub">Add or remove local models — Zeno pulls them for you, and warns before a download that won't fit your GPU.</div></div><button class="set-btn" data-set-managemodels>Open model manager</button></div>
           <div class="setrow"><div><div class="lab">Cloud API keys</div><div class="sub">Optional. Stored in the OS keychain, never in a file. A cloud call is a T3 egress effect and asks you every time.</div></div><span class="pill wt">Anthropic · set</span></div>
         </div>
