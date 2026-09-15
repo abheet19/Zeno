@@ -32,31 +32,25 @@ between what it **proposes** and what actually **happens**.
 </div>
 
 > [!NOTE]
-> **Everything runs on your machine.** The daemon binds to `127.0.0.1` and nothing else — there is
-> no inbound surface at all. See [what can reach the internet](#-what-can-reach-the-internet) for
-> the precise, unglamorous truth.
+> **The safety core stays on your machine.** State, policy, approvals, Vault, local Ollama and local
+> Whisper use loopback or local files. Hosted Forge providers and explicitly enabled browser/web
+> controls can send bounded data out. See [what can reach the internet](#-what-can-reach-the-internet)
+> for the exact boundary. The daemon itself exposes no non-loopback listening surface.
 
 > [!NOTE]
-> **Current working-tree verification (2026-09-15).** Fixed the desktop window occasionally opening
-> without its owner token (the cause of an apparently-dead UI); Forge now opens to **Agent** view by
-> default and shows an **"Open a project"** prompt instead of silently landing in a scratch repo; the
-> "paired phone" editor lock was a CSS width breakpoint misfiring on a same-machine browser, not a real
-> capability gate, and is fixed; Command uses the selected local model for ordinary conversation;
-> stale persisted approvals are revalidated and automatically cleaned up instead of blocking project selection; Compare
-> reads and runs installed models; the composer stays on-screen at narrow widths; and the orb renderer
-> no longer duplicates its animation loop. Forge now previews the exact plan and bounded context that
-> a run will use, and Lens exposes the selected repository rules, skills, citations, prompt hash, and
-> retry state. Skills load for deliberate per-run opt-in instead of being silently selected; this
-> removes a real `skill-selection-too-large` blocker in repositories with large skill libraries.
-> Answer-only Forge runs now show their actual answer in Session instead of “No files were changed”,
-> and the one-click local fallback prefers the faster installed 8B model. The latest daemon package run is **200/200**. The complete 26-flow renderer suite is
-> **23 passed, 0 failed, 3 blocked**: Counsel audio and Voice require a physical microphone, while
-> Work/Devices pairing requires a second Zeno client. An actual Electron profile also verified a
-> normal `qwen3:14b` Command answer, zero pending approvals, live orb rotation, Forge folder/Agent/Editor/terminal
-> paths, and no console errors. A second live interaction sweep redirected a hosted route to local
-> `qwen3:8b`, which read this repository's `package.json` and answered `@abheet19/zeno-workspace`.
-> These results describe the tested working tree based on `c79f5f2`;
-> they are not a signed packaged-release claim or formal WCAG certification.
+> **Current source and installed-app verification (2026-09-15, `dcadca8`).** The full workspace gate
+> is green: daemon **201**, desktop **107**, Forge **140**, and Glass **4** tests. The unchanged
+> 26-flow renderer suite remains **23 passed, 0 failed, 3 blocked**; its blocks require physical Voice
+> audio, physical Counsel audio, or a second Zeno client. Separate installed-app sweeps passed Command
+> **12/12**, Forge **14/14**, Forge controls **8/8**, and Counsel **19/19**. They covered the 4B/8B/14B
+> Command model picker, prompt-injection refusal and navigation, the moving orb with reduced motion off,
+> Forge project grounding, terminal `git status`, Agent/Editor and all five Session tabs, Counsel's
+> consent-to-archive lifecycle, memory persistence across restart and recall inside Forge, the exact
+> approval hold/apply/receipt path, stale-approval auto-pruning, wake/settings state, and push-to-talk
+> state transitions. Synthetic acoustic wake remains **BLOCKED**. A prior hosted Codex run passed;
+> the JSONL cleanup now has unit coverage, but a fresh hosted rerun on `dcadca8` was blocked by approval
+> review. These are bounded checks, not acceptance of all 196 formal criteria, a signed release, a
+> clean-account/provider matrix, physical-device coverage, load/SLO proof, or WCAG certification.
 
 <div align="center">
 
@@ -256,8 +250,8 @@ Nothing leaves the machine, and nothing costs money.
 
 ## 🧩 The three products
 
-Three separate products sharing one gate. Each is an independently testable package; **none needs
-the others to run.**
+Three desktop surfaces share one daemon and one gate. Their package cores are independently testable;
+the Command, Forge and Counsel UIs are coordinated views of the same desktop app, not standalone apps.
 
 <table>
 <tr>
@@ -641,8 +635,8 @@ A sample of what that caught, and fixed:
 
 Zeno is local-first, not air-gapped. Being precise about this matters more than a slogan.
 
-**Nothing can reach *in*.** The daemon binds to `127.0.0.1` — not your network, not your router,
-not another machine. There is no inbound surface at all. That includes the Chrome bridge below: its
+**The daemon has no non-loopback listening surface.** It binds to `127.0.0.1` — not your network,
+not your router and not another machine. That includes the Chrome bridge below: its
 native-messaging host is *started by Chrome* and speaks over Chrome's own stdio pipe, then reaches
 **out** to the address Zeno already binds. It opens no port of its own — deliberately, because a
 helper listening anywhere would make the sentence above false.

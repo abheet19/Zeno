@@ -100,7 +100,7 @@ Pass criteria:
 | Navigation | Open every Command rail item, then use keyboard focus to repeat the journey. | Each control changes to a real surface or an explicit unavailable state; focus remains visible. |
 | Live state | Create a disposable proposal and watch pending approvals and receipts. | Counts and lists update without a page refresh. A verified seal appears only after its receipt exists. |
 | Read failure | Stop the daemon while the window is open. | The surface reports unread/unknown rather than rendering a healthy zero or quiet field. |
-| Field parity | Toggle the full list, 2D view, reduced motion, masking and each theme. Inspect every node. | Canvas and list describe the same live objects; controls do not fabricate objects or activity. |
+| Field parity | Toggle the full list, 2D view, reduced motion and each theme. Inspect every node. | Canvas and list describe the same live objects; controls do not fabricate objects or activity. |
 | Node actions | Open a pending action, receipt, Vault note, meeting and repository node when each exists. | The card links to its owning surface; opening a card never approves or executes. |
 | Local models | Start Ollama and pull a model; then stop Ollama. | A runtime/model node appears only after `/forge/agents` reports installed models and disappears or becomes honestly unavailable after loss. |
 | Ask Zeno | Ask a question answerable from current state or Vault, then ask an unsupported one. | Grounded answers cite the source; unsupported claims are labelled ungrounded. |

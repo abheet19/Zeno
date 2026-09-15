@@ -1,4 +1,4 @@
-# Acceptance evidence boundary — 2026-09-10
+# Acceptance evidence boundary — 2026-09-15
 
 This document maps current focused checks and retained live observations to clauses in the
 canonical 196-row acceptance ledger. It does not award acceptance. A row is complete only when
@@ -14,7 +14,29 @@ every clause and every item in its `required_evidence_summary` has a retained ar
 | Whole rows proved by this audit | 0 |
 | Status edits made by this audit | 0 |
 
-Evidence below is split by scope. The complete workspace gate was rerun on clean implementation commit
+## Final source and installed-app supplement (`dcadca8`)
+
+This supplement is newer than the historical package evidence below. It still awards no formal
+criterion: the canonical ledger remains **196 `not-started`, 0 accepted**.
+
+| Check | Result | Boundary |
+|---|---:|---|
+| Full workspace gate | daemon 201; desktop 107; Forge 140; Glass 4, all green | Current source at `dcadca8`; not a signed installer or public release |
+| Installed Command | 12/12 | Three installed Qwen choices, bounded reply/refusal/navigation, pending 0, stale badge hidden, reduced-motion-off orb movement |
+| Installed Forge | 14/14; controls 8/8 | One `qwen3:8b` read-only grounding task, terminal `git status`, Agent/Editor, five Session tabs; not arbitrary task quality |
+| Installed Counsel | 19/19 | Synthetic/local consent-to-archive lifecycle; not physical microphone or remote/system audio |
+| Memory and approval | restart/recall/Forge context passed; held proposal applied once with verified receipt | Named local journeys only |
+| Voice/wake state | wake/settings and PTT state passed | Synthetic acoustic wake and physical audio remain BLOCKED |
+| Hosted Codex | prior run passed; current JSONL cleanup unit-tested | Fresh `dcadca8` hosted rerun was blocked by approval review and is not claimed |
+
+Current primary artifacts include `ZENO_LIVE_COMMAND_SWEEP_20260915.json`
+(`86B8885DA5D2C84FC2E71D52CC51977C293BB275CA3C75407DD15FF11C547A25`),
+`ZENO_LIVE_FORGE_SWEEP_20260915.json`
+(`91F26A9306E0F7D609223BFEBA59E17172F5211ACACC155B71722729F9343421`), and
+`ZENO_LIVE_FORGE_CONTROLS_20260915.json`
+(`2FB9726DA15E5BBD772EB45CB0A40E92C51F2DB745A560B0DAD887E9EF101291`).
+
+Historical evidence below is split by scope. The complete workspace gate was rerun on clean implementation commit
 `db674c0bd1112786eae70bbbce2ec39e44365b52` (tree `c904c41019f754051b12bd04cae2b775dcd95824`).
 The rebuilt dark package then received fresh-profile theme, 21-check UI, exact answer-only, and held-edit probes in an isolated Zeno directory. The physical hold-to-talk probe predates the theme-only commit and is labelled separately.
 

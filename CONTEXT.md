@@ -1,6 +1,6 @@
 # Zeno — current implementation context
 
-> Evidence snapshot: 15 September 2026 IST. Canonical repository: `D:\Code\Zeno`; branch `phase-0-and-p1-01-kernel`; verified working tree based on commit `c79f5f2f59ba11d04ceb18d84a6ed8e9f06f6642`. The verification includes uncommitted product and test changes, so preserve the complete dirty-path list with any result and do not describe it as commit-bound. An *ordinary edit to an ordinary file inside the sandbox* auto-applies (tier T0) and is still receipted, while destructive writes, sensitive paths (config/keys/`.git`/`CLAUDE.md`), rewrites over the 40-line budget, credentials, and every egress or shell action still stop and wait for one exact human approval — see `packages/kernel/src/risk.ts`. The current code was exercised with `npm run app`; no current signed installer or public deployment has been accepted.
+> Evidence snapshot: 15 September 2026 IST. Canonical repository: `D:\Code\Zeno`; branch `phase-0-and-p1-01-kernel`; final code commit `dcadca8`. An *ordinary edit to an ordinary file inside the sandbox* auto-applies (tier T0) and is still receipted, while destructive writes, sensitive paths (config/keys/`.git`/`CLAUDE.md`), rewrites over the 40-line budget, credentials, and every egress or shell action still stop and wait for one exact human approval — see `packages/kernel/src/risk.ts`. Current source gates and installed-app journeys were exercised; no current signed installer or public deployment has been accepted. The formal 196-criterion ledger remains separate and is not promoted by these test totals.
 >
 > This is the short, AI-readable map, written to be pasted into another AI as project context — so it explains its own jargon inline the first time a term appears. The current source and the retained executable evidence win if an older design note disagrees. A configured URL or a stale packaged binary is not proof that current code is deployed.
 >
@@ -200,9 +200,9 @@ The last packaged runtime build (pre-refactor, `db674c0`) emitted `Zeno-0.1.0-x6
 
 ## Current measured evidence
 
-### Current working tree (15 September 2026)
+### Current source and installed app (`dcadca8`, 15 September 2026)
 
-These results cover the working tree based on `c79f5f2`. Because it is dirty, retain the path list and evidence files with the result; a later commit must rerun the gates before inheriting the claim.
+These results bind only the named test, environment and commit. Supplemental installed-app sweeps do not replace the 26-flow renderer suite or accept the formal ledger.
 
 | Result | How it was produced |
 | --- | --- |
@@ -210,8 +210,11 @@ These results cover the working tree based on `c79f5f2`. Because it is dirty, re
 | `cta-sweep`: every visible control across Command/Forge/Counsel and the Settings/model-picker/`+`-menu overlays either produced a real effect or was honestly disabled — no silent no-op button anywhere. Three genuine gaps this pass caught and fixed: the editor status footer (Problems/Ports/exit) showed with no editor in Agent mode (now hidden), and the sweep's own detector was taught to credit toggle-state and redundant view-switch effects. | flow `19-cta-sweep` |
 | `stress`: 12 concurrent proposals, rapid approve/refuse, and a screen-switch race left the kernel and receipt chain consistent (15/15). | flow `20-stress` |
 | `orchestrator`: a Command task really opened and started a new Forge session and the live `.orch-runs` status tracked it (9/9). | flow `21-orchestrator` |
-| Daemon package gate **200/200**. Forge context/capability fixtures passed 17/17; plan-first and Forge-run fixtures passed 62/62 each; add-capabilities passed 52/52. The capability flow now proves that installed skills begin unselected and enter a run only after deliberate opt-in. | `npm test -w @abheet19/zeno-daemon`; focused scripts under `packages/daemon/scripts` and `evidence/c79f5f2/e2e/` |
-| Actual Electron profile: owner bridge and local Whisper installation detected; pending approvals 0; orb animation advanced by 0.454 radians; `qwen3:14b` answered `2 + 3` normally; Command repository overview matched the active Forge branch/head; Forge folder selection, Agent/Editor views, terminal, Vault, and Work loaded without console errors. A second live interaction sweep verified rapid Enter deduplication, 32 real slash commands, Work-filter persistence, Settings → model manager, and hosted-route → **Run locally instead** → `qwen3:8b` reading `package.json` and answering `@abheet19/zeno-workspace`. | `%USERPROFILE%\OneDrive\Documents\ChatGPT\code\verification-work\portfolio-release-20260910\ZENO_ACTUAL_PROFILE_CDP_CHECK_20260915.json`, `ZENO_ACTUAL_PROFILE_COMMAND_MODEL_20260915.json`, `ZENO_ACTUAL_PROFILE_FORGE_20260915.json`, and `ZENO_FINAL_INTERACTION_CHECK_20260915.json` |
+| Full workspace gate: daemon **201**, desktop **107**, Forge **140**, Glass **4**, all green. | `npm run check` at `dcadca8` |
+| Installed Command **12/12**: 4B/8B/14B model selection and bounded replies, injection refusal/navigation, reduced-motion-off orb movement, and pending approvals 0 with the stale badge hidden. | `ZENO_LIVE_COMMAND_SWEEP_20260915.json` (SHA-256 `86B8885DA5D2C84FC2E71D52CC51977C293BB275CA3C75407DD15FF11C547A25`) |
+| Installed Forge **14/14** plus controls **8/8**: `qwen3:8b` read-only project grounding, terminal `git status`, Agent/Editor, and Session/Plan/Runs/Actions/Lens. | `ZENO_LIVE_FORGE_SWEEP_20260915.json` (SHA-256 `91F26A9306E0F7D609223BFEBA59E17172F5211ACACC155B71722729F9343421`) and `ZENO_LIVE_FORGE_CONTROLS_20260915.json` (SHA-256 `2FB9726DA15E5BBD772EB45CB0A40E92C51F2DB745A560B0DAD887E9EF101291`) |
+| Installed Counsel **19/19** covered its synthetic/local consent, capture-state, archive, cited summary/Q&A, export, local email draft and deletion lifecycle. Physical microphone/remote-system-audio capture remains blocked. Memory persisted across restart and was recalled in Command and Forge; approval hold/apply produced a verified receipt; stale approval auto-pruning, wake/settings state and push-to-talk state passed. | Current retained installed-run output; claims are limited to the named synthetic/state journeys. |
+| A prior hosted Codex run passed 3/3. The current runner's JSONL cleanup has Forge unit coverage, but a fresh hosted rerun at `dcadca8` was blocked by approval review and is not claimed. | `ZENO_LIVE_HOSTED_CODEX_20260915.json` (prior-run SHA-256 `E9AE492A291398A56FB33BF67A949F3B6C60B6A527F4A9320918A7AE6C407755`) plus the current Forge 140-test gate |
 
 The three blocks are environment limits, not passes: the automated paths cannot prove live microphone capture or a real second client. Installed Whisper assets and a working speech bridge prove provisioning only. No formal WCAG certification, physical-device matrix, load capacity, or packaged-release acceptance follows from these results.
 
@@ -282,7 +285,7 @@ These are the questions this project is most likely to draw, with answers ground
 3. `docs/44-STUDY-PACK.md` — trace current packages and concepts
 4. `docs/12-architecture-and-adrs.md; docs/13-threat-model-and-policy.md` — learn architectural decisions and threats
 5. `packages/kernel/src; packages/daemon/src; packages/desktop` — follow proposal to approval/receipt and desktop lifecycle
-6. `packages/forge/src; packages/daemon/public/forge.js` — follow provider execution and IDE state
+6. `packages/forge/src; packages/daemon/src/routes/forge; packages/daemon/public/forge/` — follow provider execution, scoped routes and IDE state
 7. `packages/voice; packages/counsel; packages/vault` — study speech, ethical meetings, and memory
 8. `docs/35-HOW-TO-TEST.md; docs/SANITY.md; docs/43-ACCEPTANCE-EVIDENCE.md` — run evidence and understand its limits
 

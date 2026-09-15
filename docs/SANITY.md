@@ -1,6 +1,6 @@
 # Zeno — sanity, acceptance, and release guide
 
-> Snapshot: 10 September 2026 IST. Run this against disposable or synthetic data. Save the branch, commit, complete dirty-path list, command, exit code, environment, and artifact hashes with every result.
+> Snapshot: 15 September 2026 IST. Final code commit `dcadca8`. Run this against disposable or synthetic data. Save the branch, commit, complete dirty-path list, command, exit code, environment, and artifact hashes with every result. The current full workspace gate is green (daemon 201, desktop 107, Forge 140, Glass 4); the formal ledger remains 0/196 accepted.
 
 ## Before running
 
@@ -31,9 +31,16 @@ Get-FileHash .\dist-app\Zeno-Setup-0.1.0-x64.exe -Algorithm SHA256
 - [ ] Run hosted Codex/Claude only after their exact in-product egress/allowance confirmation; verify denied and cancelled paths as well as success.
 - [ ] Inspect every Codex provider log: ambient MCP/web should remain disabled, while any global Agent Skill discovery must be surfaced as an open isolation boundary rather than described as fully blocked.
 - [ ] Verify Vault owner write, agent proposal/refusal to self-approve, keyword recall citations, memory-off behavior, and no raw-chat auto-memory.
-- [ ] Test theme, reduced motion, masking, zoom, keyboard focus, and layouts at desktop/tablet/360 px without horizontal page overflow.
+- [ ] Test theme, reduced motion, zoom, keyboard focus, and layouts at desktop/tablet/360 px without horizontal page overflow.
 
 ## Retained evidence for the current candidate
+
+- `ZENO_LIVE_COMMAND_SWEEP_20260915.json`: installed Command 12/12, including three Qwen selections, pending 0, stale badge hidden, and reduced-motion-off orb movement.
+- `ZENO_LIVE_FORGE_SWEEP_20260915.json` and `ZENO_LIVE_FORGE_CONTROLS_20260915.json`: installed Forge 14/14 and controls 8/8, including read-only project grounding, terminal `git status`, Agent/Editor, and all five Session tabs.
+- Current retained runs also cover Counsel 19/19, memory persistence/restart/Forge recall, one approval hold/apply/receipt journey, wake/settings state, and PTT state. Synthetic acoustic wake and physical capture remain blocked.
+- A prior hosted Codex run passed. A fresh `dcadca8` rerun was blocked by approval review; the current claim is limited to the JSONL cleanup unit test in the Forge 140-test gate.
+
+Historical package evidence follows and remains bound to its named binaries:
 
 - `verification-work/zeno-release-db674c0-check.log`: exact post-dark implementation commit, 1,456 tests, 1,454 passed, 2 explicit Windows symlink skips, 0 failed across 16 workspace summaries.
 - `verification-work/zeno-packaged-dark-default-report.json`: a fresh profile booted Graphite dark before CSS; saved System, Light, and Dark choices still won; zero page or console errors.
