@@ -8,8 +8,9 @@
  * `S.renderPlan`, `S.renderLens`; reads `S.setForgeView`, `S.openFile`,
  * `S.latestPlanTurn` (plan.js).
  */
-import { $, el, fill } from '../../bind.js';
-import { add, runMark } from './dom.js';
+import { $, $$, el, fill } from '../../bind.js';
+import { add, postJSON, runMark } from './dom.js';
+import { withContextSelection } from './state.js';
 
 export function setupSessionViews(S) {
   /** One proposal capsule — used both inline in the Session transcript
@@ -93,7 +94,7 @@ export function setupSessionViews(S) {
     const proposed = session.lastProposed || [];
     if (!proposed.length) { fill(view, el('div', 'fnote', 'No proposed changes from this session yet.')); return; }
     const nodes = proposed.map((p) => proposalCard(p));
-    nodes.push(el('div', 'fnote', 'Each changed file becomes one approval capsule. Forge never applies a write itself; Command approves it.'));
+    nodes.push(el('div', 'fnote', 'Each changed file becomes one governed capsule. Routine T0 edits are already sealed; risky edits wait for you in Command.'));
     fill(view, ...nodes);
   };
 
@@ -117,9 +118,46 @@ export function setupSessionViews(S) {
     fill(view, ...nodes);
   };
 
-  S.renderLens = function renderLens(session) {
+  let lensRequest = 0;
+  S.renderLens = async function renderLens(session) {
     const view = $('.sessview[data-stab="lens"]');
     if (!view) return;
-    fill(view, el('div', 'fnote', 'Forge Lens’s exact assembled prompt preview is not read by this build. What actually goes to the agent is the task text you typed, plus Vault memory when it is on, plus any skills you select, plus the plan you approved when Plan first is on.'));
+    const lastTask = [...session.chat].reverse().find((turn) => turn.who === 'you' && typeof turn.text === 'string');
+    const draft = S.sessions[S.activeIdx] === session ? ($('#s-ta')?.value || '') : '';
+    const ownerTask = (draft || lastTask?.text || session.runs[session.runs.length - 1]?.task || '').trim();
+    const task = S.contextTaskForSession ? S.contextTaskForSession(session, ownerTask) : ownerTask;
+    if (!task) {
+      fill(view, el('div', 'fnote', 'Send a task in this session to preview the exact context Forge will give the selected agent.'));
+      return;
+    }
+    const request = ++lensRequest;
+    fill(view, el('div', 'fnote', 'Assembling the exact prompt from this task, repository rules, selected skills and Vault memory…'));
+    const body = withContextSelection(S, { task, memoryEnabled: session.memoryEnabled !== false });
+    const response = await postJSON('/forge/context', body);
+    if (request !== lensRequest) return;
+    if (!response.ok || !response.data || !response.data.context) {
+      const reason = response.error || 'the daemon did not return a context preview';
+      const retry = el('button', 'btn sm', 'Retry');
+      retry.type = 'button';
+      retry.addEventListener('click', () => { void S.renderLens(session); });
+      fill(view, el('div', 'fnote', `Forge Lens could not assemble this prompt: ${reason}`), retry);
+      return;
+    }
+    const context = response.data.context;
+    const facts = el('div', 'frm', `${context.characters} characters · ${context.rules.length} rule${context.rules.length === 1 ? '' : 's'} · ${context.skillIds.length} skill${context.skillIds.length === 1 ? '' : 's'} · ${context.memory.note}`);
+    const hash = el('div', 'vsnote', `SHA-256 ${context.hash}${context.truncated ? ` · ${context.omittedCharacters} characters omitted at the context limit` : ''}`);
+    const prompt = el('pre', 'fterm');
+    prompt.dataset.lensPrompt = '1';
+    prompt.textContent = context.prompt;
+    fill(view, el('div', 'fnote', 'Exact prompt assembled by the same daemon path used for this Forge run.'), facts, hash, prompt);
   };
+  // ui.js owns generic tab visibility. Lens adds only the data refresh: when
+  // the owner opens it, preview the active session (including an unsent draft)
+  // through the real daemon route instead of leaving an old prompt on screen.
+  for (const tab of $$('#s-tabs [data-stab="lens"]')) {
+    tab.addEventListener('click', () => {
+      const session = S.sessions[S.activeIdx];
+      if (session) void S.renderLens(session);
+    });
+  }
 }

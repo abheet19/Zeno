@@ -28,7 +28,7 @@
       if(pane&&setSub) setSub.textContent=pane.dataset.sub||''; const body=smodal.querySelector('.set-body2'); if(body) body.scrollTop=0; }
     smodal.querySelectorAll('[data-setcat]').forEach(b=> b.addEventListener('click', ()=> setCat(b.dataset.setcat)));
     smodal.querySelectorAll('[data-set-signout]').forEach(b=> b.addEventListener('click', ()=> toast('Owner token released — this window is now read-only. Reopen Zeno to approve again.')));
-    smodal.querySelectorAll('[data-set-managemodels]').forEach(b=> b.addEventListener('click', ()=>{ smodal.hidden=true; toast('The model manager lives in Forge → ＋ Models — pull or remove local models there.'); }));
+    smodal.querySelectorAll('[data-set-managemodels]').forEach(b=> b.addEventListener('click', ()=>{ smodal.hidden=true; showProduct('forge'); toast('The model manager lives in Forge → ＋ Models — pull or remove local models there.'); }));
     smodal.querySelectorAll('[data-set-customize]').forEach(b=> b.addEventListener('click', e=>{ e.preventDefault(); smodal.hidden=true; toast('Customize: Skills · Connectors · Plugins — each added by you, all behind the approval gate.'); }));
   })();
   function grp(sel){ $$(sel).forEach(b=> b.addEventListener('click', ()=>{ b.parentElement.querySelectorAll('[aria-current]').forEach(x=>x.removeAttribute('aria-current')); b.setAttribute('aria-current','page'); })); }

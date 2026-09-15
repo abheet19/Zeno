@@ -23,6 +23,7 @@ import { setupPlanFirst } from './plan.js';
 import { setupSessionViews } from './session-views.js';
 import { setupAgentMode } from './agent-mode.js';
 import { setupComposerCommands } from './composer-commands.js';
+import { withContextSelection } from './state.js';
 
 export function setupSession(S) {
   const ide = S.ide;
@@ -204,7 +205,8 @@ export function setupSession(S) {
       const who2 = [t.agentId, t.model, t.effort].filter(Boolean).join(' · ');
       if (who2) add(head, el('span', 'frm', who2));
       add(bt, head);
-      add(bt, el('p', null, t.note || (t.files && t.files.length ? `Changed ${t.files.length} file(s).` : 'No files were changed.')));
+      const answerOnly = t.answered && typeof t.log === 'string' && t.log.trim() !== '';
+      add(bt, el('p', null, t.note || (answerOnly ? t.log : (t.files && t.files.length ? `Changed ${t.files.length} file(s).` : 'No files were changed.'))));
       for (const path of (t.files || [])) {
         const tool = el('div', 'dvtool');
         // A real control, not decoration: opens the file in the editor
@@ -230,7 +232,7 @@ export function setupSession(S) {
 
   function renderChat(session) {
     if (!sTurns) return;
-    if (!session.chat.length) { fill(sTurns, el('div', 'fnote', 'Describe the change. Zeno works in an isolated worktree, and every effect waits for your approval in Command.')); return; }
+    if (!session.chat.length) { fill(sTurns, el('div', 'fnote', 'Describe the change. Zeno works in an isolated worktree. Routine low-risk edits may apply under your local policy; risky or sensitive effects wait for your approval in Command.')); return; }
     fill(sTurns, ...session.chat.map((t) => turnNode(t, session)));
     sTurns.scrollTop = sTurns.scrollHeight;
   }
@@ -417,8 +419,12 @@ export function setupSession(S) {
   function localModelChoice() {
     const locals = (S.agentsData && Array.isArray(S.agentsData.localModels)) ? S.agentsData.localModels : [];
     if (!locals.length) return '';
-    // Prefer an 8b/14b: qwen3:4b tends to exhaust its budget before proposing.
-    return locals.find((m) => /8b|14b/.test(m)) || locals[0];
+    // Prefer 8b for the one-click local fallback: 4b often exhausts its output
+    // budget, while 14b adds avoidable latency to an action whose promise is a
+    // quick on-device alternative. Manual selection still exposes every model.
+    return locals.find((m) => /(?:^|:)8b(?:$|[-_])/i.test(m))
+      || locals.find((m) => /(?:^|:)14b(?:$|[-_])/i.test(m))
+      || locals[0];
   }
 
   /** Redirect a held hosted proposal to a real local run — no egress, no bill. */
@@ -441,7 +447,7 @@ export function setupSession(S) {
     // this session by openByRunId() above.
     session.runId = runId;
     runIndex.set(runId, session);
-    const body = { task, memoryEnabled: session.memoryEnabled !== false, skillIds: [...S.selectedSkillIds], agentId: route.agentId, runId };
+    const body = withContextSelection(S, { task, memoryEnabled: session.memoryEnabled !== false, agentId: route.agentId, runId });
     if (route.model) body.model = route.model;
     if (route.effort) body.effort = route.effort;
     if (hostedConfirmed) body.hostedConfirmed = true;
@@ -465,6 +471,7 @@ export function setupSession(S) {
     const run = d.run || {};
     const proposed = Array.isArray(d.proposed) ? d.proposed : [];
     const changed = Array.isArray(d.changed) ? d.changed : [];
+    const answered = changed.length === 0 && typeof run.log === 'string' && run.log.trim() !== '';
     const applied = proposed.filter((p) => p && p.auto).length;
     const waiting = proposed.length - applied;
     // "planned" is the DAEMON's word: only a run whose response carries the
@@ -473,14 +480,14 @@ export function setupSession(S) {
     session.lastProposed = proposed;
     session.chat.push({
       who: 'agent', agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
-      files: changed, waiting, applied, proposed, log: typeof run.log === 'string' ? run.log : '', planSteps,
+      files: changed, waiting, applied, proposed, log: typeof run.log === 'string' ? run.log : '', answered, planSteps,
       ok: run.ok === true, cancelled: run.cancelled === true, // turnNode's runMark() needs the same shape session.runs already carries
       note: run.ok === false ? (run.note || 'The agent did not complete this task.') : (run.note || ''),
     });
     session.runs.push({
       task, ok: run.ok === true, cancelled: run.cancelled === true,
       agentId: run.agentId || route.agentId, model: run.model || route.model, effort: run.effort || route.effort,
-      files: changed.length, waiting, applied, planSteps, note: run.ok === false ? (run.note || '') : '',
+      files: changed.length, waiting, applied, answered, planSteps, note: run.ok === false ? (run.note || '') : '',
       // Only local (Ollama) runs measure these; hosted CLIs return null and the
       // Runs tab shows nothing rather than a fabricated count.
       tokensIn: Number.isFinite(run.tokensIn) ? run.tokensIn : null,

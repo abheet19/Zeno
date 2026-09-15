@@ -169,9 +169,10 @@ export async function runLocalModel(
             { role: 'assistant', content: '<think>\n\n</think>\n\n' },
           ],
           stream: false,
-          options: { num_predict: numPredict, temperature: 0.7, top_p: 0.8, top_k: 20 },
+          keep_alive: '60s',
+          options: { num_ctx: 16384, num_predict: numPredict, temperature: 0.7, top_p: 0.8, top_k: 20 },
         }
-      : { model: chosen, prompt, stream: false, think, options: { num_predict: numPredict } };
+      : { model: chosen, prompt, stream: false, think, keep_alive: '60s', options: { num_ctx: 16384, num_predict: numPredict } };
     const r = await fetch(ollamaEndpoint(ctx, endpoint), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

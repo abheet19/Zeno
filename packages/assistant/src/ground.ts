@@ -315,13 +315,28 @@ export function groundReply(answer: string, snapshot: Snapshot): Grounding {
 
   const beside = withoutProposal.replace(refusalPattern(), ' ');
   const refused = beside !== withoutProposal;
-  if (refused && !hasWords(beside)) {
+  if (refused && !hasWords(maskCitations(beside))) {
     // `unknownIds` is empty on this path in practice — a bracketed id would have
     // survived the deletion and left something alphanumeric behind — but the
     // verdict is derived from it rather than hard-coded, so no future change to
     // the refusal pattern can turn this into a hole.
     const ok = unknownIds.length === 0;
     return { ok, cited: [], unknownIds, claimsWithoutCitation: [], reason: ok ? null : 'fabricated-id' };
+  }
+
+  // A citation marker is evidence metadata, not an answer. Small local models
+  // occasionally emit only `[g1]`; accepting that as grounded leaves the owner
+  // with a blank-looking reply even though the cited id is real. Preserve the
+  // fabricated-id diagnosis for unknown markers, then reject marker-only text
+  // as empty rather than rendering it as a successful answer.
+  if (!hasWords(maskCitations(beside))) {
+    return {
+      ok: false,
+      cited,
+      unknownIds,
+      claimsWithoutCitation: [],
+      reason: unknownIds.length > 0 ? 'fabricated-id' : 'empty-answer',
+    };
   }
 
   const claimsWithoutCitation = sentencesIn(beside).filter((s) => {

@@ -34,6 +34,26 @@ export function withPayload(ctx: ServerCtx, h: Held): Record<string, unknown> {
   return { ...h.preview, payload: h.payload, review };
 }
 
+/**
+ * A proposal bound to bytes that have already changed can never be approved:
+ * the kernel's compare-and-swap would refuse it. Remove those dead entries as
+ * soon as a live read notices the drift so they cannot keep showing as a
+ * decision, block project switching, or require manual housekeeping.
+ * Unreadable reviews are retained because a temporary filesystem problem is
+ * not proof that the proposal is obsolete.
+ */
+export function pruneDriftedHeld(ctx: ServerCtx): number {
+  let removed = 0;
+  for (const [hash, held] of ctx.held) {
+    const item = withPayload(ctx, held) as { review?: ForgeFileReview };
+    if (item.review?.state !== 'drifted') continue;
+    ctx.held.delete(hash);
+    removed += 1;
+  }
+  if (removed > 0) persistHeld(ctx);
+  return removed;
+}
+
 export async function postPreview(ctx: ServerCtx, req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
   const body = await readJson(req);
   const relPath = str(body, 'relPath');

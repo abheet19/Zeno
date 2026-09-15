@@ -40,6 +40,8 @@ function debounce(fn, ms) {
 
 let source = null;
 let backoff = 1000;
+let refreshDrain = null;
+const queuedKinds = new Set();
 
 async function rerun(kinds) {
   const jobs = Object.entries(REBIND)
@@ -64,6 +66,23 @@ async function rerun(kinds) {
   document.dispatchEvent(new CustomEvent('zeno:refreshed'));
 }
 
+function queueRerun(kinds) {
+  for (const kind of kinds) queuedKinds.add(kind);
+  if (refreshDrain) return refreshDrain;
+  refreshDrain = (async () => {
+    // Collapse any burst that arrived while the previous read was in flight
+    // into one fresh snapshot. An unbounded promise chain made navigation lag
+    // behind old stream events and could leave a newly opened screen displaying
+    // its temporary "Reading…" state for seconds after the data already existed.
+    while (queuedKinds.size) {
+      const next = new Set(queuedKinds);
+      queuedKinds.clear();
+      await rerun(next);
+    }
+  })().finally(() => { refreshDrain = null; });
+  return refreshDrain;
+}
+
 function connect() {
   if (!token()) return; // a read-only page has no stream to read
   if (source) { try { source.close(); } catch { /* already gone */ } }
@@ -77,7 +96,7 @@ function connect() {
   const flush = debounce(() => {
     const kinds = pendingKinds;
     pendingKinds = new Set();
-    if (kinds.size) void rerun(kinds);
+    if (kinds.size) void queueRerun(kinds);
   }, 180);
 
   const note = (kind) => () => { pendingKinds.add(kind); flush(); };
@@ -109,7 +128,7 @@ function connect() {
     // EventSource finished connecting. Streams only deliver later events, so
     // re-read once at connection time: a pending approval can never remain
     // invisible merely because this window opened a fraction too slowly.
-    void rerun(new Set(['state', 'receipt', 'chain', 'preview']));
+    void queueRerun(new Set(['state', 'receipt', 'chain', 'preview']));
   });
   source.addEventListener('error', () => {
     /* EventSource retries on its own AND replays from Last-Event-ID, which is
@@ -126,12 +145,22 @@ function connect() {
 
 export async function bind() {
   connect();
+  const refreshSnapshot = () => { void queueRerun(new Set(['state', 'receipt', 'chain', 'preview'])); };
+  // A file can drift outside Zeno without producing a Zeno stream event. Re-read
+  // when the owner changes product or opens a Command section so a proposal that
+  // just became stale is never still described as an approval waiting on them.
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element
+      ? event.target.closest('[data-screen], [data-mscreen], [data-screen-jump], [data-product], [data-product-go]')
+      : null;
+    if (target) setTimeout(refreshSnapshot, 0);
+  }, true);
   // A window that slept can miss events entirely; re-reading on return costs one
   // round trip and removes a whole class of "it was stale and I believed it".
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       if (!source) connect();
-      void rerun(new Set(['state', 'receipt', 'chain', 'preview']));
+      refreshSnapshot();
     }
   });
 }

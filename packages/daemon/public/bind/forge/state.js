@@ -33,6 +33,16 @@
  *    before the user can click anything, so by the time any of these are
  *    actually invoked, the owner has already registered it.
  */
+/** Add the owner's current capability selection to any Forge context request.
+ * Keeping this transform in one pure helper prevents Lens, Plan and Run from
+ * quietly diverging. `ruleIds` stays absent until the owner narrows the safe
+ * default (all repository rules); an explicit empty array means no rules. */
+export function withContextSelection(S, body) {
+  const selected = { ...body, skillIds: [...S.selectedSkillIds] };
+  if (S.ruleSelectionExplicit) selected.ruleIds = [...S.selectedRuleIds];
+  return selected;
+}
+
 export function createForgeState() {
   return {
     // ---- set once, at the top of forge.js's bind(), read everywhere ----
@@ -51,8 +61,13 @@ export function createForgeState() {
     activeIdx: -1,
     draftSession: null,
 
-    // ---- owned by activitybar.js's Zeno view; read by session.js ----
+    // ---- owned by activitybar.js's Zeno view; read by session/plan/Lens ----
     selectedSkillIds: new Set(),
+    selectedRuleIds: new Set(),
+    ruleSelectionExplicit: false,
+    availableSkills: [],
+    availableRules: [],
+    capabilityCatalogLoaded: false,
 
     // ---- owned by modelpicker.js; read by session.js (localModelChoice) ----
     agentsData: null,
@@ -82,6 +97,8 @@ export function createForgeState() {
     proceedWithRoute: null,             // session.js: (session, task, route, plan|null) => Promise<void> — the one path from a routed task to a run
     openSession: null,                  // session.js: (index) => void
     startNewSession: null,              // session.js: () => session
+    selectSkillById: null,              // activitybar.js: (id) => boolean
+    selectRuleById: null,               // activitybar.js: (id) => boolean
 
     // ---- owned by agent-mode.js (the chat-first Agent layout + local history) ----
     renderSessionsList: null,           // () => void — the sessions rail
@@ -101,5 +118,6 @@ export function createForgeState() {
     planTurnNode: null,                 // (turn, session) => HTMLElement — a `who: 'plan'` chat turn's body
     renderPlanSummary: null,            // (session|null) => void — the #s-plan details under the title
     latestPlanTurn: null,               // (session) => turn|null
+    contextTaskForSession: null,        // (session, task) => exact task+approved-plan text used by /forge/run
   };
 }

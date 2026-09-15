@@ -23,7 +23,7 @@ import type { AddressInfo } from 'node:net';
 import { DEFAULT_POLICY, Kernel, nodeLedgerStore, nodeSandboxFs } from '@abheet19/zeno-kernel';
 import { CANNOT_ANSWER } from '@abheet19/zeno-assistant';
 import { createServer } from '../src/server.js';
-import { DEFAULT_ASSISTANT_MODEL } from '../src/routes/assistant.js';
+import { DEFAULT_ASSISTANT_MODEL, ZENO_APPROVAL_KERNEL_HELP, ZENO_CAPABILITY_HELP, isRepositoryOverviewQuestion } from '../src/routes/assistant.js';
 import { Stream } from '../src/stream.js';
 import { mintTokens } from '../src/tokens.js';
 import { nodeWorkDesk } from '../src/work.js';
@@ -31,12 +31,19 @@ import { nodeWorld } from '../src/world.js';
 
 const FAKE_OLLAMA = 'http://127.0.0.1:22435';
 
+test('repository overview recognition is narrow and covers the Command prompts owners use', () => {
+  assert.equal(isRepositoryOverviewQuestion('What is in the sandbox right now?'), true);
+  assert.equal(isRepositoryOverviewQuestion('What Git branch is the current Forge project on?'), true);
+  assert.equal(isRepositoryOverviewQuestion('What is binary search?'), false);
+});
+
 test('ASK — the model field picks an installed local model, falls back honestly, and defaults when absent', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zeno-ask-model-'));
   const sandbox = join(dir, 'sandbox');
   mkdirSync(sandbox, { recursive: true });
   const tokens = mintTokens();
   const installed = ['qwen3:8b', 'llama3.1:8b'];
+  let probeCalls = 0;
   // The daemon reads OLLAMA_HOST once, at creation; point it at the fake below.
   const server = (() => {
     const previousHost = process.env['OLLAMA_HOST'];
@@ -50,7 +57,7 @@ test('ASK — the model field picks an installed local model, falls back honestl
         stream: new Stream(),
         publicDir: join(dir, 'public'),
         work: nodeWorkDesk(dir),
-        delegateProbe: { available: async () => ({ localModels: installed, claudeOnPath: false, codexOnPath: false }) },
+        delegateProbe: { available: async () => { probeCalls += 1; return { localModels: installed, claudeOnPath: false, codexOnPath: false }; } },
       });
     } finally {
       if (previousHost === undefined) delete process.env['OLLAMA_HOST'];
@@ -64,14 +71,18 @@ test('ASK — the model field picks an installed local model, falls back honestl
   // answers with the honest refusal, which grounds cleanly (nothing to cite).
   const realFetch = globalThis.fetch;
   const generatedWith: string[] = [];
+  const keepAliveValues: unknown[] = [];
+  const contextValues: unknown[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === FAKE_OLLAMA + '/api/tags') {
       return new Response(JSON.stringify({ models: installed.map((name) => ({ name })) }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url === FAKE_OLLAMA + '/api/generate') {
-      const sent = JSON.parse(String(init?.body ?? '{}')) as { model?: string };
+      const sent = JSON.parse(String(init?.body ?? '{}')) as { model?: string; keep_alive?: unknown; options?: { num_ctx?: unknown } };
       generatedWith.push(sent.model ?? '(none)');
+      keepAliveValues.push(sent.keep_alive);
+      contextValues.push(sent.options?.num_ctx);
       return new Response(JSON.stringify({ response: CANNOT_ANSWER }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     return await realFetch(input, init);
@@ -103,6 +114,55 @@ test('ASK — the model field picks an installed local model, falls back honestl
     assert.equal(greeting.status, 200);
     assert.equal(generatedWith.at(-1), 'llama3.1:8b', 'a normal greeting is a real model call, not a canned state summary');
 
+    const generationsBeforeHelp = generatedWith.length;
+    for (const question of ['help', 'what can you do?']) {
+      const help = await realFetch(base + '/assistant/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+        body: JSON.stringify({ question, model: 'llama3.1:8b' }),
+      });
+      assert.equal(help.status, 200);
+      const payload = (await help.json()) as { answer?: string; delegated?: unknown; help?: boolean };
+      assert.equal(payload.answer, ZENO_CAPABILITY_HELP, `${question}: stable product help is returned`);
+      assert.equal(payload.delegated, null, `${question}: help never delegates`);
+      assert.equal(payload.help, true, `${question}: response is identified as product help`);
+    }
+    assert.equal(generatedWith.length, generationsBeforeHelp, 'product help never asks a model to invent Zeno capabilities');
+
+    const kernel = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'what is the Zeno approval kernel?', model: 'llama3.1:8b' }),
+    });
+    assert.equal(kernel.status, 200);
+    const kernelPayload = (await kernel.json()) as { answer?: string; general?: boolean; delegated?: unknown };
+    assert.equal(kernelPayload.answer, ZENO_APPROVAL_KERNEL_HELP, 'the kernel is described from Zeno itself');
+    assert.equal(kernelPayload.general, undefined, 'the kernel is never mislabeled as general knowledge');
+    assert.equal(kernelPayload.delegated, null, 'a product-definition question never delegates');
+    assert.equal(generatedWith.length, generationsBeforeHelp, 'the product definition never asks a model to guess');
+
+    const emptyMemory = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'what are my preferences?', model: 'llama3.1:8b' }),
+    });
+    assert.equal(emptyMemory.status, 200);
+    const emptyMemoryPayload = (await emptyMemory.json()) as { answer?: string; delegated?: unknown };
+    assert.equal(emptyMemoryPayload.answer, 'Vault has no saved memories yet.');
+    assert.equal(emptyMemoryPayload.delegated, null);
+    assert.equal(generatedWith.length, generationsBeforeHelp, 'an owner-memory question never asks a model to guess');
+
+    const generationsBeforeRepo = generatedWith.length;
+    const probesBeforeRepo = probeCalls;
+    const repoOverview = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'what is in the sandbox right now?', model: 'llama3.1:8b' }),
+    });
+    assert.equal(repoOverview.status, 200);
+    assert.equal(generatedWith.length, generationsBeforeRepo, 'a private repository-state question never calls a model');
+    assert.equal(probeCalls, probesBeforeRepo, 'a private repository-state question is answered before hosted-agent probes');
+
     const picked = await ask({ model: 'llama3.1:8b' });
     assert.equal(picked.modelUsed, 'llama3.1:8b', 'an installed model is the one that answers');
     assert.equal(picked.note, null);
@@ -123,6 +183,8 @@ test('ASK — the model field picks an installed local model, falls back honestl
     assert.equal(((await bad.json()) as { error: { code: string } }).error.code, 'bad-model');
 
     assert.ok(generatedWith.every((m) => installed.includes(m)), 'no generation ever named a model this machine does not have');
+    assert.ok(keepAliveValues.length > 0 && keepAliveValues.every((value) => value === '30s'), 'Command reuses a warm local model briefly without retaining it indefinitely');
+    assert.ok(contextValues.every((value) => value === 8192), 'Command bounds the local-model context instead of inheriting a 262k model default');
   } finally {
     globalThis.fetch = realFetch;
     await new Promise<void>((ok) => server.close(() => ok()));

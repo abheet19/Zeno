@@ -89,7 +89,10 @@ export function setupCommandMenu(ta, getCommands) {
     // Only at the very start, and only the bare "/word" shape — a "/" typed
     // mid-sentence, or with a space after the command name, is real text, not
     // a command invocation.
-    const m = /^\/([a-z-]*)$/i.exec(v);
+    // Installed skill/rule ids are kebab-case and may legitimately contain
+    // digits (for example /skill-e2e-review), so the command grammar must
+    // accept the same alphabet as the capability ids it exposes.
+    const m = /^\/([a-z0-9-]*)$/i.exec(v);
     if (m) open(m[1].toLowerCase()); else close();
   });
   ta.addEventListener('blur', () => setTimeout(close, 150)); // after a row's own mousedown fires
@@ -100,7 +103,13 @@ export function setupCommandMenu(ta, getCommands) {
       if (!menuEl) return false;
       if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, Math.max(items.length - 1, 0)); paint(); return true; }
       if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); paint(); return true; }
-      if (e.key === 'Escape') { e.preventDefault(); close(); return true; }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        ta.value = '';
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      }
       if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (items[active]) run(items[active]); return true; }
       return false;
     },

@@ -50,19 +50,60 @@ import {
   groundReply,
   needsLiveLookup,
   parseIntent,
+  type SnapshotTier,
 } from '@abheet19/zeno-assistant';
 import type { Role } from '../tokens.js';
 import { ollamaEndpoint, type ServerCtx } from '../server/context.js';
 import { json, readJson, str } from './http.js';
 import { ensureOllama, installedLocalModels } from './ollama-lifecycle.js';
 import { withoutReasoning } from './forge-local-model.js';
-import { proposeFileWrite } from './approvals.js';
+import { proposeFileWrite, pruneDriftedHeld } from './approvals.js';
 import { resolveDelegation, type Delegated } from './delegate.js';
 import { probeAgents } from './delegate-probe.js';
 import { searchNeosapienMemories } from './neosapien.js';
 
 /** The model Ask Zeno answers with when the owner has not picked one. */
 export const DEFAULT_ASSISTANT_MODEL = 'qwen3:8b';
+/** Bound Command latency: a wedged or memory-starved local model must not leave
+ * the composer spinning forever. Forge has its own longer, cancellable run
+ * lifecycle; a conversational turn gets one minute and then fails honestly. */
+export const ASSISTANT_MODEL_TIMEOUT_MS = 60_000;
+
+/**
+ * Product help is part of Zeno's own interface contract, not a general-
+ * knowledge question for a local model to improvise. Keep this deliberately
+ * narrow so ordinary questions still use the real assistant path below.
+ */
+export const ZENO_CAPABILITY_HELP = [
+  'Zeno has three connected surfaces:',
+  '',
+  '- Command — chat with a local model, inspect current work, search Vault memory, navigate the app, and review exact approvals and signed receipts.',
+  '- Forge — open a Git repository, inspect and edit code, plan and run governed coding tasks, use installed skills and rules, and review every proposed effect before it is applied.',
+  '- Counsel — record a meeting only after explicit consent, transcribe it locally when Whisper is available, and create a cited summary and follow-up notes.',
+  '',
+  'Try “open Forge”, “show approvals”, “what is waiting on me?”, or type / to see available commands.',
+].join('\n');
+
+export const ZENO_APPROVAL_KERNEL_HELP = [
+  'Zeno’s approval kernel is the local boundary between an agent’s proposal and a real side effect.',
+  'An agent can propose an exact action, but it cannot approve that action. Zeno classifies the risk, binds the preview to the action and current base state, and either applies a routine action under policy or holds it for the owner. If the base state changes, the proposal becomes stale and must be proposed again. Every executed result is recorded in the signed receipt chain.',
+].join('\n\n');
+
+export function isCapabilityHelpQuestion(question: string): boolean {
+  return /^(?:help|what can you do|what does zeno do|show (?:me )?(?:zeno(?:'s)? )?(?:help|capabilities))\s*[?!.]*$/i.test(question.trim());
+}
+
+export function isApprovalKernelQuestion(question: string): boolean {
+  return /^(?:(?:what|how) (?:is|does)|explain|describe) (?:the )?zeno(?:'s)? approval kernel(?: work)?\s*[?!.]*$/i.test(question.trim());
+}
+
+export function isOwnerMemoryQuestion(question: string): boolean {
+  return /^(?:what do you know about me|recall my preferences|what are my preferences)\s*[?!.]*$/i.test(question.trim());
+}
+
+export function isRepositoryOverviewQuestion(question: string): boolean {
+  return /^(?:what(?:'s| is) (?:in|the state of) (?:the )?(?:sandbox|forge (?:workspace|project))(?: right now)?|what (?:git )?branch is (?:the )?(?:current )?(?:forge )?(?:workspace|project|sandbox) on)\s*[?!.]*$/i.test(question.trim());
+}
 
 /**
  * The local models this machine can answer with — the same list
@@ -135,12 +176,21 @@ function recalledMemory(ctx: ServerCtx, question: string): readonly { id: string
  * empty reply) so the caller falls through to the honest final refusal rather
  * than rendering nothing as something.
  */
-async function askGeneral(ctx: ServerCtx, question: string, model: string): Promise<string | null> {
+async function askGeneral(
+  ctx: ServerCtx,
+  question: string,
+  model: string,
+  signal: AbortSignal,
+): Promise<string | null> {
   try {
     const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, prompt: buildGeneralPrompt(question), stream: false, think: false }),
+      body: JSON.stringify({
+        model, prompt: buildGeneralPrompt(question), stream: false, think: false,
+        keep_alive: '30s', options: { num_ctx: 8192 },
+      }),
+      signal,
     });
     if (!r.ok) return null;
     const text = withoutReasoning(((await r.json()) as { response?: string }).response ?? '').trim();
@@ -148,6 +198,44 @@ async function askGeneral(ctx: ServerCtx, question: string, model: string): Prom
   } catch {
     return null;
   }
+}
+
+function repositoryState(ctx: ServerCtx): { branch: string; head: string; changed: string[] } | null {
+  try {
+    const st = ctx.gitRunner.run(['rev-parse', '--abbrev-ref', 'HEAD'], ctx.opts.sandbox);
+    if (st.status !== 0) return null;
+    const ch = ctx.gitRunner.run(['status', '--porcelain', '-z', '--untracked-files=all'], ctx.opts.sandbox)
+      .stdout.split(String.fromCharCode(0)).filter(Boolean).map((entry) => entry.slice(3));
+    const hd = ctx.gitRunner.run(['rev-parse', 'HEAD'], ctx.opts.sandbox);
+    return { branch: st.stdout.trim(), head: hd.status === 0 ? hd.stdout.trim().slice(0, 12) : 'no commits yet', changed: ch };
+  } catch {
+    return null;
+  }
+}
+
+function pendingSnapshot(ctx: ServerCtx): { id: string; summary: string; tier: SnapshotTier; ageMin: number }[] {
+  pruneDriftedHeld(ctx);
+  return [
+    ...[...ctx.held.values()].map((h) => h.preview),
+    ...[...ctx.gateHeld.values()].map((h) => h.preview),
+    ...(ctx.memoryRoutes?.waiting() ?? []),
+  ].flatMap((preview) => {
+    const tier = String(preview.tier);
+    if (!/^T[0-4]$/.test(tier)) return [];
+    return [{
+      id: preview.actionHash.slice(0, 8),
+      summary: preview.summary,
+      tier: tier as SnapshotTier,
+      ageMin: 0,
+    }];
+  });
+}
+
+function localModelFailureNote(model: string, error: unknown): string {
+  const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+  return timedOut
+    ? `${model} did not answer within ${ASSISTANT_MODEL_TIMEOUT_MS / 1000} seconds, so this turn was stopped. Try a smaller installed model or ask again after the current model finishes loading.`
+    : `Zeno could not reach Ollama for this turn. Start Ollama, then confirm ${model} is installed (ollama pull ${model}). Your Zeno state is unaffected.`;
 }
 
 export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res: ServerResponse, role: Role): Promise<void> {
@@ -166,29 +254,98 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     return json(res, 400, { error: { code: 'bad-model', message: 'model is not a valid local model id.', resolve: 'Send an installed local model id from GET /forge/agents, or omit it.' } });
   }
 
-  const work = await ctx.opts.work.list().catch(() => null);
-  const availability = await probeAgents(ctx);
-  let repo: { branch: string; head: string; changed: string[] } | null = null;
-  try {
-    const st = ctx.gitRunner.run(['rev-parse', '--abbrev-ref', 'HEAD'], ctx.opts.sandbox);
-    if (st.status === 0) {
-      const ch = ctx.gitRunner.run(['status', '--porcelain', '-z', '--untracked-files=all'], ctx.opts.sandbox)
-        .stdout.split(String.fromCharCode(0)).filter(Boolean).map((e) => e.slice(3));
-      const hd = ctx.gitRunner.run(['rev-parse', 'HEAD'], ctx.opts.sandbox);
-      repo = { branch: st.stdout.trim(), head: hd.status === 0 ? hd.stdout.trim().slice(0, 12) : 'no commits yet', changed: ch };
+  if (isCapabilityHelpQuestion(question)) {
+    return json(res, 200, {
+      answer: ZENO_CAPABILITY_HELP,
+      cited: [],
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: null,
+      modelUsed: null,
+      help: true,
+    });
+  }
+
+  if (isApprovalKernelQuestion(question)) {
+    return json(res, 200, {
+      answer: ZENO_APPROVAL_KERNEL_HELP,
+      cited: [],
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: null,
+      modelUsed: null,
+      help: true,
+    });
+  }
+
+  if (isOwnerMemoryQuestion(question)) {
+    const memories = recalledMemory(ctx, question).slice(0, 5);
+    return json(res, 200, {
+      answer: memories.length === 0
+        ? 'Vault has no saved memories yet.'
+        : memories.map((memory, index) => `- ${memory.body || memory.title} [m${index + 1}]`).join('\n'),
+      cited: memories.map((memory, index) => ({ id: `m${index + 1}`, source: memory.id })),
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: null,
+      modelUsed: null,
+    });
+  }
+
+  // Repository-state questions are fully local. Answer before backlog reads,
+  // hosted-agent probes, or optional external-memory searches so a private
+  // workspace question can never cause unrelated data to leave this machine.
+  if (isRepositoryOverviewQuestion(question)) {
+    const repo = repositoryState(ctx);
+    const id = repo === null ? 'g0' : 'g1';
+    const answer = repo === null
+      ? `No Git repository state was captured for the current Forge workspace [${id}].`
+      : `The current Forge workspace is on branch ${repo.branch} at ${repo.head}. It has ${repo.changed.length} uncommitted ${repo.changed.length === 1 ? 'file' : 'files'} [${id}].`;
+    return json(res, 200, {
+      answer,
+      cited: [{ id, source: 'current Forge repository state' }],
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: null,
+      modelUsed: null,
+    });
+  }
+
+  // The whole conversational request shares one deadline, including optional
+  // source reads and Ollama startup/model discovery. A series of individually
+  // bounded awaits must not turn a one-minute turn into several minutes.
+  const turnDeadline = Date.now() + ASSISTANT_MODEL_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1, turnDeadline - Date.now());
+  const withinTurn = async <T>(promise: Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new DOMException('Turn timed out', 'TimeoutError')), remainingMs()); }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
-  } catch { /* no repo is a fact, not an error */ }
+  };
+
+  const work = await withinTurn(ctx.opts.work.list().catch(() => null)).catch(() => null);
+  const availability = await withinTurn(probeAgents(ctx)).catch(() => ({ localModels: [], claudeOnPath: false, codexOnPath: false }));
+  const repo = repositoryState(ctx);
 
   // NeoSapien is queried unconditionally: cheap (an immediate, no-network
   // "not-configured" answer) on every machine that has not set the token, and
   // this is the only point in the request where the snapshot can still be
   // assembled with what it finds. Its own honesty is kept separate from
   // Zeno's local state either way — see `neosapien.ts` and `ExternalFact`.
-  const neosapien = await searchNeosapienMemories(question);
+  const neosapien = await withinTurn(searchNeosapienMemories(question)).catch(() => ({ ok: false as const, reason: 'turn-timeout' }));
 
   const snapshot = buildSnapshot({
     at: new Date().toISOString(),
-    pending: [...ctx.held.values()].map((h) => ({ id: h.preview.actionHash.slice(0, 8), summary: h.preview.summary, tier: h.preview.tier, ageMin: 0 })),
+    pending: pendingSnapshot(ctx),
     receipts: ctx.opts.kernel.receipts().slice(-20).map((r) => ({ id: r.id, outcome: r.outcome, summary: r.summary ?? '', at: r.at })),
     work: (work?.items ?? []).map((i: { id: string; title: string; labels?: readonly string[]; state?: string }) => ({ id: i.id, title: i.title, labels: [...(i.labels ?? [])], state: i.state ?? 'open' })),
     repo,
@@ -226,18 +383,36 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   const truncationNote = snapshot.truncated.length > 0 ? snapshot.truncated.map(describeTruncation).join(' · ') : null;
 
   let answer: string;
-  await ensureOllama(ctx); // asking a question is the instruction to start the answerer
-  const chosen = await resolveAssistantModel(ctx, requestedModel);
+  try {
+    await withinTurn(ensureOllama(ctx)); // asking a question is the instruction to start the answerer
+  } catch (error) {
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedModel ?? DEFAULT_ASSISTANT_MODEL, error), modelUsed: requestedModel ?? DEFAULT_ASSISTANT_MODEL });
+  }
+  let chosen: { readonly modelUsed: string; readonly note: string | null };
+  try {
+    chosen = await withinTurn(resolveAssistantModel(ctx, requestedModel));
+  } catch (error) {
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedModel ?? DEFAULT_ASSISTANT_MODEL, error), modelUsed: requestedModel ?? DEFAULT_ASSISTANT_MODEL });
+  }
   const modelUsed = chosen.modelUsed;
   // `note` keeps carrying truncation; a model fallback is appended to it so the
   // window shows it without a new field, and `modelUsed` names the model on
   // every reply so a picker can confirm what actually answered.
   const note = [truncationNote, chosen.note].filter((part): part is string => part !== null).join(' · ') || null;
+  // One conversational turn gets one latency budget. Reusing this signal for
+  // the grounded attempt and its optional general-knowledge fallback prevents
+  // a conservative first answer from silently turning a 60-second ceiling
+  // into two consecutive 60-second waits.
+  const turnSignal = AbortSignal.timeout(remainingMs());
   try {
     const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: modelUsed, prompt, stream: false, think: false }),
+      body: JSON.stringify({
+        model: modelUsed, prompt, stream: false, think: false,
+        keep_alive: '30s', options: { num_ctx: 8192 },
+      }),
+      signal: turnSignal,
     });
     if (!r.ok) {
       return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `The local model answered ${r.status}. Is ${modelUsed} pulled?`, modelUsed });
@@ -246,8 +421,8 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
       withoutReasoning(((await r.json()) as { response?: string }).response ?? ''),
       snapshot,
     );
-  } catch {
-    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `Ollama is not running, so nobody can answer this. Start it, then pull a model (ollama pull ${modelUsed}). Your Zeno state is unaffected.`, modelUsed });
+  } catch (error) {
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(modelUsed, error), modelUsed });
   }
 
   const grounding = groundReply(answer, snapshot);
@@ -301,7 +476,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     // sees the snapshot and is never checked by `groundReply`, and the caller
     // is told plainly which kind of answer it is (`general: true`) — grounded
     // and general are never allowed to look the same on screen.
-    const general = await askGeneral(ctx, question, modelUsed);
+    const general = await askGeneral(ctx, question, modelUsed, turnSignal);
     if (general !== null) {
       // `note` stays exactly what it means everywhere else in this response —
       // truncation plus, at most, the model fallback. The UI labels a general
@@ -351,7 +526,7 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   // the separate general prompt rather than replacing a real model answer with
   // canned product copy. General answers carry an explicit flag in the UI.
   if (answer.trim() === CANNOT_ANSWER && intent === null) {
-    const general = await askGeneral(ctx, question, modelUsed);
+    const general = await askGeneral(ctx, question, modelUsed, turnSignal);
     if (general !== null) {
       return json(res, 200, { answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note, modelUsed });
     }

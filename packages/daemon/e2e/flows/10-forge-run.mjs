@@ -1,7 +1,7 @@
 /*
  * FORGE, end to end: the owner describes a task in Forge's composer, a REAL
- * local model runs it in an isolated throwaway worktree, and every file it
- * touched comes back as a HELD proposal — never a write.
+ * local model runs it in an isolated throwaway worktree, and a non-routine
+ * configuration file comes back as a HELD proposal — never a write.
  *
  * The line this flow exists to hold is the one Forge's whole design rests on:
  * an agent that edits files does not get to apply them. So every assertion
@@ -42,8 +42,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const id = 'forge-run';
-export const title = 'Forge runs a real local model, holds every change, and loses nothing on cancel';
-export const criteria = ['SUITE-AC-02', 'forge: proposals never self-apply', 'forge: a cancelled run keeps its changeset'];
+export const title = 'Forge runs a real local model, holds risky changes, and loses nothing on cancel';
+export const criteria = ['SUITE-AC-02', 'forge: risky proposals never self-apply', 'forge: a cancelled run keeps its changeset'];
 
 /** Where `packages/forge/src/worktree.ts` puts a run's isolated checkout. */
 const WORKTREE_NAMESPACE = 'zeno-forge-worktrees';
@@ -51,7 +51,10 @@ const WORKTREE_NAMESPACE = 'zeno-forge-worktrees';
 /** Models that reliably honour Forge's ===FILE:=== envelope, best first. */
 const PREFERRED_LOCAL = ['qwen3:8b', 'qwen3:14b'];
 
-const TASK = 'Create a file named notes.txt whose entire contents are the single line: zeno forge e2e';
+// Routine T0 edits intentionally auto-apply and seal a receipt. This flow is
+// specifically the approval path, so it asks for a configuration path the
+// risk classifier must hold regardless of how small the edit is.
+const TASK = 'Create a file named .env.example whose entire contents are the single line: ZENO_FORGE_E2E=true';
 
 /**
  * Read the daemon's owner-only Forge progress stream from the test process, so
@@ -247,9 +250,9 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     throw new Blocked(`a local Ollama model that can follow Forge's ===FILE:=== envelope — ${model} proposed no file change for a one-line task ("${chat}")`);
   }
   ok('the work the agent did arrives as held proposals', held.length >= 1, `${held.length} held`);
-  ok('no proposal from an agent may auto-apply', held.every((h) => h.auto === false),
+  ok('no risky proposal from an agent may auto-apply', held.every((h) => h.auto === false),
     JSON.stringify(held.map((h) => ({ kind: h.binding?.kind, tier: h.tier, auto: h.auto }))));
-  ok('an agent file write is rated as an agent patch, never a routine write',
+  ok('this agent configuration write is rated as a governed patch, never a routine write',
     held.every((h) => h.binding?.kind === 'patch.task'),
     JSON.stringify(held.map((h) => h.binding?.kind)));
   ok('the proposal is attributed to the Forge run, not to the owner',
@@ -400,7 +403,9 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('the run is isolated in its own throwaway worktree', !!appeared, worktree);
   if (appeared) {
     mkdirSync(worktree, { recursive: true });
-    writeFileSync(join(worktree, 'rescued.txt'), 'written before the owner cancelled\n', 'utf8');
+    // Use a configuration path so cancel recovery exercises the held branch;
+    // an ordinary rescued.txt is correctly T0 and auto-applies by policy.
+    writeFileSync(join(worktree, '.env.rescued'), 'written before the owner cancelled\n', 'utf8');
   }
 
   const cancelReply = await daemon.api('/forge/run/cancel', {
@@ -418,9 +423,9 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('a cancelled run does not claim success', cancelledRun.body.run.ok === false);
 
   ok('a cancelled run still asks git what it left behind',
-    cancelledRun.body.changed.includes('rescued.txt'), JSON.stringify(cancelledRun.body.changed));
+    cancelledRun.body.changed.includes('.env.rescued'), JSON.stringify(cancelledRun.body.changed));
   ok('every file a cancelled run wrote is handed to the gate',
-    cancelledRun.body.proposed.some((p) => p.path === 'rescued.txt'),
+    cancelledRun.body.proposed.some((p) => p.path === '.env.rescued'),
     JSON.stringify({ proposed: cancelledRun.body.proposed, skipped: cancelledRun.body.skipped }));
   ok('nothing a cancelled run wrote may auto-apply',
     cancelledRun.body.proposed.every((p) => p.auto === false),
@@ -429,30 +434,28 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   const afterCancel = await daemon.api('/state');
   ok.eq('the rescued change is waiting for review', afterCancel.body.pending.length, pendingBeforeCancel + cancelledRun.body.proposed.length);
   ok('the rescued change is in the queue by name',
-    afterCancel.body.pending.some((p) => p.payload?.relPath === 'rescued.txt'),
+    afterCancel.body.pending.some((p) => p.payload?.relPath === '.env.rescued'),
     JSON.stringify(afterCancel.body.pending.map((p) => p.payload?.relPath)));
   ok.eq('cancelling seals no receipt', afterCancel.body.receipts.length, receiptsBeforeCancel);
-  const rescuedInSandbox = await daemon.api('/forge/file?path=rescued.txt');
+  const rescuedInSandbox = await daemon.api('/forge/file?path=.env.rescued');
   ok.eq('and it is still nowhere near the sandbox', rescuedInSandbox.status, 404);
 
   // Settling it must be the owner's call too — declining removes it and writes nothing.
-  const rescued = afterCancel.body.pending.find((p) => p.payload?.relPath === 'rescued.txt');
+  const rescued = afterCancel.body.pending.find((p) => p.payload?.relPath === '.env.rescued');
   const declined = await daemon.api('/approvals/decline', {
     method: 'POST',
     body: JSON.stringify({ actionHash: rescued.actionHash }),
   });
   ok.eq('the owner can decline what a cancelled run left', declined.status, 200);
-  const afterDecline = await daemon.api('/forge/file?path=rescued.txt');
+  const afterDecline = await daemon.api('/forge/file?path=.env.rescued');
   ok.eq('a decline writes nothing', afterDecline.status, 404);
 
   /* ---------------------------------------------------------------- *
-   * 7 · why any of that was held at all: the proposer, not the bytes  *
+   * 7 · why any of that was held at all: the risky target path        *
    * ---------------------------------------------------------------- *
    * The owner's own hand-written change to an identical routine file is T0 and
-   * applies with no decision owed. Forge's was T1 and waited. Nothing about the
-   * content differs — `proposeFileWrite` escalates because the proposer is an
-   * agent ("a model may propose a harmless-looking file, but it cannot
-   * auto-land its own output merely because the path happened to score T0").
+   * applies with no decision owed. Forge's configuration-path edit was T1 and
+   * waited. The bytes are identical; the sensitive target is the risk boundary.
    * Run last, because it seals a receipt of its own. */
   const byHand = await daemon.api('/previews', {
     method: 'POST',
@@ -460,7 +463,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   });
   ok.eq('the owner may write a routine file with no decision owed', byHand.body.preview.auto, true);
   ok.eq('and it is rated an ordinary local write', byHand.body.preview.binding.kind, 'local.write');
-  ok('the same bytes proposed by an agent were rated higher and held instead',
+  ok('the same bytes aimed at a configuration path were rated higher and held instead',
     held[0].binding.kind === 'patch.task' && held[0].auto === false && byHand.body.preview.tier !== held[0].tier,
     `agent: ${held[0].binding.kind}/${held[0].tier}, owner: ${byHand.body.preview.binding.kind}/${byHand.body.preview.tier}`);
 

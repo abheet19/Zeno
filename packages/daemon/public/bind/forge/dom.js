@@ -37,20 +37,18 @@ export function statusWord(code) {
  *  header (turnNode), so the two views can never disagree about how a run
  *  ended.
  *
- *  A Forge run NEVER applies anything. Every file it changes becomes an
- *  approval capsule, and the kernel writes only after the owner clicks in
- *  Command — so "applied" is the one outcome this card structurally cannot
- *  report on its own. An earlier build reported it anyway for every
- *  successful run, in green, directly above its own line reading "1 waiting
- *  · 0 applied". That is the exact claim this function exists to make
- *  impossible: "applied" only ever means the kernel auto-committed a T0
- *  write by itself. */
+ *  Every Forge change becomes a governed capsule. The kernel may immediately
+ *  seal a routine T0 edit; risky edits remain held for the owner in Command.
+ *  An earlier build reported every successful run as applied even when its
+ *  own detail read "1 waiting · 0 applied". This helper makes those views use
+ *  the response's measured waiting/applied counts instead. */
 export function runMark(r) {
   return r.cancelled ? { tone: 'wt', word: 'cancelled' }
     : !r.ok ? { tone: 'rd', word: 'failed' }
       : r.waiting > 0 ? { tone: 'am', word: `${r.waiting} waiting on you` }
         : r.applied > 0 ? { tone: 'gr', word: 'applied' }
-          : { tone: 'wt', word: 'no changes' };
+          : r.answered ? { tone: 'gr', word: 'answered' }
+            : { tone: 'wt', word: 'no changes' };
 }
 
 /** [className, badge glyph] for a file name, using only classes this

@@ -7,7 +7,8 @@
  * plan to a run, and it goes through session.js's own `S.proceedWithRoute` —
  * the same code the composer uses with the toggle off — so a hosted route
  * still stops at its own confirmation, and every file the run then touches
- * still lands in Command as a held proposal. Discard runs nothing. The card
+ * still goes through the kernel (routine T0 edits seal automatically; risky
+ * edits wait in Command). Discard runs nothing. The card
  * also says, in the daemon's own words, that the plan was produced without a
  * worktree or a write, because that claim is the daemon's to make, not this
  * file's.
@@ -18,6 +19,7 @@
  */
 import { $, $$, el, fill } from '../../bind.js';
 import { add, postJSON } from './dom.js';
+import { withContextSelection } from './state.js';
 
 const KEY = 'zeno-plan-first';
 
@@ -72,6 +74,24 @@ export function setupPlanFirst(S) {
   paint();
   S.planFirstEnabled = () => enabled;
 
+  // Mirror forge-plan.ts's exported planText() exactly. The daemon remains the
+  // context assembler; this only gives POST /forge/context the same task bytes
+  // POST /forge/run will receive after an owner approves a plan.
+  S.contextTaskForSession = (session, task) => {
+    const turn = S.latestPlanTurn ? S.latestPlanTurn(session) : null;
+    if (!turn || turn.state !== 'approved' || turn.task !== task || !turn.plan) return task;
+    const plan = turn.plan;
+    const lines = [
+      'OWNER-APPROVED PLAN (produced by a read-only planning pass; follow it, and say so if a step proves wrong):',
+      plan.goal ? `Goal: ${plan.goal}` : '',
+      'Steps:',
+      ...plan.steps.map((step, index) => `${index + 1}. ${step}`),
+      plan.files.length ? `Files expected to change: ${plan.files.join(', ')}` : '',
+      plan.risks.length ? `Risks and open questions: ${plan.risks.join('; ')}` : '',
+    ];
+    return `${task}\n\n${lines.filter((line) => line !== '').join('\n')}`;
+  };
+
   /** Ask the daemon for a plan; the turn is pushed first so the owner sees "Planning…" at once. */
   async function requestPlan(session, task, route) {
     const reply = conversationalReply(task);
@@ -87,7 +107,7 @@ export function setupPlanFirst(S) {
     session.chat.push(turn);
     session.planning = true;
     S.renderSessionHeader(session); S.renderChat(session);
-    const body = { task, agentId: route.agentId, memoryEnabled: session.memoryEnabled !== false, skillIds: [...S.selectedSkillIds] };
+    const body = withContextSelection(S, { task, agentId: route.agentId, memoryEnabled: session.memoryEnabled !== false });
     if (route.agentId === 'local' && route.model) body.model = route.model;
     const r = await postJSON('/forge/plan', body);
     session.planning = false;

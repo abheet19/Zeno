@@ -157,6 +157,8 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
     if (p.actionHash) pendingHashes.add(p.actionHash);
     const id = 'pend' + i;
     const summary = p.summary || (p.request && p.request.summary) || p.actionHash || `pending ${i + 1}`;
+    const reviewState = p?.review?.state;
+    const stale = reviewState && reviewState !== 'ready';
     nodes.push({
       id, k: 'ticket', l: clip(ticketLabel(summary, p.targetRef), 26), hash: p.actionHash,
       /* Attention comes from what the capsule ACTUALLY carries. A /state
@@ -165,12 +167,14 @@ export function buildTopology(state, work, forge, mem, meetings, agents, runs = 
          every waiting approval fall through to "waiting" and draw calm grey.
          The single most urgent thing in the product was the one thing that
          never lit up. Being IN this list IS the fact: it is waiting on you. */
-      att: p.denied ? 'error' : 'needs',
+      att: p.denied ? 'error' : (stale ? 'waiting' : 'needs'),
       /* No ageMin: nothing in the pending record carries a timestamp, and an
          invented one would be a lie told in the most load-bearing place on the
          screen. urgOf() reads 0 and the glow sits at its base strength. */
       d: p.denied
         ? `${summary} — refused by policy${p.tier ? ` at tier ${p.tier}` : ''}. ${(p.reasons || []).join(' · ') || 'No reason was recorded.'}`
+        : stale
+          ? `${summary} — ${reviewState === 'drifted' ? 'the workspace changed after this was proposed' : 'its preview cannot be verified now'}. It cannot be approved; discard it or re-propose the action.`
         : `${summary} — tier ${p.tier || '?'}, waiting for your approval. Opening it is not approving it.`,
     });
     edges.push(['core', id], ['command', id]);

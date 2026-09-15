@@ -173,7 +173,7 @@ export function setupExplorerProject(S) {
     wrap.style.cssText = 'margin:auto;max-width:520px;width:100%;display:flex;flex-direction:column;gap:12px;padding:32px 8px;white-space:normal;font-family:var(--font)';
     const h = el('div', null, 'Open a project');
     h.style.cssText = 'font-size:20px;font-weight:600;color:var(--ink)';
-    const lead = el('div', null, 'Forge works inside a real Git repository. Open one to get the full editor, explorer and agent — nothing is written to disk until you approve it in Command.');
+    const lead = el('div', null, 'Forge works inside a real Git repository. Open one to use the editor, explorer and agent. Routine low-risk edits follow your local policy; risky or sensitive effects wait for approval in Command.');
     lead.style.cssText = 'font-size:13px;line-height:1.6;color:var(--ink-2)';
     add(wrap, h, lead);
 

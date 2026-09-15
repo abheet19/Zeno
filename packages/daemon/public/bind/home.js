@@ -36,9 +36,15 @@ function deriveState(stateRes) {
   const data = ok ? stateRes.data : null;
   const pendingAll = ok && Array.isArray(data.pending) ? data.pending : [];
   const pending = pendingAll.filter((p) => !(p && p.denied));
+  const stale = pending.filter((p) => p?.review && p.review.state !== 'ready');
+  const actionable = pending.filter((p) => !p?.review || p.review.state === 'ready');
   const receipts = ok && Array.isArray(data.receipts) ? data.receipts : [];
   const chainOk = ok && data.chain && typeof data.chain.ok === 'boolean' ? data.chain.ok : null;
-  return { ok, pending, receipts, chainOk, needs: ok ? pending.length : null };
+  return {
+    ok, pending, stale, actionable, receipts, chainOk,
+    needs: ok ? actionable.length : null,
+    staleCount: ok ? stale.length : null,
+  };
 }
 
 /* ---- greet: real local time, the one owner's name ------------------------ */
@@ -57,21 +63,31 @@ function bindAttnKernelOrb(st) {
   if (orbState) {
     orbState.textContent = !st.ok
       ? 'state unread · the daemon did not answer'
-      : st.needs === 0
+      : st.needs === 0 && st.staleCount === 0
         ? 'all clear · nothing is waiting on you'
+        : st.needs === 0
+          ? `${st.staleCount} stale ${st.staleCount === 1 ? 'proposal needs' : 'proposals need'} cleanup`
+          : st.staleCount > 0
+            ? `${st.needs} ${st.needs === 1 ? 'decision needs' : 'decisions need'} you · ${st.staleCount} stale`
         : `${st.needs} ${st.needs === 1 ? 'decision needs you' : 'decisions need you'}`;
   }
 
   const attn = q('.attn');
   if (attn) {
-    const show = st.ok && st.needs > 0;
+    const show = st.ok && (st.needs > 0 || st.staleCount > 0);
     attn.hidden = !show;
     if (show) {
       const mid = Array.from(attn.children).find((c) => !c.classList.contains('ai') && !c.classList.contains('go'));
       if (mid) {
-        fill(mid,
-          bTxt(`${st.needs} ${st.needs === 1 ? 'decision' : 'decisions'}`),
-          txt(` ${st.needs === 1 ? 'is' : 'are'} waiting for your approval`));
+        if (st.needs > 0) {
+          fill(mid,
+            bTxt(`${st.needs} ${st.needs === 1 ? 'decision' : 'decisions'}`),
+            txt(` ${st.needs === 1 ? 'is' : 'are'} waiting for your approval${st.staleCount > 0 ? ` · ${st.staleCount} stale` : ''}`));
+        } else {
+          fill(mid,
+            bTxt(`${st.staleCount} stale ${st.staleCount === 1 ? 'proposal' : 'proposals'}`),
+            txt(` ${st.staleCount === 1 ? 'needs' : 'need'} cleanup, not approval`));
+        }
       }
     }
   }
@@ -110,11 +126,14 @@ function setSum(header, n) {
 
 function needsCard(p) {
   const summary = clip(p.summary || (p.request && p.request.summary) || p.actionHash || 'a pending action', 46);
-  const meta = p.tier ? `tier ${p.tier} · held for your approval` : 'held for your approval';
+  const isStale = p?.review && p.review.state !== 'ready';
+  const meta = isStale
+    ? `${p.review.state === 'drifted' ? 'workspace changed' : 'preview unavailable'} · discard or re-propose`
+    : (p.tier ? `tier ${p.tier} · held for your approval` : 'held for your approval');
   const card = el('div', 'lcard needs');
   const lk = el('div', 'lk'); lk.append(svgIcon(SVG_APPROVE), txt(summary));
   const lm = el('div', 'lm', meta);
-  const pill = el('span', 'pill am'); pill.append(el('span', 'd'), txt('1 approval'));
+  const pill = el('span', 'pill am'); pill.append(el('span', 'd'), txt(isStale ? 'stale' : '1 approval'));
   const btn = el('button', 'laction', 'Review'); btn.setAttribute('data-screen-jump', 'approvals');
   const lr = el('div', 'lr'); lr.append(pill, btn);
   card.append(lk, lm, lr);
@@ -124,7 +143,7 @@ function needsCard(p) {
 function bindNeedsYou(st, sec) {
   if (!sec) return;
   const header = sec.querySelector('.hs-h');
-  setSum(header, st.needs);
+  setSum(header, st.ok ? st.needs + st.staleCount : null);
   let body;
   if (!st.ok) body = [el('div', 'hnote', 'The approval queue could not be read.')];
   else if (st.pending.length === 0) body = [el('div', 'hnote', 'Nothing is waiting on you.')];

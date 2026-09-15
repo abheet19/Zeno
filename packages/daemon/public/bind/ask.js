@@ -22,6 +22,8 @@ import { setupCommandMenu } from './command-menu.js';
 
 const COMMAND_MODEL_KEY = 'zeno.command.model';
 let commandModel = null;
+let commandRegistryCommands = [];
+let commandRegistryRefreshBound = false;
 
 function commandModelPill() {
   return $('.screen[data-screen="home"] [data-model-pill]');
@@ -110,7 +112,7 @@ const SCREEN_ALIASES = {
 };
 
 /** The three products, each switched by `.seg [data-product="…"]`. */
-const PRODUCT_ALIASES = { command: 'command', forge: 'forge', counsel: 'counsel' };
+const PRODUCT_ALIASES = { command: 'command', forge: 'forge', counsel: 'counsel', counsal: 'counsel' };
 
 const NAV_LABEL = {
   home: 'Home', chats: 'Chats', approvals: 'Approvals', receipts: 'Receipts', work: 'Work',
@@ -198,6 +200,46 @@ function seedForgeComposer(task) {
   target.dispatchEvent(new Event('input', { bubbles: true }));
   target.focus();
   return true;
+}
+
+function openForgeRegistryEntry(kind, id) {
+  const forge = document.querySelector('.seg [data-product="forge"]');
+  if (forge) forge.click();
+  requestAnimationFrame(() => {
+    const zeno = document.querySelector('.vsact [data-vsview="zeno"]');
+    if (zeno) zeno.click();
+    requestAnimationFrame(() => {
+      const rows = [...document.querySelectorAll('.vsside .vsfile, .vsside .vsck')];
+      const row = rows.find((item) => (item.textContent || '').toLowerCase().includes(String(id).toLowerCase()));
+      if (row) {
+        row.scrollIntoView({ block: 'center' });
+        row.style.outline = '1px solid var(--cyan)';
+        setTimeout(() => { row.style.outline = ''; }, 1600);
+      }
+    });
+  });
+  return !!forge;
+}
+
+async function refreshCommandRegistry() {
+  const response = await fetch('/skills', { headers: authHeaders(), cache: 'no-store' })
+    .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
+    .catch(() => ({ ok: false, data: {} }));
+  if (!response.ok) { commandRegistryCommands = []; return; }
+  const skills = Array.isArray(response.data.skills) ? response.data.skills : [];
+  const rules = Array.isArray(response.data.rules) ? response.data.rules : [];
+  commandRegistryCommands = [
+    ...skills.map((skill, index) => ({
+      id: `skill-${String(skill.id || index + 1).toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`,
+      hint: `${skill.name || skill.id || 'Installed skill'} — ${skill.description || 'open in Forge'}`,
+      run: () => openForgeRegistryEntry('skill', skill.id || skill.name || ''),
+    })),
+    ...rules.map((rule, index) => ({
+      id: `rule-${String(rule.id || rule.path || index + 1).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')}`,
+      hint: `${rule.path || rule.name || 'Repository rule'} — open in Forge`,
+      run: () => openForgeRegistryEntry('rule', rule.path || rule.id || ''),
+    })),
+  ];
 }
 
 /* ---- turn rendering, in the artifact's own components --------------------- */
@@ -318,6 +360,31 @@ async function ask(question) {
   return { ok: res.ok, status: res.status, payload };
 }
 
+function rememberText(question) {
+  const match = /^remember\s*:\s*(.+)$/is.exec(question.trim());
+  return match && match[1] ? match[1].trim() : null;
+}
+
+async function rememberInVault(body) {
+  const title = body.length <= 72 ? body : `${body.slice(0, 69)}…`;
+  const written = await fetch('/memory', {
+    method: 'POST',
+    headers: authHeaders({ 'content-type': 'application/json' }),
+    cache: 'no-store',
+    body: JSON.stringify({ title, body, kind: 'preference', source: 'owner via Command', tags: ['command'] }),
+  }).then(async (res) => ({ ok: res.ok, status: res.status, data: await res.json().catch(() => ({})) }));
+  if (!written.ok) return { ok: false, message: written.data?.error?.message || `Vault answered ${written.status}.` };
+  const id = written.data?.note?.id;
+  if (typeof id !== 'string' || !id) return { ok: false, message: 'Vault did not return the stored note id.' };
+  const readback = await fetch(`/memory?q=${encodeURIComponent(body)}`, { headers: authHeaders(), cache: 'no-store' })
+    .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }));
+  const stored = readback.ok && Array.isArray(readback.data?.hits)
+    && readback.data.hits.some((hit) => hit?.note?.id === id);
+  return stored
+    ? { ok: true, message: `Saved to Vault: ${body}` }
+    : { ok: false, message: 'Vault accepted the write but the note could not be read back, so it is not confirmed.' };
+}
+
 /**
  * The "/" commands this composer offers right now — never a fixed list: `/new`
  * is left out when there is no open thread to reset, and each entry runs the
@@ -346,6 +413,7 @@ function homeCommands() {
   out.push({ id: 'record', hint: 'Record a meeting in Counsel', run: () => startCounselRecording() });
   out.push({ id: 'forge', hint: 'Switch to Forge', run: () => seedForgeComposer('') });
   out.push({ id: 'help', hint: 'What can Zeno do?', run: () => { const ta = $('#home-ta'); if (ta) { ta.value = 'help'; ta.dispatchEvent(new Event('input', { bubbles: true })); const s = $('#home-send'); if (s) s.click(); } } });
+  out.push(...commandRegistryCommands);
   return out;
 }
 
@@ -405,6 +473,33 @@ function wire({ ta, send, turns, thread, onFirstTurn, commands }) {
       return;
     }
 
+    const memory = rememberText(question);
+    if (memory) {
+      const pending = turn('z', (b) => b.append(el('div', 'fnote', 'Saving to Vault…')));
+      turns.append(pending);
+      try {
+        const result = await rememberInVault(memory);
+        pending.remove();
+        turns.append(turn('z', (b) => {
+          const message = el('p', null, result.message);
+          if (!result.ok) message.style.color = 'var(--amber)';
+          b.append(message);
+        }));
+      } catch (err) {
+        pending.remove();
+        turns.append(turn('z', (b) => {
+          const message = el('p', null, `Vault could not be reached: ${(err && err.message) || err}. Nothing was saved.`);
+          message.style.color = 'var(--amber)';
+          b.append(message);
+        }));
+      } finally {
+        busy = false;
+        if (send) send.disabled = false;
+        turns.lastElementChild?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      }
+      return;
+    }
+
     // Honest progress: "asking" is a state we are actually in, not a fake trace.
     const pending = turn('z', (b) => b.append(el('div', 'fnote', 'Asking Zeno — reading your local state…')));
     turns.append(pending);
@@ -449,14 +544,25 @@ function wire({ ta, send, turns, thread, onFirstTurn, commands }) {
     // The "/" menu owns arrows/Enter/Escape while it is open; only once it
     // says it did not handle the key does Enter fall through to Send.
     if (cmdMenu && cmdMenu.handleKeydown(e)) return;
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.stopPropagation(); void submit(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      // This capturing handler owns Enter even while a request is busy. Stop
+      // the artifact's older same-element listener from producing a mock turn
+      // when the owner presses Enter twice quickly.
+      e.stopImmediatePropagation();
+      if (!busy) void submit();
+    }
   }, true);
 
   return true;
 }
 
 export async function bind() {
-  await bindCommandModel();
+  await Promise.all([bindCommandModel(), refreshCommandRegistry()]);
+  if (!commandRegistryRefreshBound) {
+    commandRegistryRefreshBound = true;
+    window.addEventListener('zeno:state', () => { void refreshCommandRegistry(); });
+  }
   // HOME — the artifact hides the hero once a conversation starts.
   const heroBlock = $('#hero-block');
   const starters = $('#starters-block');

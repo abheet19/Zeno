@@ -5,7 +5,7 @@
 import type { ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import type { Role } from '../tokens.js';
-import type { ServerCtx } from '../server/context.js';
+import { persistHeld, type ServerCtx } from '../server/context.js';
 import { json } from './http.js';
 import { withPayload } from './approvals.js';
 
@@ -21,6 +21,21 @@ export function lanIps(): string[] {
 }
 
 export function serveState(ctx: ServerCtx, res: ServerResponse, role: Role): void {
+  // Build each file review once. Besides avoiding a second full diff on every
+  // state poll, this lets this read atomically remove proposals whose bound
+  // base bytes have already drifted before it reports the queue.
+  const filePending: Record<string, unknown>[] = [];
+  let removedDrifted = false;
+  for (const [hash, held] of ctx.held) {
+    const item = withPayload(ctx, held) as Record<string, unknown> & { review?: { state?: string } };
+    if (item.review?.state === 'drifted') {
+      ctx.held.delete(hash);
+      removedDrifted = true;
+    } else {
+      filePending.push(item);
+    }
+  }
+  if (removedDrifted) persistHeld(ctx);
   // Phone-access URLs carry the launch nonce, so they are OWNER-ONLY — a
   // proposer reading /state must never learn the secret that mints owner.
   const lanOn = ctx.opts.lanAccess === true;
@@ -35,7 +50,7 @@ export function serveState(ctx: ServerCtx, res: ServerResponse, role: Role): voi
     // identically: one carries the bytes of a file write, one the bytes of a
     // call, one the text of a note.
     pending: [
-      ...[...ctx.held.values()].map((h) => withPayload(ctx, h)),
+      ...filePending,
       ...[...ctx.gateHeld.values()].map((p) => ({ ...p.preview, payload: p.payload })),
       ...(ctx.memoryRoutes ? ctx.memoryRoutes.waiting() : []),
     ],

@@ -35,6 +35,11 @@ export async function bindVault() {
   let hitsRes = null;
   let pendingRes = null;
   let searchTimer = null;
+  // Every bind/search owns a monotonically increasing generation. A slower
+  // recall for an older query may finish after a newer one; only the current
+  // generation is allowed to paint the list.
+  let generation = Number(rowList.dataset.zenoVaultGeneration || 0) + 1;
+  rowList.dataset.zenoVaultGeneration = String(generation);
 
   function noteRow(n, score, matched) {
     const tags = Array.isArray(n.tags) ? n.tags : [];
@@ -120,14 +125,20 @@ export async function bindVault() {
     fill(rowList, ...nodes);
   }
 
-  render();
+  // A live/navigation refresh must not replace already-rendered memory with a
+  // transient loading row. Keep the last successful snapshot visible until
+  // the new read lands; this also avoids a noticeable flash on slower disks.
+  if (rowList.dataset.zenoBound !== '1') render();
   const reads = [getJSON('/memory'), getJSON('/memory/pending')];
   // A re-run while a search is open must re-run the SEARCH, not quietly fall
   // back to the full list.
   if (query.trim()) reads.push(getJSON('/memory?q=' + encodeURIComponent(query.trim())));
+  const initialGeneration = generation;
   const [notes, pending, hits] = await Promise.all(reads);
+  if (Number(rowList.dataset.zenoVaultGeneration) !== initialGeneration) return;
   notesRes = notes; pendingRes = pending; hitsRes = hits ?? null;
   render();
+  rowList.dataset.zenoBound = '1';
 
   if (searchInput) {
     /* One listener, not one per stream event. Every re-run used to add another,
@@ -139,13 +150,18 @@ export async function bindVault() {
     if (searchInput._zenoVaultInput) searchInput.removeEventListener('input', searchInput._zenoVaultInput);
     clearTimeout(searchInput._zenoVaultTimer);
     const onInput = () => {
+      generation += 1;
+      rowList.dataset.zenoVaultGeneration = String(generation);
+      const requestGeneration = generation;
       query = searchInput.value;
       const q = query.trim();
       if (!q) { hitsRes = null; render(); return; }
       render();
       clearTimeout(searchTimer);
       searchTimer = setTimeout(async () => {
-        hitsRes = await getJSON('/memory?q=' + encodeURIComponent(q));
+        const next = await getJSON('/memory?q=' + encodeURIComponent(q));
+        if (Number(rowList.dataset.zenoVaultGeneration) !== requestGeneration || searchInput.value.trim() !== q) return;
+        hitsRes = next;
         render();
       }, 300);
       searchInput._zenoVaultTimer = searchTimer;

@@ -1078,10 +1078,10 @@ button{font:inherit; color:inherit}
       <button class="nav-i" data-screen="approvals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>Approvals <span class="ct needs">1</span></button>
       <button class="nav-i" data-screen="receipts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v15H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg>Receipts</button>
       <div class="rk mt">Workspace</div>
-      <button class="nav-i" data-screen="work"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Work <span class="ct" id="work-count">5</span></button>
-      <button class="nav-i" data-screen="vault"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>Vault <span class="ct">12</span></button>
-      <button class="nav-i" data-screen="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>Devices <span class="ct">1</span></button>
-      <button class="nav-i" data-screen="integrations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Integrations <span class="ct">4</span></button>
+      <button class="nav-i" data-screen="work"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>Work <span class="ct" id="work-count"></span></button>
+      <button class="nav-i" data-screen="vault"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="2"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>Vault <span class="ct"></span></button>
+      <button class="nav-i" data-screen="devices"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="10" rx="2"/><path d="M2 20h20M8 17h8"/></svg>Devices <span class="ct"></span></button>
+      <button class="nav-i" data-screen="integrations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Integrations <span class="ct"></span></button>
       <!-- Zeno has two workspace surfaces the design never depicted. They keep the
            design's own rail language rather than being dropped. -->
       <button class="nav-i" data-screen="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Projects <span class="ct" id="projects-count"></span></button>
@@ -1096,11 +1096,11 @@ button{font:inherit; color:inherit}
       <section class="screen on" data-screen="home">
         <div class="home">
           <div class="hcenter">
-            <button class="attn" data-screen-jump="approvals"><span class="ai"></span><span><b>1 decision</b> is waiting for your approval</span><span class="go">Review →</span></button>
+            <button class="attn" data-screen-jump="approvals" hidden><span class="ai"></span><span></span><span class="go">Review →</span></button>
             <div class="hscroll" id="hscroll">
               <div id="hero-block" class="hero-block">
                 <div class="orb-wrap"><canvas id="orb" width="780" height="460" role="img" aria-label="The Standing Field: Zeno's live state as a rotating map. The gold Zeno core is the centre; nodes are agents, tickets, devices, repos, memory, meetings and models; a link is a relationship; a dashed amber link is network egress."></canvas></div>
-                <div class="orb-meta"><div class="orb-state">all clear · 1 needs you · voice: idle</div><div class="orb-flow"><b>question</b> → grounded answer &nbsp;·&nbsp; <b>task</b> → ticket → Forge → your approval → sealed receipt &nbsp;·&nbsp; click a node to go to it · drag to turn the field</div></div>
+                <div class="orb-meta"><div class="orb-state">Reading local state…</div><div class="orb-flow"><b>question</b> → grounded answer &nbsp;·&nbsp; <b>task</b> → ticket → Forge → your approval → sealed receipt &nbsp;·&nbsp; click a node to go to it · drag to turn the field</div></div>
                 <div class="greet"><h1>Good evening, Abheet.</h1><p>Ask anything, or start a task. Nothing runs until you approve it.</p></div>
               </div>
               <div id="home-thread" class="thread" hidden>
@@ -1334,7 +1334,7 @@ button{font:inherit; color:inherit}
       <button class="tbico" title="Extensions" data-vsgo="extensions"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v3M15 3v3M8 6h8a2 2 0 0 1 2 2v3a6 6 0 0 1-12 0V8a2 2 0 0 1 2-2zM12 17v4"/></svg></button>
       <div class="tblayout"><button title="Toggle Panel (Ctrl+J)" data-layout="panel" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 15h18"/></svg></button><button title="Toggle Primary Side Bar" data-layout="side" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button><button title="Toggle Secondary Side Bar (Ctrl+Alt+B)" data-layout="sess" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button></div>
       <button class="tbavatar" title="Abheet Isher · local owner">AI</button>
-      <button class="tbcta" data-product-go="command" data-then="approvals">1 approval waiting →</button>
+      <button class="tbcta" data-product-go="command" data-then="approvals" hidden></button>
       <div class="tbwin" aria-label="Window controls"><button id="zeno-win-min" title="Minimize" aria-label="Minimize">–</button><button id="zeno-win-max" title="Maximize" aria-label="Maximize">☐</button><button id="zeno-win-close" title="Close" aria-label="Close">×</button></div>
     </div>
 
@@ -1344,11 +1344,11 @@ button{font:inherit; color:inherit}
       <nav class="vsact" aria-label="Activity Bar">
         <button aria-current="page" data-vsview="explorer" title="Explorer (Ctrl+Shift+E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/></svg></button>
         <button data-vsview="search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
-        <button data-vsview="scm" title="Source Control (Ctrl+Shift+G)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 3-3 4-6 4H8"/></svg><span class="vsbadge">2</span></button>
+        <button data-vsview="scm" title="Source Control (Ctrl+Shift+G)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 3-3 4-6 4H8"/></svg><span class="vsbadge" hidden></span></button>
         <button data-vsview="debug" title="Run and Debug (Ctrl+Shift+D)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l14 8-14 8z"/><path d="M4 12h2"/></svg></button>
         <button data-vsview="extensions" title="Extensions (Ctrl+Shift+X)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><path d="M17 13v8M13 17h8"/></svg></button>
         <button data-vsview="testing" title="Testing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/></svg></button>
-        <button data-vsview="zeno" title="Zeno — rules, skills, MCP"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><circle cx="12" cy="12" r="3"/></svg><span class="vsbadge am">1</span></button>
+        <button data-vsview="zeno" title="Zeno — rules, skills, MCP"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><circle cx="12" cy="12" r="3"/></svg><span class="vsbadge am" hidden></span></button>
         <button data-vsview="remote" title="Ports &amp; Remote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></button>
         <span class="fgrow"></span>
         <button title="Accounts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button>
@@ -1657,10 +1657,10 @@ Open questions (2): …</pre><div class="caps-acts" style="padding:12px 0 0;bord
   <div class="modal-card msheet-card" role="dialog" aria-modal="true" aria-label="More">
     <div class="modal-head"><div class="mh-title">More</div><button class="iconbtn" data-close title="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div class="modal-body msheet-list">
-      <button class="nav-i" data-mscreen="work">Work <span class="ct">5</span></button>
-      <button class="nav-i" data-mscreen="vault">Vault <span class="ct">12</span></button>
-      <button class="nav-i" data-mscreen="devices">Devices <span class="ct">1</span></button>
-      <button class="nav-i" data-mscreen="integrations">Integrations <span class="ct">4</span></button>
+      <button class="nav-i" data-mscreen="work">Work <span class="ct"></span></button>
+      <button class="nav-i" data-mscreen="vault">Vault <span class="ct"></span></button>
+      <button class="nav-i" data-mscreen="devices">Devices <span class="ct"></span></button>
+      <button class="nav-i" data-mscreen="integrations">Integrations <span class="ct"></span></button>
       <button class="nav-i" data-mscreen="receipts">Receipts</button>
       <button class="nav-i" data-open-settings data-close>Settings</button>
       <div class="railfoot" style="margin-top:12px"><span class="lg g">verified</span><span class="lg a">needs you</span><span class="lg r">blocked</span></div>

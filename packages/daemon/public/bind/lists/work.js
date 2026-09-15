@@ -20,8 +20,9 @@ export async function bindWork() {
   const pillButtons = $$('.sbar .filterpill', screen);
   const FILTER_IDS = ['all', 'tickets', 'sandbox', 'sources'];
 
-  let query = '';
-  let filter = 'all';
+  let query = searchInput ? searchInput.value : '';
+  const currentFilter = pillButtons.findIndex((btn) => btn.hasAttribute('aria-current'));
+  let filter = FILTER_IDS[currentFilter] || 'all';
   let workRes = null;
   let forgeRes = null;
 
@@ -120,13 +121,25 @@ export async function bindWork() {
     fill(listEl, ...nodes);
   }
 
-  render();
+  // Preserve the last successful snapshot while a live/navigation refresh is
+  // in flight. Repainting a loading row here made Work appear stuck even
+  // though its prior data was still valid.
+  if (listEl.dataset.zenoBound !== '1') render();
   const [w, f] = await Promise.all([getJSON('/work'), getJSON('/forge/status')]);
   workRes = w; forgeRes = f;
   render();
+  listEl.dataset.zenoBound = '1';
 
-  if (searchInput) searchInput.addEventListener('input', () => { query = searchInput.value; render(); });
+  if (searchInput) {
+    if (searchInput._zenoWorkInput) searchInput.removeEventListener('input', searchInput._zenoWorkInput);
+    const onInput = () => { query = searchInput.value; render(); };
+    searchInput._zenoWorkInput = onInput;
+    searchInput.addEventListener('input', onInput);
+  }
   pillButtons.forEach((btn, i) => {
-    btn.addEventListener('click', () => { filter = FILTER_IDS[i] || 'all'; render(); });
+    if (btn._zenoWorkClick) btn.removeEventListener('click', btn._zenoWorkClick);
+    const onClick = () => { filter = FILTER_IDS[i] || 'all'; render(); };
+    btn._zenoWorkClick = onClick;
+    btn.addEventListener('click', onClick);
   });
 }

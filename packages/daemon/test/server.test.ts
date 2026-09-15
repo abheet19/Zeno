@@ -558,6 +558,46 @@ test('a waiting proposal survives a daemon restart and is still approvable', asy
   }
 });
 
+test('a live proposal whose base drifts is cleared before it can pose as an approval or block Forge', async () => {
+  const { nodeHeldStore } = await import('../src/held-store.js');
+  const { nodeWorkDesk } = await import('../src/work.js');
+  const dir = mkdtempSync(join(tmpdir(), 'zeno-live-drift-'));
+  const sandbox = join(dir, 'sandbox');
+  const heldPath = join(dir, 'pending.jsonl');
+  const tokens = mintTokens();
+  const fs = nodeSandboxFs();
+  const server = createServer({
+    kernel: new Kernel(nodeWorld(fs)), sandbox, fs, tokens,
+    stream: new Stream(), publicDir: join(dir, 'public'),
+    work: nodeWorkDesk(dir), heldStore: nodeHeldStore(heldPath),
+  });
+  const postAt = (base: string, path: string, token: string, body: unknown) => fetch(base + path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-zeno-token': token },
+    body: JSON.stringify(body),
+  });
+
+  try {
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const made = await postAt(base, '/previews', tokens.proposer, RISKY);
+    assert.equal(made.status, 200);
+    assert.notEqual(readFileSync(heldPath, 'utf8').trim(), '', 'the undecided proposal was persisted');
+
+    mkdirSync(sandbox, { recursive: true });
+    writeFileSync(join(sandbox, 'package.json'), '{"moved":true}\n', 'utf8');
+
+    const state = await (await fetch(base + '/state', { headers: { 'x-zeno-token': tokens.owner } })).json() as { pending: unknown[] };
+    assert.equal(state.pending.length, 0, 'drifted work is not advertised as a decision waiting');
+    const project = await (await fetch(base + '/forge/project', { headers: { 'x-zeno-token': tokens.owner } })).json() as { project: { canChange: boolean } };
+    assert.equal(project.project.canChange, true, 'a dead proposal cannot block changing the working folder');
+    assert.equal(readFileSync(heldPath, 'utf8').trim(), '', 'the dead record is removed from durable pending state');
+  } finally {
+    await new Promise<void>((ok) => server.close(() => ok()));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a persisted proposal whose base drifted is pruned and cannot block the project forever', async () => {
   const { nodeHeldStore } = await import('../src/held-store.js');
   const { nodeWorkDesk } = await import('../src/work.js');
@@ -1145,7 +1185,7 @@ test('Forge — the code pane reads a sandbox file, and a path that escapes is r
   }
 });
 
-test('Forge — pending file capsules carry a fresh review and expose later base drift', async () => {
+test('Forge — pending file capsules carry a fresh review, then live drift removes the dead decision', async () => {
   const h = await start();
   try {
     const relPath = 'src/review me.ts';
@@ -1176,14 +1216,10 @@ test('Forge — pending file capsules carry a fresh review and expose later base
       headers: { 'x-zeno-token': h.owner },
     })).json() as { pending: { actionHash: string; review: ReturnType<typeof buildForgeFileReview> }[] };
     const moved = movedState.pending.find((entry) => entry.actionHash === actionHash)?.review;
-    assert.equal(moved?.state, 'drifted');
-    assert.equal(moved?.diff, null, 'the API never labels a diff against unapproved current bytes as the proposed review');
+    assert.equal(moved, undefined, 'a drifted capsule is no longer an approval the owner can take');
 
     const approval = await post(h, '/approvals', h.owner, { actionHash });
-    assert.equal(approval.status, 200);
-    const receipt = (await approval.json()) as { receipt: { outcome: string; reason: string } };
-    assert.equal(receipt.receipt.outcome, 'refused');
-    assert.match(receipt.receipt.reason, /base/i);
+    assert.equal(approval.status, 404, 'the removed hash cannot be revived by an approval replay');
     assert.equal(readFileSync(join(h.sandbox, relPath), 'utf8'), 'export const value = 99;\n');
   } finally {
     await h.close();

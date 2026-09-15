@@ -10,7 +10,7 @@
  *                               and no worktree directory appeared
  *   - approve is the run     -> POST /forge/run fires only after the click,
  *                               the daemon's response says the run carried
- *                               the plan, and the changes come back HELD
+ *                               the plan, and a risky change comes back HELD
  *   - discard runs nothing   -> no /forge/run, /state unchanged
  *   - off means unchanged    -> a task goes straight to /forge/run, no /forge/plan
  *   - Command respects it    -> the zeno:command-run event plans too when on
@@ -27,7 +27,9 @@ export const criteria = ['owner: intake — research before work', 'forge: plann
 /** Where `packages/forge/src/worktree.ts` puts a run's isolated checkout. */
 const WORKTREE_DIR = join(tmpdir(), 'zeno-forge-worktrees');
 const PREFERRED_LOCAL = ['qwen3:8b', 'qwen3:14b'];
-const TASK = 'Create a file named plan-notes.txt whose entire contents are the single line: zeno plan first';
+// Routine T0 edits auto-apply by policy. This flow needs to exercise the held
+// approval branch after planning, so it targets a configuration path.
+const TASK = 'Create a file named .env.plan-example whose entire contents are the single line: ZENO_PLAN_FIRST=true';
 
 function worktrees() {
   try { return existsSync(WORKTREE_DIR) ? readdirSync(WORKTREE_DIR).sort() : []; } catch { return []; }
@@ -67,6 +69,11 @@ async function waitForPlanCard(page, timeoutMs) {
 }
 
 export async function run({ daemon, page, ok, network, Blocked }) {
+  const lensBodies = [];
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/forge/context') return;
+    try { lensBodies.push(request.postDataJSON()); } catch { lensBodies.push(null); }
+  });
   const agents = await daemon.api('/forge/agents?passive=1');
   const localModels = Array.isArray(agents.body?.localModels) ? agents.body.localModels : [];
   if (localModels.length === 0) {
@@ -182,6 +189,15 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('the run reports that it carried the approved plan (the daemon’s word, not the window’s)',
     new RegExp(`ran with your approved plan \\(${edited.length} steps\\)`).test(agentTurn), agentTurn.slice(0, 200));
 
+  await page.click('#s-tabs [data-stab="lens"]');
+  await page.waitForSelector('[data-lens-prompt="1"]', { timeout: 10_000 });
+  const plannedLens = await page.evaluate(() => document.querySelector('[data-lens-prompt="1"]')?.textContent || '');
+  ok('Lens calls the context route for the approved-plan session', network.includes('POST /forge/context'));
+  ok('Lens sends the same owner-approved plan bytes the run used',
+    /OWNER-APPROVED PLAN/.test(lensBodies[lensBodies.length - 1]?.task || '') && (lensBodies[lensBodies.length - 1]?.task || '').includes(edited[0]),
+    JSON.stringify(lensBodies[lensBodies.length - 1]));
+  ok('Lens renders that exact approved plan in the daemon prompt', /OWNER-APPROVED PLAN/.test(plannedLens) && plannedLens.includes(edited[0]), plannedLens.slice(-600));
+
   const afterRun = await daemon.api('/state');
   if (afterRun.body.pending.length === 0) {
     throw new Blocked(`a local Ollama model that can follow Forge's ===FILE:=== envelope — ${model} proposed no file change for a one-line task ("${agentTurn.slice(0, 200)}")`);
@@ -189,7 +205,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   ok('the planned run’s changes arrive as held proposals', afterRun.body.pending.length >= 1, `${afterRun.body.pending.length} held`);
   ok('none of them may auto-apply', afterRun.body.pending.every((h) => h.auto === false));
   ok('the proposal summary names the task, not the plan prose',
-    afterRun.body.pending.every((h) => /^Forge \(local\): write .* — Create a file named plan-notes/.test(h.summary)),
+    afterRun.body.pending.every((h) => /^Forge \(local\): write .* — Create a file named \.env\.plan-example/.test(h.summary)),
     JSON.stringify(afterRun.body.pending.map((h) => h.summary)));
   ok.eq('a planned run still seals no receipt on its own', afterRun.body.receipts.length, 0);
 
@@ -305,12 +321,12 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     layout.sessW > 1000 && layout.turnsW > 500, `session panel ${layout.sessW}px, transcript ${layout.turnsW}px`);
   ok.eq('the rail lists every session this flow created', layout.sessions, 4);
   ok('the rail is newest-first and names the sessions', /from-command/.test(layout.rows[0]?.title ?? ''), JSON.stringify(layout.rows));
-  const plannedRow = layout.rows.find((r) => /plan-notes/.test(r.title || ''));
+  const plannedRow = layout.rows.find((r) => /\.env\.plan-example/.test(r.title || ''));
   ok('the planned session’s row reports its held changes from the daemon’s queue', /\d+ held/.test(plannedRow?.state ?? ''), JSON.stringify(plannedRow));
 
-  await page.evaluate(() => [...document.querySelectorAll('#ag-list .dvsess')].find((b) => /plan-notes/.test(b.textContent)).click());
+  await page.evaluate(() => [...document.querySelectorAll('#ag-list .dvsess')].find((b) => /\.env\.plan-example/.test(b.textContent)).click());
   await page.waitForTimeout(300);
-  ok('clicking a rail row opens that session', await page.evaluate(() => /plan-notes/.test(document.querySelector('#s-title')?.textContent || '') && !!document.querySelector('#s-turns .plan-card.approved')));
+  ok('clicking a rail row opens that session', await page.evaluate(() => /\.env\.plan-example/.test(document.querySelector('#s-title')?.textContent || '') && !!document.querySelector('#s-turns .plan-card.approved')));
 
   await page.fill('#ag-search', 'discard');
   await page.waitForTimeout(150);
@@ -350,7 +366,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
 
   // Persistence: the rail's history is this browser's own, and it must survive a reload as real transcripts.
   const stored = await page.evaluate(() => { try { return JSON.parse(localStorage.getItem('zeno-forge-sessions') || 'null'); } catch { return null; } });
-  ok('sessions are persisted in this browser', Array.isArray(stored) && stored.length === 5 && stored.some((s) => /plan-notes/.test(s.title || '')), JSON.stringify((stored || []).map((s) => s.title)));
+  ok('sessions are persisted in this browser', Array.isArray(stored) && stored.length === 5 && stored.some((s) => /\.env\.plan-example/.test(s.title || '')), JSON.stringify((stored || []).map((s) => s.title)));
   await page.reload({ waitUntil: 'domcontentloaded' });
   const bound = await page.waitForFunction(() => window.__zenoBind !== undefined, null, { timeout: 20_000 }).then(() => true).catch(() => false);
   ok('the window binds again after a reload', bound);
@@ -361,7 +377,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     rows: [...document.querySelectorAll('#ag-list .dvsess')].map((b) => b.querySelector('b')?.textContent),
   }));
   ok('Agent mode and every past session come back after a reload', restored.agent === true && restored.rows.length === 5, JSON.stringify(restored));
-  await page.evaluate(() => [...document.querySelectorAll('#ag-list .dvsess')].find((b) => /plan-notes/.test(b.textContent))?.click());
+  await page.evaluate(() => [...document.querySelectorAll('#ag-list .dvsess')].find((b) => /\.env\.plan-example/.test(b.textContent))?.click());
   await page.waitForTimeout(300);
   ok('a restored session carries its real transcript, approved plan card included', await page.evaluate(() =>
     !!document.querySelector('#s-turns .plan-card.approved') && /ran with your approved plan/.test(document.querySelector('#s-turns')?.innerText || '')));

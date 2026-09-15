@@ -206,6 +206,13 @@ test('an empty answer is not grounded — silence is not an answer', () => {
   assert.equal(groundReply('   ', S).ok, false);
 });
 
+test('a real citation marker without answer text is still an empty answer', () => {
+  const g = groundReply('[g1]', S);
+  assert.equal(g.ok, false);
+  assert.equal(g.reason, 'empty-answer');
+  assert.deepEqual(g.cited, ['g1']);
+});
+
 test('an answer that cites nothing at all is not grounded even if it asserts nothing', () => {
   const g = groundReply('Sure.', S);
   assert.equal(g.ok, false, 'an answer about local state that points at no state is not checkable');

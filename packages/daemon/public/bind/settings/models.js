@@ -133,6 +133,7 @@ export async function bindModels(modal) {
         // actually goes somewhere, rather than just naming where models live.
         const go = document.querySelector('[data-product-go="forge"]');
         if (go) go.click();
+        setTimeout(() => window.dispatchEvent(new CustomEvent('zeno:open-model-manager')), 0);
       });
     }
   } catch { /* skip quietly */ }

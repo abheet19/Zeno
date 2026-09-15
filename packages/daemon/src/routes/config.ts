@@ -12,6 +12,7 @@ import { basename, join, resolve } from 'node:path';
 import type { GitRunner } from '@abheet19/zeno-kernel';
 import type { Role } from '../tokens.js';
 import type { McpServerConfig, ScheduledTask, ServerCtx } from '../server/context.js';
+import { pruneDriftedHeld } from './approvals.js';
 import { json, readJson, str } from './http.js';
 
 // ---- the active project root ---------------------------------------------
@@ -142,6 +143,10 @@ function samePath(a: string, b: string): boolean {
 
 /** The wire shape both project routes answer with — everything the window shows is read from here. */
 function wireProject(ctx: ServerCtx): Record<string, unknown> {
+  // Project switching must not be held hostage by an impossible, drifted
+  // proposal. The same cleanup runs on /state; doing it here makes this route
+  // correct even for a client that asks for project state directly.
+  pruneDriftedHeld(ctx);
   const root = ctx.opts.sandbox;
   const workspace = ctx.opts.workspace;
   const scratch = workspace !== undefined && samePath(root, scratchProjectRoot(workspace));

@@ -205,13 +205,25 @@ async function bindRailBadges() {
      zero proposals must show no badge even while other sessions, or older
      runs, have things held), so bind/forge/session-views.js's renderActions
      paints it from that session's own state instead. */
-  const pending = state.ok && Array.isArray(state.data?.pending) ? state.data.pending.length : null;
+  const pendingItems = state.ok && Array.isArray(state.data?.pending)
+    ? state.data.pending.filter((item) => !(item && item.denied))
+    : null;
+  const actionable = Array.isArray(pendingItems)
+    ? pendingItems.filter((item) => !item?.review || item.review.state === 'ready').length
+    : null;
+  const stale = Array.isArray(pendingItems)
+    ? pendingItems.filter((item) => item?.review && item.review.state !== 'ready').length
+    : null;
+  const pending = Array.isArray(pendingItems) ? pendingItems.length : null;
 
   const cta = document.querySelector('.tbcta');
   if (cta) {
-    const n = Number.isFinite(pending) ? pending : 0;
-    cta.hidden = n === 0;
-    if (n > 0) cta.textContent = `${n} approval${n === 1 ? '' : 's'} waiting →`;
+    const ready = Number.isFinite(actionable) ? actionable : 0;
+    const old = Number.isFinite(stale) ? stale : 0;
+    cta.hidden = ready + old === 0;
+    if (ready > 0 && old > 0) cta.textContent = `${ready} approval${ready === 1 ? '' : 's'} + ${old} stale →`;
+    else if (ready > 0) cta.textContent = `${ready} approval${ready === 1 ? '' : 's'} waiting →`;
+    else if (old > 0) cta.textContent = `${old} stale proposal${old === 1 ? '' : 's'} to clear →`;
   }
 
   const zenoBadge = document.querySelector('.vsact [data-vsview="zeno"] .vsbadge');

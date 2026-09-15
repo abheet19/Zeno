@@ -202,7 +202,10 @@ export async function postForgePlan(ctx: ServerCtx, req: IncomingMessage, res: S
     const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, prompt, stream: false, think: false, format: PLAN_SCHEMA, options: { num_predict: 2048 } }),
+      body: JSON.stringify({
+        model, prompt, stream: false, think: false, format: PLAN_SCHEMA,
+        keep_alive: '60s', options: { num_ctx: 16384, num_predict: 2048 },
+      }),
       signal: controller.signal,
     });
     if (!r.ok) {

@@ -26,7 +26,10 @@ export async function askLocalModel(
     r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: chosen, prompt, stream: false, think: false, options: { num_predict: 512 } }),
+      body: JSON.stringify({
+        model: chosen, prompt, stream: false, think: false,
+        keep_alive: 0, options: { num_ctx: 8192, num_predict: 512 },
+      }),
       signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {

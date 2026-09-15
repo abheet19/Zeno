@@ -306,9 +306,14 @@ export function setupActivityBar(S) {
    * a fixed 2. */
   const zenoView = $('.vsside .vsview[data-vsview="zeno"] .vspad', ide);
   const skillsPill = $('#s-skills', ide);
+  const MAX_SELECTED_SKILLS = 16;
   function renderSkillsPill() {
     if (!skillsPill) return;
-    setTrailingText(skillsPill, ` ${S.selectedSkillIds.size} skill${S.selectedSkillIds.size === 1 ? '' : 's'} ▾`);
+    const skills = `${S.selectedSkillIds.size} skill${S.selectedSkillIds.size === 1 ? '' : 's'}`;
+    const rules = S.ruleSelectionExplicit
+      ? `${S.selectedRuleIds.size} rule${S.selectedRuleIds.size === 1 ? '' : 's'}`
+      : 'all rules';
+    setTrailingText(skillsPill, ` ${skills} · ${rules} ▾`);
   }
   function sectHead(text, key) {
     const h = el('div', 'vssect open');
@@ -327,6 +332,37 @@ export function setupActivityBar(S) {
     if (h) { h.scrollIntoView({ block: 'start' }); h.style.outline = '1px solid var(--cyan)'; setTimeout(() => { h.style.outline = ''; }, 1600); }
     return !!h;
   };
+  function syncCapabilityChecks() {
+    if (!zenoView) return;
+    zenoView.querySelectorAll('input[data-skill-id]').forEach((cb) => {
+      const checked = S.selectedSkillIds.has(cb.dataset.skillId);
+      cb.checked = checked;
+      cb.disabled = !checked && S.selectedSkillIds.size >= MAX_SELECTED_SKILLS;
+    });
+    zenoView.querySelectorAll('input[data-rule-id]').forEach((cb) => {
+      cb.checked = !S.ruleSelectionExplicit || S.selectedRuleIds.has(cb.dataset.ruleId);
+    });
+    renderSkillsPill();
+  }
+  S.selectSkillById = (id) => {
+    if (!S.availableSkills.some((skill) => skill.id === id)) return false;
+    if (!S.selectedSkillIds.has(id) && S.selectedSkillIds.size >= MAX_SELECTED_SKILLS) return false;
+    S.selectedSkillIds.add(id);
+    syncCapabilityChecks();
+    S.openZenoSection('skills');
+    return true;
+  };
+  S.selectRuleById = (id) => {
+    if (!S.availableRules.some((rule) => rule.id === id)) return false;
+    // A named slash command is an explicit, singular rule choice. This makes
+    // /rule-foo observable even though the safe default is to load all rules.
+    S.ruleSelectionExplicit = true;
+    S.selectedRuleIds.clear();
+    S.selectedRuleIds.add(id);
+    syncCapabilityChecks();
+    S.openZenoSection('rules');
+    return true;
+  };
   async function loadZenoView() {
     if (!zenoView) return;
     const [skillsRes, schedRes, connRes, mcpRes] = await Promise.all([
@@ -334,7 +370,28 @@ export function setupActivityBar(S) {
     ]);
     const nodes = [];
 
-    nodes.push(sectHead('RULES · loaded for this run'));
+    if (skillsRes.ok) {
+      const rules = Array.isArray(skillsRes.data.rules) ? skillsRes.data.rules : [];
+      const skills = Array.isArray(skillsRes.data.skills) ? skillsRes.data.skills : [];
+      S.availableRules = rules.map((rule) => ({ ...rule }));
+      S.availableSkills = skills.map((skill) => ({ ...skill }));
+      if (!S.capabilityCatalogLoaded) {
+        for (const rule of rules) S.selectedRuleIds.add(rule.id);
+        // Skills are optional task-specific instructions. Loading every clean
+        // skill by default made repositories with more than the server's
+        // bounded 16-skill limit unable to run at all. Start with none and let
+        // the owner opt in through this panel or a /skill-* command.
+        S.selectedSkillIds.clear();
+        S.capabilityCatalogLoaded = true;
+      } else {
+        const ruleIds = new Set(rules.map((rule) => rule.id));
+        const skillIds = new Set(skills.map((skill) => skill.id));
+        for (const id of [...S.selectedRuleIds]) if (!ruleIds.has(id)) S.selectedRuleIds.delete(id);
+        for (const id of [...S.selectedSkillIds]) if (!skillIds.has(id)) S.selectedSkillIds.delete(id);
+      }
+    }
+
+    nodes.push(sectHead('RULES · this run', 'rules'));
     if (!skillsRes.ok) {
       nodes.push(el('div', 'vsnote', `Rules could not be read: ${skillsRes.error}`));
     } else {
@@ -342,14 +399,27 @@ export function setupActivityBar(S) {
       if (!rules.length) nodes.push(el('div', 'vsnote', 'No AGENTS.md, CLAUDE.md, or .agents/.cursor/.claude rule files were found.'));
       for (const r of rules) {
         const [cls, txt] = fileMeta(r.path.split('/').pop());
-        const row = el('div', 'vsfile');
-        add(row, el('span', cls, txt), document.createTextNode(r.path), el('span', 'vsmod ok', bytesLabel(r.bytes)));
-        if (r.truncated) row.title = `${r.path} is truncated for this preview.`;
-        nodes.push(row);
+        const label = el('label', 'vsck');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.ruleId = r.id;
+        cb.checked = !S.ruleSelectionExplicit || S.selectedRuleIds.has(r.id);
+        cb.addEventListener('change', () => {
+          if (!S.ruleSelectionExplicit) {
+            S.ruleSelectionExplicit = true;
+            S.selectedRuleIds.clear();
+            for (const rule of S.availableRules) S.selectedRuleIds.add(rule.id);
+          }
+          if (cb.checked) S.selectedRuleIds.add(r.id); else S.selectedRuleIds.delete(r.id);
+          syncCapabilityChecks();
+        });
+        add(label, cb, el('span', cls, txt), document.createTextNode(` ${r.path} `), el('em', null, bytesLabel(r.bytes)));
+        if (r.truncated) label.title = `${r.path} is truncated for this preview.`;
+        nodes.push(label);
       }
     }
 
-    nodes.push(sectHead('SKILLS · this run'));
+    nodes.push(sectHead('SKILLS · this run', 'skills'));
     if (!skillsRes.ok) {
       nodes.push(el('div', 'vsnote', `Skills could not be read: ${skillsRes.error}`));
     } else {
@@ -359,12 +429,16 @@ export function setupActivityBar(S) {
         const label = el('label', 'vsck');
         const cb = document.createElement('input');
         cb.type = 'checkbox';
+        cb.dataset.skillId = s.id;
         const suspicious = s.verdict === 'suspicious';
-        cb.checked = !suspicious; // clean skills load by default; a flagged one waits for an explicit tick
-        if (cb.checked) S.selectedSkillIds.add(s.id);
+        cb.checked = S.selectedSkillIds.has(s.id);
         cb.addEventListener('change', () => {
-          if (cb.checked) S.selectedSkillIds.add(s.id); else S.selectedSkillIds.delete(s.id);
-          renderSkillsPill();
+          if (cb.checked && S.selectedSkillIds.size >= MAX_SELECTED_SKILLS) {
+            cb.checked = false;
+            cb.title = `Choose at most ${MAX_SELECTED_SKILLS} skills for one run.`;
+          } else if (cb.checked) S.selectedSkillIds.add(s.id);
+          else S.selectedSkillIds.delete(s.id);
+          syncCapabilityChecks();
         });
         const trust = el('span', 'trust', suspicious ? 'flagged · review' : 'screened');
         const whys = Array.isArray(s.findings) ? s.findings.map((f) => f.why).filter(Boolean) : [];

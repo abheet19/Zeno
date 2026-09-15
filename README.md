@@ -37,18 +37,26 @@ between what it **proposes** and what actually **happens**.
 > the precise, unglamorous truth.
 
 > [!NOTE]
-> **Recent (2026-09-15): the Forge and Command verification pass.** Fixed the desktop window occasionally opening
+> **Current working-tree verification (2026-09-15).** Fixed the desktop window occasionally opening
 > without its owner token (the cause of an apparently-dead UI); Forge now opens to **Agent** view by
 > default and shows an **"Open a project"** prompt instead of silently landing in a scratch repo; the
 > "paired phone" editor lock was a CSS width breakpoint misfiring on a same-machine browser, not a real
 > capability gate, and is fixed; Command uses the selected local model for ordinary conversation;
-> stale persisted approvals are revalidated and removed instead of blocking project selection; Compare
+> stale persisted approvals are revalidated and automatically cleaned up instead of blocking project selection; Compare
 > reads and runs installed models; the composer stays on-screen at narrow widths; and the orb renderer
-> no longer duplicates its animation loop. The current gates pass **198/198 daemon** and **107/107
-> desktop** checks. A 25-flow headless run first reported 18 passes, two failures and five hardware or
-> environment blocks; focused reruns now pass both failures. The complete 25-flow suite has not been
-> rerun at this exact commit, and native Electron motion, microphone capture and a second-device path
-> still require hands-on verification.
+> no longer duplicates its animation loop. Forge now previews the exact plan and bounded context that
+> a run will use, and Lens exposes the selected repository rules, skills, citations, prompt hash, and
+> retry state. Skills load for deliberate per-run opt-in instead of being silently selected; this
+> removes a real `skill-selection-too-large` blocker in repositories with large skill libraries.
+> Answer-only Forge runs now show their actual answer in Session instead of “No files were changed”,
+> and the one-click local fallback prefers the faster installed 8B model. The latest daemon package run is **200/200**. The complete 26-flow renderer suite is
+> **23 passed, 0 failed, 3 blocked**: Counsel audio and Voice require a physical microphone, while
+> Work/Devices pairing requires a second Zeno client. An actual Electron profile also verified a
+> normal `qwen3:14b` Command answer, zero pending approvals, live orb rotation, Forge folder/Agent/Editor/terminal
+> paths, and no console errors. A second live interaction sweep redirected a hosted route to local
+> `qwen3:8b`, which read this repository's `package.json` and answered `@abheet19/zeno-workspace`.
+> These results describe the tested working tree based on `c79f5f2`;
+> they are not a signed packaged-release claim or formal WCAG certification.
 
 <div align="center">
 

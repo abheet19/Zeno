@@ -393,6 +393,10 @@ export function setupModelPicker(S) {
     q.addEventListener('input', renderMpList);
   }
   modelPillEls.forEach((p) => p.addEventListener('click', (e) => { e.stopPropagation(); openMp(p); }));
+  window.addEventListener('zeno:open-model-manager', () => {
+    const anchor = modelPillEls.find((pill) => pill.offsetParent !== null) || modelPillEls[0];
+    if (anchor) openMp(anchor);
+  });
 
   return { loadAgents };
 }

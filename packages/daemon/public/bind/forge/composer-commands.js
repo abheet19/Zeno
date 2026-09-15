@@ -36,6 +36,15 @@ function gotoCommandScreen(name) {
   if (b) b.click();
 }
 
+function commandSlug(prefix, value) {
+  const slug = String(value || '')
+    .split(/[\\/]/).pop()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${prefix}-${slug || 'unnamed'}`;
+}
+
 function forgeCommands(S, startNewSession, modelSel, planSel) {
   const out = [
     { id: 'new', hint: 'Start a new session', run: () => startNewSession() },
@@ -64,6 +73,29 @@ function forgeCommands(S, startNewSession, modelSel, planSel) {
   // path and proposes it) — only listed when that handler is actually present.
   if (typeof S.askNewFile === 'function') {
     out.splice(6, 0, { id: 'file', hint: 'Propose a new file', run: () => S.askNewFile() });
+  }
+  const used = new Set(out.map((command) => command.id));
+  for (const skill of S.availableSkills || []) {
+    let id = commandSlug('skill', skill.id || skill.name);
+    let n = 2;
+    while (used.has(id)) id = `${commandSlug('skill', skill.id || skill.name)}-${n++}`;
+    used.add(id);
+    out.push({
+      id,
+      hint: `Select skill: ${skill.name || skill.id}${skill.verdict === 'suspicious' ? ' (flagged — review before running)' : ''}`,
+      run: () => { if (S.selectSkillById) S.selectSkillById(skill.id); },
+    });
+  }
+  for (const rule of S.availableRules || []) {
+    let id = commandSlug('rule', rule.path || rule.name || rule.id);
+    let n = 2;
+    while (used.has(id)) id = `${commandSlug('rule', rule.path || rule.name || rule.id)}-${n++}`;
+    used.add(id);
+    out.push({
+      id,
+      hint: `Use only rule: ${rule.path || rule.name || rule.id}`,
+      run: () => { if (S.selectRuleById) S.selectRuleById(rule.id); },
+    });
   }
   return out;
 }

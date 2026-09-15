@@ -194,8 +194,8 @@ async function delegateTask(intent) {
   if (proposed > 0) {
     const many = proposed === 1 ? '' : 's';
     reply(done.ok === false
-      ? `The run did not finish, but it already wrote ${proposed} file${many} — they are waiting for your approval rather than thrown away.`
-      : `${proposed} change${many} proposed. None applied — each is waiting for your approval in Command.`);
+      ? `The run did not finish after producing ${proposed} file proposal${many}. Open Command to review what was held and what policy already recorded.`
+      : `${proposed} change${many} produced. Routine low-risk edits may already be recorded; anything risky or sensitive is waiting in Command.`);
   } else {
     reply(`No changes were proposed. ${done.note ? String(done.note) : 'The agent finished without changing any file.'}`);
   }
