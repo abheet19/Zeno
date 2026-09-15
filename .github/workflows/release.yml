@@ -48,7 +48,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npx --yes electron-builder --win --config electron-builder.json --publish never
+        run: npm run package:app -- --publish never
 
       - name: Publish GitHub Release
         shell: pwsh

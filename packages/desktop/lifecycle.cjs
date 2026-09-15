@@ -119,6 +119,12 @@ function createDaemonEnvironment(baseEnvironment, options) {
   if (options.isPackaged && !nonEmptyPath(env.ZENO_DIR)) {
     env.ZENO_DIR = options.workspacePath;
   }
+  if (options.isPackaged && options.buildIdentity) {
+    // Never trust ambient variables for an installed app. The package stamp is
+    // generated from the exact checkout before electron-builder runs.
+    env.ZENO_BUILD_SHA = options.buildIdentity.sha;
+    env.ZENO_VERSION = options.buildIdentity.version;
+  }
   const project = nonEmptyPath(options.project);
   if (project) env.ZENO_PROJECT_DIR = project;
   else delete env.ZENO_PROJECT_DIR;

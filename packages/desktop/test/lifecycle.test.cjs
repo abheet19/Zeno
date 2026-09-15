@@ -254,6 +254,8 @@ test('the packaged app includes every local module required by the desktop entry
       requiredFile + ' is required by main.cjs and must be present in portable and NSIS builds',
     );
   }
+  assert.equal(packagedFiles.has('packages/desktop/build-info.generated.cjs'), true,
+    'the package must carry the exact identity generated immediately before electron-builder runs');
 });
 
 test('the packaged daemon closes over every runtime workspace dependency', () => {

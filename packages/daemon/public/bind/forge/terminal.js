@@ -2,10 +2,10 @@
  * bind/forge/terminal.js — the bottom panel: the real terminal, the ports
  * tab and the output tab.
  *
- * Every command the box sends goes to POST /forge/terminal and runs exactly
- * as typed — there is no server-side or client-side gate that holds a
- * write/push/rm/curl/deploy command for approval before it runs (only file
- * writes from an agent run go through the approval gate). Registers
+ * Every command the owner types goes to POST /forge/terminal and runs exactly
+ * as typed. It is an explicit owner action, not an agent proposal, so it is
+ * not held for approval. File writes proposed by agents still go through the
+ * approval gate. Registers
  * `S.showPanel`, `S.runTerminalCommand`, `S.focusTerminal` and
  * `S.clearTerminal` so the menu bar and the composer "+" menu can drive the
  * same terminal.

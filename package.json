@@ -18,7 +18,9 @@
     "propose": "npm run build --silent && node packages/cli/dist/src/main.js propose",
     "backlog": "npm run build --silent && node packages/cli/dist/src/main.js backlog",
     "app": "npm run build && electron packages/desktop",
-    "build:app": "npm run build && electron-builder --win --config electron-builder.json"
+    "stamp:app": "node tools/stamp-build-identity.cjs",
+    "package:app": "npm run stamp:app && electron-builder --win --config electron-builder.json",
+    "build:app": "npm run build && npm run package:app"
   },
   "engines": {
     "node": ">=22"

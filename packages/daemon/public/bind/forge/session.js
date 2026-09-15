@@ -26,6 +26,11 @@ import { setupComposerCommands } from './composer-commands.js';
 import { withContextSelection } from './state.js';
 
 export function setupSession(S) {
+  S.forgeMode = document.body.dataset.zenoForgeMode || 'code';
+  window.addEventListener('zeno:forge-mode', (event) => {
+    const mode = event && event.detail && event.detail.mode;
+    if (mode === 'code' || mode === 'ask' || mode === 'plan') S.forgeMode = mode;
+  });
   const ide = S.ide;
   let sessionSeq = 0;
   // The secondary tabs and the plan-first intake card live in their own
@@ -356,8 +361,18 @@ export function setupSession(S) {
     renderChat(session);
     renderHistoryIfOpen();
 
+    const mode = S.forgeMode || 'code';
     let route;
-    if (session.autoRoute) {
+    if (mode === 'ask') {
+      const model = localModelChoice();
+      if (!model) {
+        session.running = false;
+        session.chat.push({ who: 'system', text: 'Ask mode needs a local model so its read-only boundary can be enforced. Install an Ollama model, then reload Forge.' });
+        renderSessionHeader(session); renderChat(session);
+        return;
+      }
+      route = { agentId: 'local', model, effort: session.effort, rationale: 'Ask mode is read-only and runs on the local model.' };
+    } else if (session.autoRoute) {
       const r = await postJSON('/forge/route', { task });
       if (!r.ok || !r.data || !r.data.route) {
         session.running = false;
@@ -380,29 +395,29 @@ export function setupSession(S) {
        read-only plan pass comes back as a card, and the ONLY way from there to
        a run is its Approve button, which calls proceedWithRoute() below —
        exactly what this line would have done with the toggle off. */
-    if (S.planFirstEnabled()) {
+    if (mode === 'plan' || S.planFirstEnabled()) {
       session.running = false;
-      await S.requestPlan(session, task, route);
+      await S.requestPlan(session, task, route, mode);
       return;
     }
-    await proceedWithRoute(session, task, route, null);
+    await proceedWithRoute(session, task, route, null, mode);
   }
   S.sendTask = sendTask;
 
   /** Start (or, for a hosted route, ask to confirm) a routed task. `plan` is
    *  the owner-approved plan card, or null for a straight run. A hosted route
    *  still stops here for its own confirmation — planning never skips it. */
-  async function proceedWithRoute(session, task, route, plan) {
+  async function proceedWithRoute(session, task, route, plan, mode = S.forgeMode || 'code') {
     if (route.agentId !== 'local') {
       session.running = false;
-      session.pendingHosted = { task, route, plan };
+      session.pendingHosted = { task, route, plan, mode };
       session.chat.push({ who: 'system', text: `This sends your task to ${route.agentId === 'codex' ? 'OpenAI (Codex)' : 'Anthropic (Claude Code)'} — nothing runs until you confirm.`, confirm: true });
       renderSessionHeader(session); renderChat(session); renderHistoryIfOpen();
       return;
     }
     session.running = true;
     renderSessionHeader(session);
-    await runResolved(session, task, route, false, plan);
+    await runResolved(session, task, route, false, plan, mode);
   }
   S.proceedWithRoute = proceedWithRoute;
 
@@ -412,7 +427,7 @@ export function setupSession(S) {
     session.pendingHosted = null;
     session.running = true;
     renderSessionHeader(session);
-    await runResolved(session, pending.task, pending.route, true, pending.plan || null);
+    await runResolved(session, pending.task, pending.route, true, pending.plan || null, pending.mode || 'code');
   }
 
   /** The local model the "Run locally instead" button would use, or '' if none. */
@@ -437,10 +452,10 @@ export function setupSession(S) {
     session.running = true;
     session.chat.push({ who: 'system', text: `Running on ${model} on this machine instead — nothing leaves your computer.` });
     renderSessionHeader(session); renderChat(session);
-    await runResolved(session, pending.task, { agentId: 'local', model, effort: pending.route.effort, rationale: 'You chose to run this on-device.' }, false, pending.plan || null);
+    await runResolved(session, pending.task, { agentId: 'local', model, effort: pending.route.effort, rationale: 'You chose to run this on-device.' }, false, pending.plan || null, pending.mode || 'code');
   }
 
-  async function runResolved(session, task, route, hostedConfirmed, plan = null) {
+  async function runResolved(session, task, route, hostedConfirmed, plan = null, mode = 'code') {
     const runId = `ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     // Recorded BEFORE the run even starts, so a run-progress event that lands
     // while the fetch below is still in flight can already be traced back to
@@ -450,6 +465,7 @@ export function setupSession(S) {
     const body = withContextSelection(S, { task, memoryEnabled: session.memoryEnabled !== false, agentId: route.agentId, runId });
     if (route.model) body.model = route.model;
     if (route.effort) body.effort = route.effort;
+    if (mode === 'ask') body.mode = 'ask';
     if (hostedConfirmed) body.hostedConfirmed = true;
     // The approved plan (as the owner left it, edits included) rides along;
     // the daemon appends it UNDER the task as owner-approved context.
@@ -459,7 +475,7 @@ export function setupSession(S) {
     session.updatedAt = Date.now();
     if (!r.ok) {
       if (r.status === 428 && r.data && r.data.confirmation) {
-        session.pendingHosted = { task, route, plan };
+        session.pendingHosted = { task, route, plan, mode };
         session.chat.push({ who: 'system', text: (r.data.error && r.data.error.message) || 'Confirm this run before it starts.', confirm: true });
       } else {
         session.chat.push({ who: 'system', text: `The run did not start: ${r.error || (r.data && r.data.error && r.data.error.message) || 'unknown error'}` });

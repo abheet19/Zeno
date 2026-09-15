@@ -55,11 +55,12 @@ export async function runLocalModel(
   effort: 'low' | 'medium' | 'high' | undefined,
   signal?: AbortSignal,
   ownerTask = task,
+  forceAnswerOnly = false,
 ): Promise<{ ok: boolean; agentId: 'local'; model: string | null; effort: typeof effort | null; log: string; note?: string; cancelled?: boolean; tokensIn?: number | null; tokensOut?: number | null }> {
   const chosen = model && model.trim() ? model.trim() : 'qwen3:8b';
   const effectiveEffort = effort ?? 'medium';
   const base = { agentId: 'local' as const, model: chosen, effort: effectiveEffort };
-  const answerOnly = localTaskAllowsPlainAnswer(ownerTask);
+  const answerOnly = forceAnswerOnly || localTaskAllowsPlainAnswer(ownerTask);
   const standaloneAnswer = answerOnly && !localTaskNeedsRepositoryContext(ownerTask);
   const ownerCancelled = (): boolean => signal?.aborted === true;
   if (ownerCancelled()) {
@@ -303,6 +304,13 @@ export async function runLocalModel(
     !/^===(?:ANSWER|FILE:|END===)/m.test(text)
   ) {
     return { ...base, ...metrics, ok: true, log: text };
+  }
+
+  // Ask mode is a hard read-only boundary. The local model has no filesystem
+  // tools; this guard also prevents a FILE envelope from reaching the parser
+  // below, even if the model ignores the requested ANSWER envelope.
+  if (forceAnswerOnly) {
+    return { ...base, ...metrics, ok: false, log: '', note: 'Ask mode did not return one valid answer. Nothing was written.' };
   }
 
   // Parse the ===FILE:...=== / ===END=== envelopes and write each, JAILED to

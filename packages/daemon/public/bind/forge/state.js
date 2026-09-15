@@ -60,6 +60,7 @@ export function createForgeState() {
     sessions: [],
     activeIdx: -1,
     draftSession: null,
+    forgeMode: 'code',
 
     // ---- owned by activitybar.js's Zeno view; read by session/plan/Lens ----
     selectedSkillIds: new Set(),

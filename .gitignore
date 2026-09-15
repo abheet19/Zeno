@@ -54,6 +54,10 @@ dist-exe/
 dist-exe/
 dist-app/
 
+# Exact installer identity, generated immediately before electron-builder runs.
+# Development ignores it so a previous package cannot masquerade as current source.
+packages/desktop/build-info.generated.cjs
+
 # ---- installed third-party skills -------------------------------------------
 # `npx skills add` fetches these; skills-lock.json records exactly which, so the
 # tree is reproducible without committing 800+ files of someone else's prose.

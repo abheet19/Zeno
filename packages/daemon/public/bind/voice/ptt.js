@@ -8,7 +8,7 @@
  * abortPttNow), so the reverse import would be a cycle. See voice/state.js.
  */
 import { SpeechRecognition, localSpeech, waitForSpeechIdle } from '../../whisper.js';
-import { interpret } from '../../session.js';
+import { interpretCommand } from '../../session.js';
 import { captureOwnerLabel } from '../../ask-voice-model.js';
 import { vstate } from './state.js';
 import { setState, reply, stopSpeaking, settleAfter, engineUnavailableReason } from './pill.js';
@@ -105,8 +105,12 @@ function ensurePttRecognition() {
 
 async function dispatchTranscript(text) {
   setState('thinking');
-  // The SAME pure pipeline the package's own tests run against.
-  await vstate.runOutcome(interpret(text));
+  // Holding the microphone is itself an explicit address to Zeno. Requiring
+  // the wake phrase again made push-to-talk reject correctly captured speech
+  // whenever Whisper omitted or softened the leading name. Ambient listening
+  // still uses interpret() in wake.js and therefore keeps its wake gate.
+  const command = text.replace(/^\s*zeno[\s,.:;!?-]*/i, '');
+  await vstate.runOutcome(interpretCommand(command));
 }
 
 export function startPtt(source) {

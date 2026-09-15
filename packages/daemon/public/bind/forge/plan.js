@@ -93,7 +93,7 @@ export function setupPlanFirst(S) {
   };
 
   /** Ask the daemon for a plan; the turn is pushed first so the owner sees "Planning…" at once. */
-  async function requestPlan(session, task, route) {
+  async function requestPlan(session, task, route, mode = 'code') {
     const reply = conversationalReply(task);
     if (reply !== null) {
       // Not a coding task — answer right here in the transcript instead of
@@ -103,7 +103,7 @@ export function setupPlanFirst(S) {
       S.renderSessionHeader(session); S.renderChat(session); S.sessionsChanged(session);
       return;
     }
-    const turn = { who: 'plan', state: 'planning', task, route, plan: null, planId: null, model: null, note: '', error: null };
+    const turn = { who: 'plan', state: 'planning', task, route, mode, plan: null, planId: null, model: null, note: '', error: null };
     session.chat.push(turn);
     session.planning = true;
     S.renderSessionHeader(session); S.renderChat(session);
@@ -176,10 +176,10 @@ export function setupPlanFirst(S) {
       const skip = el('button', 'btn p sm', 'Run without a plan');
       skip.type = 'button';
       skip.dataset.planAct = 'skip';
-      skip.addEventListener('click', () => { settle(t, session, 'skipped'); void S.proceedWithRoute(session, t.task, t.route, null); });
+      skip.addEventListener('click', () => { settle(t, session, 'skipped'); void S.proceedWithRoute(session, t.task, t.route, null, t.mode || 'code'); });
       const again = el('button', 'btn g sm', 'Try planning again');
       again.type = 'button';
-      again.addEventListener('click', () => { session.chat.splice(session.chat.indexOf(t), 1); void requestPlan(session, t.task, t.route); });
+      again.addEventListener('click', () => { session.chat.splice(session.chat.indexOf(t), 1); void requestPlan(session, t.task, t.route, t.mode || 'code'); });
       const drop = el('button', 'btn g sm', 'Discard');
       drop.type = 'button';
       drop.dataset.planAct = 'discard';
@@ -228,7 +228,7 @@ export function setupPlanFirst(S) {
         if (!chosen.length) { go.textContent = 'A plan needs at least one step'; return; }
         t.plan = { ...t.plan, steps: chosen };
         settle(t, session, 'approved');
-        void S.proceedWithRoute(session, t.task, t.route, { planId: t.planId, plan: t.plan });
+        void S.proceedWithRoute(session, t.task, t.route, { planId: t.planId, plan: t.plan }, t.mode || 'code');
       });
       const edit = el('button', 'btn g sm', editing ? 'Done editing' : 'Edit plan');
       edit.type = 'button';

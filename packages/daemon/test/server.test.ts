@@ -1736,11 +1736,11 @@ test('Forge — a local model can answer without inventing a file, while edits a
     return realFetch(input, init);
   }) as typeof fetch;
 
-  const run = async (runId: string, task: string, effort?: 'low' | 'medium' | 'high') => {
+  const run = async (runId: string, task: string, effort?: 'low' | 'medium' | 'high', mode?: 'code' | 'ask') => {
     const response = await realFetch(base + '/forge/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
-      body: JSON.stringify({ task, agentId: 'local', model: 'qwen3:14b', runId, effort }),
+      body: JSON.stringify({ task, agentId: 'local', model: 'qwen3:14b', runId, effort, mode }),
     });
     assert.equal(response.status, 200);
     return await response.json() as {
@@ -1883,6 +1883,22 @@ test('Forge — a local model can answer without inventing a file, while edits a
     }
     assert.equal(existsSync(join(dir, 'outside.ts')), false, 'a traversal target is never created beside the worktree');
     assert.equal(outputs.length, 0);
+
+    outputs.push('===FILE: forbidden.ts===\nexport const shouldNeverLand = true;\n===END===');
+    const askRefusedWrite = await run('local-ask-refuses-file', 'Create forbidden.ts', undefined, 'ask');
+    assert.equal(askRefusedWrite.run.ok, false, 'Ask mode rejects a model reply that tries to write a file');
+    assert.deepEqual(askRefusedWrite.changed, []);
+    assert.deepEqual(askRefusedWrite.proposed, []);
+    assert.equal(existsSync(join(sandbox, 'forbidden.ts')), false);
+    assert.match(askRefusedWrite.run.note ?? '', /Ask mode.*Nothing was written/i);
+
+    const hostedAsk = await realFetch(base + '/forge/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ task: 'Explain package.json', agentId: 'codex', hostedConfirmed: true, mode: 'ask' }),
+    });
+    assert.equal(hostedAsk.status, 409, 'Ask mode refuses a hosted agent whose tool boundary is not read-only');
+    assert.equal((await hostedAsk.json() as { error: { code: string } }).error.code, 'ask-local-only');
   } finally {
     globalThis.fetch = realFetch;
     await new Promise<void>((resolve) => server.close(() => resolve()));

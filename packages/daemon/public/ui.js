@@ -153,7 +153,7 @@
     {id:'ask', label:'Ask', glyph:'◇', desc:'Reads but won’t edit', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/></svg>'},
     {id:'plan', label:'Plan', glyph:'▤', desc:'Plan changes before implementing', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13H6z"/><path d="M9 12h7M9 16h5M14 3v6h6"/></svg>'} ];
   let FMODE='code', fmodeEl=null;
-  function applyFmode(id){ const m=FMODES.find(x=>x.id===id)||FMODES[0]; FMODE=m.id; const k=$('#s-kind'); if(k) k.textContent=m.glyph+' '+m.label+' ▾'; }
+  function applyFmode(id){ const m=FMODES.find(x=>x.id===id)||FMODES[0]; FMODE=m.id; document.body.dataset.zenoForgeMode=m.id; window.dispatchEvent(new CustomEvent('zeno:forge-mode',{detail:{mode:m.id}})); const k=$('#s-kind'); if(k){ k.textContent=m.glyph+' '+m.label+' ▾'; k.setAttribute('aria-label','Forge mode: '+m.label); } }
   function closeFmode(){ if(fmodeEl){ fmodeEl.remove(); fmodeEl=null; } }
   function openFmode(anchor){ if(fmodeEl){ closeFmode(); return; } fmodeEl=document.createElement('div'); fmodeEl.className='fmode-menu'; fmodeEl.setAttribute('role','menu');
     fmodeEl.innerHTML=FMODES.map(m=>'<button class="fmode-opt" role="menuitemradio" data-fmode="'+m.id+'" aria-checked="'+(FMODE===m.id)+'"><span class="mi">'+m.icon+'</span><span class="t"><b>'+m.label+'</b><span>'+esc(m.desc)+'</span></span><span class="ck">'+(FMODE===m.id?'✓':'')+'</span></button>').join('')+'<div class="fmode-foot">Use <kbd>Ctrl .</kbd> to switch modes</div>';
@@ -432,7 +432,8 @@
   function cnGo(v){ $$('.cnview').forEach(x=> x.classList.toggle('on', x.dataset.cnview===v)); $('.cnmain').scrollTop=0; }
   document.addEventListener('click', e=>{ const g=e.target.closest('[data-cngo]'); if(g) cnGo(g.dataset.cngo); });
   $$('[data-cntab]').forEach(b=> b.addEventListener('click', ()=>{ $$('.cntabs button').forEach(x=> x.setAttribute('aria-selected', x.dataset.cntab===b.dataset.cntab?'true':'false')); $$('.cnp').forEach(p=> p.classList.toggle('on', p.dataset.cntab===b.dataset.cntab)); }));
-  $('#cn-send').addEventListener('click', e=>{ const st=$('#cn-mailstate'); st.className='pill am'; st.innerHTML='<span class="d"></span>not configured — add a mail provider in Settings; nothing left this machine'; e.target.disabled=true; });
+  const staticCounselSend=$('#cn-send');
+  if(staticCounselSend) staticCounselSend.addEventListener('click', e=>{ const st=$('#cn-mailstate'); if(st){ st.className='pill am'; st.innerHTML='<span class="d"></span>not configured — add a mail provider in Settings; nothing left this machine'; } e.target.disabled=true; });
 
   // ================= Standing Field — Gate-2 renderer =================
   const cvs=$('#orb'), ctx=cvs.getContext('2d');

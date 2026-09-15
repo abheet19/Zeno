@@ -103,6 +103,20 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   });
   ok('the composer carries a Plan first toggle, on by default', toggle?.text === 'Plan first: on' && toggle.pressed === 'true', JSON.stringify(toggle));
 
+  // The Code/Ask/Plan selector used to be decorative. Turn the independent
+  // Plan-first preference OFF, then select Plan mode: the mode itself must be
+  // sufficient to force the read-only planning route.
+  await page.click('#s-planfirst');
+  await page.click('#s-kind');
+  await page.click('.fmode-menu [data-fmode="plan"]');
+  const selectedMode = await page.evaluate(() => ({
+    mode: document.body.dataset.zenoForgeMode,
+    label: document.querySelector('#s-kind')?.textContent || '',
+    planFirst: document.querySelector('#s-planfirst')?.getAttribute('aria-pressed'),
+  }));
+  ok('Plan mode is selected while the separate Plan-first preference is off',
+    selectedMode.mode === 'plan' && /Plan/.test(selectedMode.label) && selectedMode.planFirst === 'false', JSON.stringify(selectedMode));
+
   await page.fill('#s-ta', TASK);
   await page.click('#s-send');
   const planning = await page.waitForFunction(
@@ -245,13 +259,14 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   /* ---------------------------------------------------------------- *
    * 4 · toggle OFF: a task goes straight to a run, as before          *
    * ---------------------------------------------------------------- */
-  await page.click('#s-planfirst');
+  await page.click('#s-kind');
+  await page.click('.fmode-menu [data-fmode="code"]');
   const off = await page.evaluate(() => {
     let stored = null;
     try { stored = localStorage.getItem('zeno-plan-first'); } catch { /* unavailable */ }
-    return { text: document.querySelector('#s-planfirst')?.textContent.trim(), hero: document.querySelector('#ag-planfirst')?.textContent.trim(), stored };
+    return { text: document.querySelector('#s-planfirst')?.textContent.trim(), hero: document.querySelector('#ag-planfirst')?.textContent.trim(), stored, mode: document.body.dataset.zenoForgeMode };
   });
-  ok('the toggle turns off and is remembered', off.text === 'Plan first: off' && off.hero === 'Plan first: off' && off.stored === 'off', JSON.stringify(off));
+  ok('Code mode restores direct execution while the Plan-first preference remains off', off.text === 'Plan first: off' && off.hero === 'Plan first: off' && off.stored === 'off' && off.mode === 'code', JSON.stringify(off));
 
   await page.click('#s-new');
   await page.waitForTimeout(300);

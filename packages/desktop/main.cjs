@@ -39,6 +39,7 @@ const { join, dirname } = require('node:path');
 const { existsSync } = require('node:fs');
 const { installWorkbenchZoom } = require('./zoom.cjs');
 const { createMeetingPresenceHandler } = require('./meeting-presence.cjs');
+const { loadEmbeddedBuildIdentity } = require('./build-identity.cjs');
 
 // A packaged GUI can outlive the terminal or automation pipe that launched it.
 // Logging is diagnostic only, so a closed parent pipe must never crash the app
@@ -52,6 +53,7 @@ protectDiagnosticStream(process.stderr);
 // once, before anything asks for a path, and it becomes AppData\Roaming\Zeno.
 app.setName('Zeno');
 app.setAppUserModelId('dev.abheet.zeno');
+const embeddedBuildIdentity = loadEmbeddedBuildIdentity({ isPackaged: app.isPackaged });
 
 // A second launcher should focus the Zeno the owner already has instead of
 // spawning another daemon, losing the workspace lock, and showing a technical
@@ -127,6 +129,7 @@ function startDaemon() {
       isPackaged: app.isPackaged,
       workspacePath: join(userDataPath, 'workspace'),
       project: process.env.ZENO_PROJECT_DIR,
+      buildIdentity: embeddedBuildIdentity,
     });
 
     const child = spawn(process.execPath, [entry], {

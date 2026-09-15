@@ -35,6 +35,10 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
   const body = await readJson(req);
   const task = str(body, 'task');
   const agentId = str(body, 'agentId') ?? 'claude-code';
+  const mode = str(body, 'mode') ?? 'code';
+  if (mode !== 'code' && mode !== 'ask') {
+    return json(res, 400, { error: { code: 'bad-mode', message: `Unknown Forge mode "${mode}".`, resolve: 'Choose code or ask.' } });
+  }
   const agent = AGENTS.find((candidate) => candidate.id === agentId);
   if (agent === undefined) {
     return json(res, 400, {
@@ -44,6 +48,9 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
         resolve: `Choose one of: ${AGENTS.map((candidate) => candidate.id).join(', ')}.`,
       },
     });
+  }
+  if (mode === 'ask' && agent.id !== 'local') {
+    return json(res, 409, { error: { code: 'ask-local-only', message: 'Ask mode is read-only and only runs on the local model in this build.', resolve: 'Choose an installed Ollama model, or switch to Code mode for a hosted agent.' } });
   }
   if (task === null || task.trim() === '') {
     return json(res, 400, { error: { code: 'bad-request', message: 'A run needs a task.', resolve: 'POST {"task":"...","agentId":"claude-code"}.' } });
@@ -171,7 +178,7 @@ export async function postForgeRun(ctx: ServerCtx, req: IncomingMessage, res: Se
     }
     progress.providerReady(model);
     const effort = requestedEffort as 'low' | 'medium' | 'high' | undefined;
-    const outcome = await performRun(ctx, boundedTask.prompt, agentId, model, effort, progress, runId, controller.signal, task);
+    const outcome = await performRun(ctx, boundedTask.prompt, agentId, model, effort, progress, runId, controller.signal, task, mode === 'ask');
     json(res, 200, {
       ...outcome,
       context: prepared.view,

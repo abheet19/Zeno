@@ -96,6 +96,7 @@ export async function performRun(
   requestedRunId?: string,
   signal?: AbortSignal,
   ownerTask = task,
+  forceAnswerOnly = false,
 ): Promise<RunOutcome> {
   const runId = requestedRunId ?? `run-${ctx.opts.kernel.receipts().length}-${Date.now().toString(36)}-${randomUUID()}`;
   let tree;
@@ -163,7 +164,7 @@ export async function performRun(
   progress.providerRunning();
   try {
     const result = agentId === 'local'
-      ? await runLocalModel(ctx, tree.path, task, model, effort, signal, ownerTask)
+      ? await runLocalModel(ctx, tree.path, task, model, effort, signal, ownerTask, forceAnswerOnly)
       : await runAgent(
           {
             agentId,
@@ -327,4 +328,3 @@ export function pickLocalModel(installed: readonly string[]): string | null {
     ?? installed.find((m) => m.startsWith('qwen3:'));
   return preferred ?? installed[0] ?? null;
 }
-

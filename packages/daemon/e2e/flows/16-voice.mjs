@@ -545,6 +545,25 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     ok.eq('wake mode starts off', idle.checked, 'false');
     ok.eq('and nothing is listening', idle.log.join(','), '');
 
+    // Holding the button already addresses Zeno. Whisper can omit the leading
+    // name even when it was spoken, so push-to-talk must accept the command
+    // itself while ambient wake mode below continues to require "Zeno".
+    await wake.page.evaluate(() => {
+      const b = document.querySelector('#home-mic');
+      b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 41 }));
+    });
+    await wake.page.waitForTimeout(80);
+    await wake.page.evaluate(() => window.__voice.say('open Forge'));
+    await wake.page.evaluate(() => {
+      const b = document.querySelector('#home-mic');
+      b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 41 }));
+    });
+    await wake.page.waitForTimeout(700);
+    const pttProduct = await wake.page.evaluate(() => document.querySelector('.product.on')?.dataset.product || '');
+    ok.eq('push-to-talk treats the held button as the address and accepts a command without a second wake word', pttProduct, 'forge');
+    await wake.page.click('[data-product="command"]');
+    await wake.page.evaluate(() => { window.__voice.log.length = 0; });
+
     // --- (a) DECLINE the disclosure: nothing may change, at all.
     await wake.page.evaluate(`{ window.__voice.answer = false; const t = ${TOGGLE_EXPR}; t.click(); }`);
     await wake.page.waitForTimeout(500);
