@@ -38,19 +38,17 @@ between what it **proposes** and what actually **happens**.
 > for the exact boundary. The daemon itself exposes no non-loopback listening surface.
 
 > [!NOTE]
-> **Current source and installed-app verification (2026-09-15, `dcadca8`).** The full workspace gate
-> is green: daemon **201**, desktop **107**, Forge **140**, and Glass **4** tests. The unchanged
-> 26-flow renderer suite remains **23 passed, 0 failed, 3 blocked**; its blocks require physical Voice
-> audio, physical Counsel audio, or a second Zeno client. Separate installed-app sweeps passed Command
-> **12/12**, Forge **14/14**, Forge controls **8/8**, and Counsel **19/19**. They covered the 4B/8B/14B
-> Command model picker, prompt-injection refusal and navigation, the moving orb with reduced motion off,
-> Forge project grounding, terminal `git status`, Agent/Editor and all five Session tabs, Counsel's
-> consent-to-archive lifecycle, memory persistence across restart and recall inside Forge, the exact
-> approval hold/apply/receipt path, stale-approval auto-pruning, wake/settings state, and push-to-talk
-> state transitions. Synthetic acoustic wake remains **BLOCKED**. A prior hosted Codex run passed;
-> the JSONL cleanup now has unit coverage, but a fresh hosted rerun on `dcadca8` was blocked by approval
-> review. These are bounded checks, not acceptance of all 196 formal criteria, a signed release, a
-> clean-account/provider matrix, physical-device coverage, load/SLO proof, or WCAG certification.
+> **Current verification (2026-09-16, `7c3c685`).** The full workspace gate is green; the
+> daemon gate alone passed **202/202** tests, and the desktop gate passed **107/107**. The complete
+> 26-flow renderer suite ran again on this exact commit: **23 passed, 0 failed, 3 blocked**. Its
+> browser-verifiable coverage includes real local-model Command answers, the animated first-run orb
+> and persisted Reduce motion setting, neutral first paint with no sample approval/run/count flash,
+> Forge planning with compact local-model recovery, run progress, editor, terminal, project explorer,
+> capability selection, all routed CTAs, approval/apply/receipt handling, Vault memory, settings,
+> stress checks, and orchestrator boundaries. The three blocks are explicit: physical Voice audio,
+> physical Counsel audio through the desktop Whisper bridge, and pairing completion with a second
+> Zeno client. These are bounded checks, not acceptance of all 196 formal criteria, a signed release,
+> provider/account matrix coverage, physical-device coverage, load/SLO proof, or WCAG certification.
 
 <div align="center">
 
