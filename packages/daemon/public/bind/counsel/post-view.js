@@ -171,13 +171,46 @@ export function makeRenderPost({ root, postTitleEl, postMetaP, getRedacted, rend
   function renderEmailTab(m) {
     const pane = $('.cnp[data-cntab="email"]', root);
     if (!pane) return;
-    const mailPre = pane.querySelector('.cnmail');
-    if (mailPre) mailPre.textContent = emailDraftText(m);
-    const toInput = pane.querySelector('input.cninput');
-    if (toInput) toInput.value = '';
-    // #cn-send / #cn-mailstate are left exactly as ui.js already renders them:
-    // "not configured — no mail provider", disabling itself on click. That is
-    // already the honest, real state — this daemon has no mail provider.
+    // bind.js removes the design artifact's canned email card before a real
+    // meeting is opened. Rebuild the draft from the saved record instead of
+    // trying to update detached mock nodes (which left this tab stuck on
+    // "Nothing to show" even after a successful recording).
+    const card = el('div', 'cncard');
+    card.style.cssText = 'max-width:640px;margin:0';
+    const head = el('div', 'cnh');
+    head.append(
+      el('h2', null, 'Email the summary'),
+      el('p', null, 'Review and edit this local draft. Sending stays unavailable until a mail provider is implemented.'),
+    );
+    const fields = el('div', 'cnrow2');
+    const to = el('div');
+    to.append(el('div', 'lab', 'To'));
+    const toInput = el('input', 'cninput');
+    toInput.type = 'email';
+    toInput.placeholder = 'name@example.com';
+    toInput.setAttribute('aria-label', 'Email summary recipient');
+    to.append(toInput);
+    const includes = el('div');
+    includes.append(el('div', 'lab', 'Includes'), pill('wt', 'summary · decisions · actions · no transcript'));
+    fields.append(to, includes);
+    const draft = el('textarea', 'cnmail');
+    draft.rows = 12;
+    draft.value = emailDraftText(m);
+    draft.setAttribute('aria-label', 'Editable meeting summary email draft');
+    const actions = el('div', 'caps-acts');
+    actions.style.cssText = 'padding:12px 0 0;border:0';
+    const send = el('button', 'btn p', 'Authorize and send');
+    send.id = 'cn-send';
+    send.type = 'button';
+    send.disabled = true;
+    send.title = 'Unavailable — this daemon has no mail provider.';
+    const state = pill('am', 'not configured — no mail provider');
+    state.id = 'cn-mailstate';
+    actions.append(send, state);
+    const note = el('div', 'fnote-i', 'The draft remains on this machine. A preview is never reported as sent.');
+    note.style.marginTop = '8px';
+    card.append(head, fields, draft, actions, note);
+    fill(pane, card);
   }
 
   function renderPost(state) {

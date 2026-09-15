@@ -148,7 +148,13 @@ test('claude-code, no gate: the file-only surface, run in the worktree', async (
 
 test('codex: ephemeral workspace-write run ignores ambient config and runs in the worktree', async () => {
   const { spawner, calls } = recorder((cmd) =>
-    cmd === CODEX_BINARY ? OK('edited one file') : OK(z(' M src/codex.ts')),
+    cmd === CODEX_BINARY
+      ? OK([
+          JSON.stringify({ type: 'thread.started', thread_id: 't1' }),
+          JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'edited one file' } }),
+          JSON.stringify({ type: 'turn.completed' }),
+        ].join('\n'), 'non-fatal startup warning')
+      : OK(z(' M src/codex.ts')),
   );
   const res = await runAgent(spec({ agentId: 'codex', task: 'add a parser' }), spawner);
 
@@ -160,6 +166,7 @@ test('codex: ephemeral workspace-write run ignores ambient config and runs in th
     '--ignore-user-config',
     '--strict-config',
     '--color', 'never',
+    '--json',
     '--', '-',
   ]);
   assert.equal(calls[0]!.opts.stdin, 'add a parser');
@@ -167,6 +174,7 @@ test('codex: ephemeral workspace-write run ignores ambient config and runs in th
   assert.deepEqual(res.changedFiles, ['src/codex.ts']);
   assert.equal(res.agentId, 'codex');
   assert.equal(res.ok, true);
+  assert.equal(res.log, 'edited one file', 'successful Codex chat shows the final answer without JSONL or startup warnings');
 });
 
 test('codex: model and effort are validated options before exec and the prompt guard', () => {
@@ -187,6 +195,7 @@ test('codex: model and effort are validated options before exec and the prompt g
     '--ignore-user-config',
     '--strict-config',
     '--color', 'never',
+    '--json',
     '--', '-',
   ]);
   const guard = argv.indexOf('--');

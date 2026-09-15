@@ -5,6 +5,7 @@
  * exercised together. Launch Zeno with a loopback-only CDP port before running.
  */
 import { spawn } from 'node:child_process';
+import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
 const endpoint = process.env.ZENO_CDP_ENDPOINT || 'http://127.0.0.1:9228';
@@ -37,7 +38,20 @@ try {
 
   const stopWake = page.locator('.zv-live-stop');
   if (await stopWake.isVisible()) await stopWake.click();
-  await page.locator('[data-nav="command"]').click();
+  await page.locator('.seg [data-product="command"]').click();
+  await page.locator('.product[data-product="command"] .nav-i[data-screen="home"]').click();
+
+  await page.evaluate(() => {
+    window.__zenoVoiceEvents = [];
+    const pill = document.querySelector('#voice-state');
+    const record = () => window.__zenoVoiceEvents.push({
+      at: performance.now(),
+      text: pill?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      title: pill?.getAttribute('title') || '',
+    });
+    record();
+    if (pill) new MutationObserver(record).observe(pill, { attributes: true, childList: true, subtree: true });
+  });
 
   const button = page.locator('.zv-ptt');
   await button.scrollIntoViewIfNeeded();
@@ -53,12 +67,12 @@ try {
   await page.waitForTimeout(2500);
 
   const result = await page.evaluate(() => ({
-    heard: document.querySelector('.zv-heard')?.textContent?.replace(/\s+/g, ' ').trim() || '',
-    outcome: document.querySelector('.zv-outcome')?.textContent?.replace(/\s+/g, ' ').trim() || '',
-    status: document.querySelector('.zv-status')?.textContent?.trim() || '',
-    wake: document.querySelector('.zv-wake-toggle')?.getAttribute('aria-pressed') || 'false',
-    microphoneBarVisible: !document.querySelector('.zv-live')?.hidden,
+    pill: document.querySelector('#voice-state')?.textContent?.replace(/\s+/g, ' ').trim() || '',
+    title: document.querySelector('#voice-state')?.getAttribute('title') || '',
+    events: window.__zenoVoiceEvents || [],
   }));
+  assert.ok(result.events.some(event => /listening/i.test(event.text)), 'push-to-talk never entered listening state');
+  assert.ok(result.events.some(event => /transcribing|stopped|idle/i.test(event.text)), 'push-to-talk never settled');
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } finally {
   await browser.close();

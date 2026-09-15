@@ -24,9 +24,17 @@ const COMMAND_MODEL_KEY = 'zeno.command.model';
 let commandModel = null;
 let commandRegistryCommands = [];
 let commandRegistryRefreshBound = false;
+let commandModelMenu = null;
+
+function preferredCommandModel(models) {
+  return models.find((model) => model === 'qwen3:8b')
+    || models.find((model) => /(?:^|:)8b(?:$|[-:])/i.test(model))
+    || models[0]
+    || null;
+}
 
 function commandModelPill() {
-  return $('.screen[data-screen="home"] [data-model-pill]');
+  return $('.screen[data-screen="home"] [data-command-model-pill], .screen[data-screen="home"] [data-model-pill]');
 }
 
 function paintCommandModel(model) {
@@ -39,9 +47,15 @@ function paintCommandModel(model) {
     : 'No local model is installed.';
 }
 
+function closeCommandModelMenu() {
+  if (commandModelMenu) commandModelMenu.remove();
+  commandModelMenu = null;
+}
+
 async function chooseCommandModel() {
   const pill = commandModelPill();
   if (!pill || pill.disabled) return;
+  if (commandModelMenu) { closeCommandModelMenu(); return; }
   const response = await fetch('/forge/agents?passive=1', {
     headers: authHeaders(), cache: 'no-store',
   }).then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => ({})) }))
@@ -50,14 +64,48 @@ async function chooseCommandModel() {
     ? response.data.localModels.filter((item) => typeof item === 'string' && item)
     : [];
   if (models.length === 0) { commandModel = null; paintCommandModel(null); return; }
-  const current = commandModel || models[0];
-  const raw = window.prompt(`Choose the local model for Command:\n${models.map((model, index) => `${index + 1}. ${model}`).join('\n')}`, current);
-  if (raw === null) return;
-  const picked = models.includes(raw.trim()) ? raw.trim() : models[Number(raw) - 1];
-  if (!picked) { pill.title = 'Choose an installed model by its number or exact name.'; return; }
-  commandModel = picked;
-  try { localStorage.setItem(COMMAND_MODEL_KEY, picked); } catch { /* private storage unavailable */ }
-  paintCommandModel(picked);
+
+  const menu = el('div', 'mp command-model-picker');
+  menu.setAttribute('role', 'dialog');
+  menu.setAttribute('aria-label', 'Choose a local model for Command');
+  const group = el('div', 'mp-g', 'On this machine');
+  const list = el('div', 'mp-list');
+  list.setAttribute('role', 'radiogroup');
+  list.setAttribute('aria-label', 'Installed local models');
+
+  for (const model of models) {
+    const row = el('button', 'mp-row');
+    row.type = 'button';
+    row.setAttribute('role', 'radio');
+    row.setAttribute('aria-checked', model === commandModel ? 'true' : 'false');
+    row.dataset.commandModel = model;
+    const icon = el('span', 'mi', '●');
+    icon.setAttribute('aria-hidden', 'true');
+    const name = el('span', 'mn', model);
+    name.append(el('span', null, 'Ollama · stays on this machine'));
+    const tag = el('span', 'mt loc', model === commandModel ? 'selected' : 'available');
+    row.append(icon, name, tag);
+    row.addEventListener('click', () => {
+      commandModel = model;
+      try { localStorage.setItem(COMMAND_MODEL_KEY, model); } catch { /* private storage unavailable */ }
+      paintCommandModel(model);
+      closeCommandModelMenu();
+      pill.focus();
+    });
+    list.append(row);
+  }
+  menu.append(group, list);
+  document.body.append(menu);
+  commandModelMenu = menu;
+
+  const rect = pill.getBoundingClientRect();
+  const width = Math.min(360, Math.max(260, window.innerWidth - 16));
+  menu.style.width = `${width}px`;
+  menu.style.left = `${Math.min(Math.max(8, rect.left), window.innerWidth - width - 8)}px`;
+  const height = menu.offsetHeight || 240;
+  menu.style.top = `${Math.max(8, rect.top > height + 12 ? rect.top - height - 8 : rect.bottom + 8)}px`;
+  const selected = menu.querySelector('[aria-checked="true"]') || menu.querySelector('button');
+  if (selected) selected.focus();
 }
 
 async function bindCommandModel() {
@@ -73,14 +121,27 @@ async function bindCommandModel() {
     : [];
   let stored = null;
   try { stored = localStorage.getItem(COMMAND_MODEL_KEY); } catch { /* private storage unavailable */ }
-  commandModel = stored && models.includes(stored) ? stored : (models[0] || null);
+  commandModel = stored && models.includes(stored) ? stored : preferredCommandModel(models);
   window.zenoCommandModel = () => commandModel;
   paintCommandModel(commandModel);
+  pill.removeAttribute('data-model-pill');
+  pill.setAttribute('data-command-model-pill', 'true');
   pill.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
     void chooseCommandModel();
   }, true);
+  document.addEventListener('click', (event) => {
+    if (!commandModelMenu) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target && (commandModelMenu.contains(target) || pill.contains(target))) return;
+    closeCommandModelMenu();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !commandModelMenu) return;
+    closeCommandModelMenu();
+    pill.focus();
+  });
 }
 
 /* ---- navigation: "open receipts", "go to Forge" — pure, client-side ------- *

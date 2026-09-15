@@ -252,6 +252,7 @@ export function codexArgv(agent: Agent, spec: RunSpec): string[] {
     '--strict-config',
     '--color',
     'never',
+    '--json',
     '--',
     '-',
   );
@@ -383,6 +384,28 @@ function mergeStreams(r: SpawnResult): string {
   return [r.stdout, r.stderr].filter((s) => s !== '').join('\n');
 }
 
+/**
+ * Codex `--json` keeps machine diagnostics and the answer on separate JSONL
+ * events. Surface the final agent message in chat and keep raw streams as the
+ * fallback for older CLIs or failures; successful runs should not make the
+ * owner read startup warnings and the echoed prompt to find the answer.
+ */
+function codexDisplayLog(r: SpawnResult): string {
+  let answer = '';
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (line.trim() === '') continue;
+    try {
+      const event = JSON.parse(line) as { type?: unknown; item?: { type?: unknown; text?: unknown } };
+      if (event.type === 'item.completed' && event.item?.type === 'agent_message' && typeof event.item.text === 'string') {
+        answer = event.item.text.trim();
+      }
+    } catch {
+      // A non-JSON line means this CLI did not honor --json; preserve it below.
+    }
+  }
+  return answer || mergeStreams(r);
+}
+
 /** git's own words, one line, bounded — for a `note`. */
 function detail(r: SpawnResult): string {
   return (r.stderr.trim() || r.stdout.trim()).replace(/\s+/g, ' ').slice(0, 300);
@@ -423,7 +446,7 @@ export async function runAgent(spec: RunSpec, spawner: Spawner): Promise<RunResu
     ...(spec.env ? { env: spec.env } : {}),
     ...(spec.signal ? { signal: spec.signal } : {}),
   });
-  const log = mergeStreams(run);
+  const log = agent.id === 'codex' && run.code === 0 ? codexDisplayLog(run) : mergeStreams(run);
   if (run.failedToSpawn) {
     return {
       ...base,

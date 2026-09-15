@@ -79,27 +79,43 @@ export async function runLocalModel(
   const treeOutput = standaloneAnswer ? '' : ctx.gitRunner.run(['ls-files'], worktree).stdout;
   const tree = treeOutput.slice(0, 1_000_000).split(NL).map((f) => f.trim()).filter(Boolean);
   const SRC = /\.(js|mjs|cjs|ts|tsx|jsx|json|css|html|md|py)$/i;
-  const lower = task.toLowerCase();
+  // Select repository files from the owner's actual task. `task` may also
+  // contain project rules and Vault context; treating those references as the
+  // request can crowd the file the owner named out of the context pack.
+  const lower = ownerTask.toLowerCase();
   // Files the task actually names come first; then ordinary source. A budget
   // buys the most files this way rather than one enormous one.
-  const named = tree.filter((f) => lower.includes((f.split('/').pop() ?? '').toLowerCase()));
+  // Prefer an exact project-relative path before basename matches. A request
+  // for `package.json` otherwise matched every workspace manifest and the
+  // first twelve nested packages could crowd the root manifest out entirely.
+  const exactNamed = tree.filter((f) => lower.includes(f.toLowerCase()));
+  const basenameNamed = tree.filter((f) => (
+    !exactNamed.includes(f) && lower.includes((f.split('/').pop() ?? '').toLowerCase())
+  ));
+  const named = [...exactNamed, ...basenameNamed];
   const rest = tree.filter((f) => !named.includes(f) && SRC.test(f));
   const pack: string[] = [];
   let spent = 0;
   for (const rel of [...named, ...rest].slice(0, 12)) {
     let body: string;
+    let truncated = false;
     try {
       const remaining = 24_000 - spent;
       if (remaining <= 0) break;
       const source = readUtf8Bounded(jail(ctx.forgeFs, worktree, rel), remaining);
-      if (source.truncated) continue;
       body = source.text;
+      truncated = source.truncated;
     } catch {
       continue;
     }
     if (spent + body.length > 24_000) continue;
     spent += body.length;
-    pack.push(`===FILE: ${rel}===${NL}${body}${NL}===END===`);
+    pack.push([
+      `===FILE: ${rel}===`,
+      body,
+      truncated ? '[ZENO: THIS FILE EXCERPT IS TRUNCATED. Do not infer claims from omitted content.]' : '',
+      '===END===',
+    ].filter(Boolean).join(NL));
   }
   const prompt = (standaloneAnswer
     ? [
@@ -121,6 +137,9 @@ export async function runLocalModel(
         pack.length === 0
           ? ''
           : `CURRENT CONTENTS OF THE MOST RELEVANT FILES. To CHANGE one, output it again in full with your edits applied:${NL}${NL}${pack.join(NL + NL)}`,
+        answerOnly
+          ? 'For a repository question, make factual claims only from the supplied file contents. Copy exact names and values verbatim rather than shortening or paraphrasing them. Cite the supporting path in square brackets. If the supplied excerpt does not support a claim, say that it could not be verified; do not infer broad privacy, security, or locality guarantees.'
+          : '',
         'Choose exactly ONE response form. Never mix the two forms.',
         'If this task needs repository edits, output one or more file blocks and no other text:',
         '===FILE: <relative/path>===',
@@ -131,7 +150,10 @@ export async function runLocalModel(
         '<the concise answer; markdown and fenced code are allowed here>',
         '===END===',
         'Outside the selected envelope output nothing: no preface, reasoning, or trailing explanation.',
-        'TASK: ' + task,
+        'PROJECT RULES, MEMORY AND OWNER TASK CONTEXT:',
+        task,
+        'OWNER TASK TO ANSWER OR IMPLEMENT (repeat, authoritative, and last):',
+        ownerTask,
       ]).filter((l) => l !== '').join(NL + NL);
   let text: string;
   let tokensIn: number | null = null;
@@ -170,9 +192,18 @@ export async function runLocalModel(
           ],
           stream: false,
           keep_alive: '60s',
-          options: { num_ctx: 16384, num_predict: numPredict, temperature: 0.7, top_p: 0.8, top_k: 20 },
+          // Read-only repository answers should be reproducible quotations of
+          // supplied evidence. Sampling adds variation without adding value.
+          options: { num_ctx: 16384, num_predict: numPredict, temperature: answerOnly ? 0 : 0.7, top_p: 0.8, top_k: 20 },
         }
-      : { model: chosen, prompt, stream: false, think, keep_alive: '60s', options: { num_ctx: 16384, num_predict: numPredict } };
+      : {
+          model: chosen,
+          prompt,
+          stream: false,
+          think,
+          keep_alive: '60s',
+          options: { num_ctx: 16384, num_predict: numPredict, ...(answerOnly ? { temperature: 0 } : {}) },
+        };
     const r = await fetch(ollamaEndpoint(ctx, endpoint), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -241,6 +272,23 @@ export async function runLocalModel(
       return { ...base, ...metrics, ok: false, log: '', note: `The model returned an empty, mixed, or oversized answer envelope. Nothing was written; keep one answer under ${MAX_LOCAL_MODEL_ANSWER_CHARS.toLocaleString('en-US')} characters.` };
     }
     return { ...base, ...metrics, ok: true, log: answer };
+  }
+
+  // A compact local model can finish the useful answer but omit the final
+  // delimiter. For a task already classified as answer-only, recovering that
+  // single body is safe: this branch can only return chat text and can never
+  // write a file. Keep mixed or repeated protocol markers as hard failures.
+  const unterminatedAnswerBlock = /^===ANSWER===\r?\n([\s\S]+)$/.exec(text);
+  if (answerOnly && unterminatedAnswerBlock) {
+    const answer = (unterminatedAnswerBlock[1] ?? '').trim();
+    if (
+      answer !== '' &&
+      answer.length <= MAX_LOCAL_MODEL_ANSWER_CHARS &&
+      !answer.includes(NUL) &&
+      !/^===(?:ANSWER|FILE:|END===)/m.test(answer)
+    ) {
+      return { ...base, ...metrics, ok: true, log: answer };
+    }
   }
 
   // Qwen and other compact local models occasionally return the requested

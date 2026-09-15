@@ -318,6 +318,7 @@ export function setupModelPicker(S) {
       b.dataset.model = m.model || '';
       b.dataset.agentId = m.agentId;
       b.dataset.where = m.where;
+      b.setAttribute('role', mpMode === 'compare' ? 'checkbox' : 'radio');
       const checked = mpMode === 'compare' ? CMP.has(m.key) : m.key === curKey;
       b.setAttribute('aria-checked', checked ? 'true' : 'false');
       /* The row's CSS grid reserves a leading 18px icon column (it is shared with
@@ -359,6 +360,7 @@ export function setupModelPicker(S) {
     CMP.clear();
     mpEl = el('div', 'mp');
     mpEl.setAttribute('role', 'dialog');
+    mpEl.setAttribute('aria-label', 'Choose a Forge model');
     mpEl.addEventListener('click', (e) => e.stopPropagation());
     const search = el('div', 'mp-search');
     const q = document.createElement('input');

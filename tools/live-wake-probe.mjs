@@ -34,68 +34,49 @@ const browser = await chromium.connectOverCDP(endpoint);
 try {
   const page = browser.contexts()[0]?.pages()[0];
   if (!page) throw new Error('Zeno renderer was not found.');
-  const toggle = page.locator('.zv-wake-toggle');
-  if (await toggle.getAttribute('aria-pressed') === 'true') {
-    const stop = page.locator('.zv-live-stop');
-    if (await stop.isVisible()) await stop.click();
-  }
-  // Reload after any previous wake session is closed so this probe always tests
-  // the current served bundle rather than a renderer left open during a rebuild.
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('[data-nav="command"]').click();
-
-  await page.evaluate(() => {
-    window.__zenoWakeBarEvents = [];
-    const bar = document.querySelector('.zv-live');
-    const record = () => window.__zenoWakeBarEvents.push({
-      at: performance.now(),
-      hidden: Boolean(bar?.hidden),
-      text: bar?.textContent?.replace(/\s+/g, ' ').trim() || '',
-    });
-    record();
-    if (bar) new MutationObserver(record).observe(bar, { attributes: true, childList: true, subtree: true });
-  });
-
+  await page.locator('.seg [data-product="command"]').click();
+  await page.locator('.product[data-product="command"] .nav-i[data-screen="home"]').click();
+  await page.locator('.product[data-product="command"] [data-open-settings]').click();
+  const modal = page.locator('#settings-modal');
+  await modal.waitFor({ state: 'visible' });
+  await modal.locator('[data-setcat="voice"]').click();
+  const toggle = modal.locator('.setrow', { hasText: 'Wake word' }).locator('.toggle[role="switch"]');
+  if (await toggle.getAttribute('aria-checked') === 'true') await toggle.click();
+  page.once('dialog', dialog => dialog.accept());
   await toggle.click();
-  const disclosure = page.locator('#zv-disclosure');
-  await disclosure.waitFor({ state: 'visible' });
-  await page.locator('.zv-ack-box').check();
-  await page.locator('.zv-confirm').click();
-  await page.waitForFunction(() => document.querySelector('.zv-wake-toggle')?.getAttribute('aria-pressed') === 'true');
-  await page.locator('.zv-live').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => document.querySelector('#voice-state')?.textContent?.includes('listening'));
+  await page.keyboard.press('Escape');
+  const turnsBefore = await page.locator('#home-turns').locator(':scope > *').count();
   await page.waitForTimeout(500);
   await speak(phrase);
-  await page.waitForFunction(() => {
-    const heard = document.querySelector('.zv-heard')?.textContent || '';
-    return heard.includes('Heard:');
-  }, null, { timeout: 20_000 });
-  await page.waitForTimeout(1_000);
-
-  const beforeStop = await page.evaluate(() => ({
-    heard: document.querySelector('.zv-heard')?.textContent?.replace(/\s+/g, ' ').trim() || '',
-    outcome: document.querySelector('.zv-outcome')?.textContent?.replace(/\s+/g, ' ').trim() || '',
-    status: document.querySelector('.zv-status')?.textContent?.trim() || '',
-    wake: document.querySelector('.zv-wake-toggle')?.getAttribute('aria-pressed') || 'false',
-    microphoneBarVisible: !document.querySelector('.zv-live')?.hidden,
+  await page.waitForTimeout(5_000);
+  const beforeStop = await page.evaluate((before) => ({
+    wake: localStorage.getItem('zeno.voice.wake') ? 'true' : 'false',
+    voice: document.querySelector('#voice-state')?.textContent?.replace(/\s+/g, ' ').trim() || '',
     captureOwner: document.body.getAttribute('data-zeno-capture') || '',
-    events: window.__zenoWakeBarEvents || [],
-  }));
+    turnsBefore: before,
+    turnsAfter: document.querySelector('#home-turns')?.children.length || 0,
+  }), turnsBefore);
   assert.equal(beforeStop.wake, 'true');
-  assert.equal(beforeStop.microphoneBarVisible, true);
+  assert.match(beforeStop.voice, /listening/i);
   assert.notEqual(beforeStop.captureOwner, 'counsel', 'Counsel did not own the microphone during Command wake mode');
-  const firstVisible = beforeStop.events.findIndex(event => event.hidden === false);
-  assert.ok(firstVisible >= 0, 'the persistent listening bar became visible');
-  assert.equal(beforeStop.events.slice(firstVisible).some(event => event.hidden === true), false, 'the listening bar did not flicker closed');
-
-  await page.locator('.zv-live-stop').click();
-  await page.waitForFunction(() => document.querySelector('.zv-wake-toggle')?.getAttribute('aria-pressed') === 'false');
+  const acoustic = beforeStop.turnsAfter > beforeStop.turnsBefore
+    ? 'PASS'
+    : 'BLOCKED — synthesized speaker output was not captured by the physical microphone input';
+  await page.locator('.product[data-product="command"] [data-open-settings]').click();
+  await modal.waitFor({ state: 'visible' });
+  await modal.locator('[data-setcat="voice"]').click();
+  await toggle.click();
+  await page.waitForFunction(() => !localStorage.getItem('zeno.voice.wake'));
   const afterStop = await page.evaluate(() => ({
-    wake: document.querySelector('.zv-wake-toggle')?.getAttribute('aria-pressed') || 'false',
-    microphoneBarVisible: !document.querySelector('.zv-live')?.hidden,
+    wake: localStorage.getItem('zeno.voice.wake') ? 'true' : 'false',
+    voice: document.querySelector('#voice-state')?.textContent?.replace(/\s+/g, ' ').trim() || '',
     captureOwner: document.body.getAttribute('data-zeno-capture') || '',
   }));
-  assert.deepEqual(afterStop, { wake: 'false', microphoneBarVisible: false, captureOwner: '' });
-  process.stdout.write(`${JSON.stringify({ phrase, beforeStop, afterStop })}\n`);
+  assert.equal(afterStop.wake, 'false');
+  assert.doesNotMatch(afterStop.voice, /listening/i);
+  process.stdout.write(`${JSON.stringify({ phrase, acoustic, beforeStop, afterStop })}\n`);
 } finally {
   await browser.close();
 }

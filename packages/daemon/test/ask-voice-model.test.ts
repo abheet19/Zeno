@@ -123,6 +123,10 @@ test('Ask never approves, and hosted work stays click-confirmed in Forge', () =>
   assert.match(source, /has NOT started/);
   assert.match(source, /voice and chat cannot start hosted work/);
   assert.match(source, /waiting for your approval/);
+  assert.doesNotMatch(source, /window\.prompt/);
+  assert.match(source, /aria-label', 'Choose a local model for Command'/);
+  assert.match(source, /localStorage\.setItem\(COMMAND_MODEL_KEY, model\)/);
+  assert.match(source, /model === 'qwen3:8b'/);
 });
 
 test('Command voice yields to every external microphone owner', () => {

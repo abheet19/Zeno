@@ -226,13 +226,19 @@ function bindToday(st, workRes, forgeRes, memRes, sec) {
 
 /* ---- the composer's model pill: the real installed local model, if any -- */
 function bindModelPill(agentsRes) {
-  const pill = q('[data-model-pill]');
+  const pill = q('[data-command-model-pill], [data-model-pill]');
   if (!pill) return;
   let label;
   if (!agentsRes.ok) label = 'model unread';
   else {
     const models = Array.isArray(agentsRes.data.localModels) ? agentsRes.data.localModels : [];
-    label = models.length ? `${models[0]} · local` : 'no local model installed';
+    let selected = null;
+    try { selected = window.zenoCommandModel?.() || localStorage.getItem('zeno.command.model'); }
+    catch { /* private storage unavailable */ }
+    const current = selected && models.includes(selected)
+      ? selected
+      : (models.find((model) => model === 'qwen3:8b') || models[0]);
+    label = current ? `${current} · local` : 'no local model installed';
   }
   fill(pill, el('span', 'd'), txt(`${label} ▾`));
 }

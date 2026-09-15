@@ -71,7 +71,7 @@ async function consentAndBegin(page, dialog) {
 }
 
 async function deleteByTitle(page, title) {
-  await page.locator('[data-nav="counsel"]').click();
+  await page.locator('.seg [data-product="counsel"]').click();
   const row = page.locator('.callrow', { hasText: title });
   if (await row.count() === 0) return false;
   await row.first().click();
@@ -102,7 +102,13 @@ try {
   const voiceDisclosureCancel = page.locator('.zv-cancel');
   if (await voiceDisclosureCancel.isVisible()) await voiceDisclosureCancel.click();
 
-  await page.locator('[data-nav="counsel"]').click();
+  const settingsModal = page.locator('#settings-modal');
+  if (await settingsModal.isVisible()) {
+    await page.keyboard.press('Escape');
+    await settingsModal.waitFor({ state: 'hidden' });
+  }
+
+  await page.locator('.seg [data-product="counsel"]').click();
   await waitForArchive(page);
   const baselineRows = await page.locator('.callrow').count();
 
@@ -162,7 +168,7 @@ try {
   assert.ok(liveLines.every(line => line.speaker === 'owner'), JSON.stringify(liveLines));
   assert.match(liveLines.map(line => line.text).join(' '), /PostgreSQL|Counsel archive|migration plan/i);
 
-  await page.locator('[data-nav="command"]').click();
+  await page.locator('.seg [data-product="command"]').click();
   const overlayInCommand = await page.locator('.ov[aria-label="Live call"]').isVisible();
   assert.equal(overlayInCommand, true);
   assert.equal(await page.locator('body').getAttribute('data-zeno-capture'), 'counsel');
@@ -186,7 +192,7 @@ try {
   assert.match(wakeRefusal, /Counsel/i);
   assert.notEqual(await wake.getAttribute('aria-pressed'), 'true');
 
-  await page.locator('[data-nav="counsel"]').click();
+  await page.locator('.seg [data-product="counsel"]').click();
   assert.equal(await page.locator('.ov[aria-label="Live call"]').isVisible(), true);
   await page.getByRole('button', { name: 'End call & save', exact: true }).click();
   await page.locator('.ov[aria-label="Live call"]').waitFor({ state: 'detached', timeout: 30_000 });

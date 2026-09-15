@@ -112,6 +112,7 @@ export function createEditorView(E, S, deps) {
       const [cls, txt] = fileMeta(name);
       const tab = el('button', 'vstab');
       tab.type = 'button';
+      tab.setAttribute('role', 'tab');
       tab.dataset.realTab = path;
       tab.setAttribute('aria-selected', path === g.file ? 'true' : 'false');
       const dirty = el('span', 'vsdirty', '●');

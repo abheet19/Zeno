@@ -65,9 +65,21 @@ import { searchNeosapienMemories } from './neosapien.js';
 /** The model Ask Zeno answers with when the owner has not picked one. */
 export const DEFAULT_ASSISTANT_MODEL = 'qwen3:8b';
 /** Bound Command latency: a wedged or memory-starved local model must not leave
- * the composer spinning forever. Forge has its own longer, cancellable run
- * lifecycle; a conversational turn gets one minute and then fails honestly. */
-export const ASSISTANT_MODEL_TIMEOUT_MS = 60_000;
+ * the composer spinning forever. A cold model swap on this pilot machine can
+ * legitimately take more than one minute, so a normal turn gets two. */
+export const ASSISTANT_MODEL_TIMEOUT_MS = 120_000;
+/** Larger local models can spend most of the normal turn budget loading their
+ * weights after another model was used. The owner explicitly chose that
+ * tradeoff, so give 14B+ models one bounded cold-start window while keeping
+ * the responsive default at one minute. */
+export const LARGE_ASSISTANT_MODEL_TIMEOUT_MS = 180_000;
+
+export function assistantTurnTimeoutMs(model: string): number {
+  const billions = /(?:^|[:_-])(\d+(?:\.\d+)?)b(?:$|[:_-])/i.exec(model)?.[1];
+  return billions !== undefined && Number(billions) >= 14
+    ? LARGE_ASSISTANT_MODEL_TIMEOUT_MS
+    : ASSISTANT_MODEL_TIMEOUT_MS;
+}
 
 /**
  * Product help is part of Zeno's own interface contract, not a general-
@@ -183,17 +195,18 @@ async function askGeneral(
   signal: AbortSignal,
 ): Promise<string | null> {
   try {
-    const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
+    const qwenChat = /^qwen3(?:[:-]|$)/i.test(model);
+    const r = await fetch(ollamaEndpoint(ctx, qwenChat ? '/api/chat' : '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model, prompt: buildGeneralPrompt(question), stream: false, think: false,
-        keep_alive: '30s', options: { num_ctx: 8192 },
-      }),
+      body: JSON.stringify(qwenChat
+        ? { model, messages: [{ role: 'user', content: buildGeneralPrompt(question) }], stream: false, think: false, keep_alive: '30s', options: { num_ctx: 8192 } }
+        : { model, prompt: buildGeneralPrompt(question), stream: false, think: false, keep_alive: '30s', options: { num_ctx: 8192 } }),
       signal,
     });
     if (!r.ok) return null;
-    const text = withoutReasoning(((await r.json()) as { response?: string }).response ?? '').trim();
+    const raw = (await r.json()) as { response?: string; message?: { content?: string } };
+    const text = withoutReasoning(qwenChat ? raw.message?.content ?? '' : raw.response ?? '').trim();
     return text === '' ? null : text;
   } catch {
     return null;
@@ -231,10 +244,10 @@ function pendingSnapshot(ctx: ServerCtx): { id: string; summary: string; tier: S
   });
 }
 
-function localModelFailureNote(model: string, error: unknown): string {
+function localModelFailureNote(model: string, error: unknown, timeoutMs: number): string {
   const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
   return timedOut
-    ? `${model} did not answer within ${ASSISTANT_MODEL_TIMEOUT_MS / 1000} seconds, so this turn was stopped. Try a smaller installed model or ask again after the current model finishes loading.`
+    ? `${model} did not answer within ${timeoutMs / 1000} seconds, so this turn was stopped. Try a smaller installed model or ask again after the current model finishes loading.`
     : `Zeno could not reach Ollama for this turn. Start Ollama, then confirm ${model} is installed (ollama pull ${model}). Your Zeno state is unaffected.`;
 }
 
@@ -318,7 +331,9 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   // The whole conversational request shares one deadline, including optional
   // source reads and Ollama startup/model discovery. A series of individually
   // bounded awaits must not turn a one-minute turn into several minutes.
-  const turnDeadline = Date.now() + ASSISTANT_MODEL_TIMEOUT_MS;
+  const requestedOrDefaultModel = requestedModel ?? DEFAULT_ASSISTANT_MODEL;
+  const turnTimeoutMs = assistantTurnTimeoutMs(requestedOrDefaultModel);
+  const turnDeadline = Date.now() + turnTimeoutMs;
   const remainingMs = () => Math.max(1, turnDeadline - Date.now());
   const withinTurn = async <T>(promise: Promise<T>): Promise<T> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -386,13 +401,13 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   try {
     await withinTurn(ensureOllama(ctx)); // asking a question is the instruction to start the answerer
   } catch (error) {
-    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedModel ?? DEFAULT_ASSISTANT_MODEL, error), modelUsed: requestedModel ?? DEFAULT_ASSISTANT_MODEL });
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedOrDefaultModel, error, turnTimeoutMs), modelUsed: requestedOrDefaultModel });
   }
   let chosen: { readonly modelUsed: string; readonly note: string | null };
   try {
     chosen = await withinTurn(resolveAssistantModel(ctx, requestedModel));
   } catch (error) {
-    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedModel ?? DEFAULT_ASSISTANT_MODEL, error), modelUsed: requestedModel ?? DEFAULT_ASSISTANT_MODEL });
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedOrDefaultModel, error, turnTimeoutMs), modelUsed: requestedOrDefaultModel });
   }
   const modelUsed = chosen.modelUsed;
   // `note` keeps carrying truncation; a model fallback is appended to it so the
@@ -405,24 +420,22 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   // into two consecutive 60-second waits.
   const turnSignal = AbortSignal.timeout(remainingMs());
   try {
-    const r = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
+    const qwenChat = /^qwen3(?:[:-]|$)/i.test(modelUsed);
+    const r = await fetch(ollamaEndpoint(ctx, qwenChat ? '/api/chat' : '/api/generate'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: modelUsed, prompt, stream: false, think: false,
-        keep_alive: '30s', options: { num_ctx: 8192 },
-      }),
+      body: JSON.stringify(qwenChat
+        ? { model: modelUsed, messages: [{ role: 'user', content: prompt }], stream: false, think: false, keep_alive: '30s', options: { num_ctx: 8192 } }
+        : { model: modelUsed, prompt, stream: false, think: false, keep_alive: '30s', options: { num_ctx: 8192 } }),
       signal: turnSignal,
     });
     if (!r.ok) {
       return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: `The local model answered ${r.status}. Is ${modelUsed} pulled?`, modelUsed });
     }
-    answer = cleanGroundedReply(
-      withoutReasoning(((await r.json()) as { response?: string }).response ?? ''),
-      snapshot,
-    );
+    const raw = (await r.json()) as { response?: string; message?: { content?: string } };
+    answer = cleanGroundedReply(withoutReasoning(qwenChat ? raw.message?.content ?? '' : raw.response ?? ''), snapshot);
   } catch (error) {
-    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(modelUsed, error), modelUsed });
+    return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(modelUsed, error, turnTimeoutMs), modelUsed });
   }
 
   const grounding = groundReply(answer, snapshot);

@@ -1646,8 +1646,15 @@ test('Forge — a local model can answer without inventing a file, while edits a
   execFileSync('git', ['init'], { cwd: sandbox });
   execFileSync('git', ['config', 'user.email', 'owner@zeno.local'], { cwd: sandbox });
   execFileSync('git', ['config', 'user.name', 'Zeno Owner'], { cwd: sandbox });
-  writeFileSync(join(sandbox, 'README.md'), '# Zeno fixture\n\nRepository context is available.\n', 'utf8');
-  execFileSync('git', ['add', 'README.md'], { cwd: sandbox });
+  writeFileSync(
+    join(sandbox, 'README.md'),
+    '# Zeno fixture\n\nRepository context is available.\n' + 'large named file content\n'.repeat(2_000),
+    'utf8',
+  );
+  mkdirSync(join(sandbox, 'packages', 'nested'), { recursive: true });
+  writeFileSync(join(sandbox, 'package.json'), '{"name":"@fixture/root"}\n', 'utf8');
+  writeFileSync(join(sandbox, 'packages', 'nested', 'package.json'), '{"name":"@fixture/nested"}\n', 'utf8');
+  execFileSync('git', ['add', '.'], { cwd: sandbox });
   execFileSync('git', ['commit', '-m', 'seed'], { cwd: sandbox });
 
   const fs = nodeSandboxFs();
@@ -1676,12 +1683,13 @@ test('Forge — a local model can answer without inventing a file, while edits a
     '<think>private scratchpad</think>\n===ANSWER===\n```js\nfor (let i = 0; i < 3; i++) console.log(i);\n```\n===END===',
     '===FILE: loop.js===\nexport const loop = () => { for (let i = 0; i < 3; i++) console.log(i); };\n===END===',
     '===ANSWER===\nlooks safe\n===END===\n===FILE: mixed.js===\nexport const mixed = true;\n===END===',
-    '===ANSWER===\nmissing the closing envelope',
+    '===ANSWER===\nfirst answer\n===ANSWER===\nsecond answer',
     `===ANSWER===\n${'x'.repeat(32_001)}\n===END===`,
     '```js\nfor (let i = 0; i < 5; i++) console.log(i);\n```',
     'I changed loop.js for you.',
     '===ANSWER===\nmissing the closing envelope',
     '===ANSWER===\nZeno fixture\n===END===',
+    '===ANSWER===\n@fixture/root [package.json]\n===END===',
     '===FILE: docs/My Guide.md===\n# Guide with spaces\n===END===\n===FILE: src/second.ts===\nexport const second = true;\n===END===',
     '===FILE: duplicate.ts===\nexport const first = true;\n===END===\n===FILE: duplicate.ts===\nexport const second = true;\n===END===',
     '===FILE: ../outside.ts===\nexport const escaped = true;\n===END===',
@@ -1798,10 +1806,11 @@ test('Forge — a local model can answer without inventing a file, while edits a
     assert.deepEqual(rawEdit.proposed, []);
     assert.match(rawEdit.run.note ?? '', /clean set of file envelopes/i);
 
-    const malformedRawAnswer = await run('local-raw-malformed', 'Show a for loop');
-    assert.equal(malformedRawAnswer.run.ok, false, 'a malformed protocol marker is never accepted as raw chat');
-    assert.deepEqual(malformedRawAnswer.changed, []);
-    assert.deepEqual(malformedRawAnswer.proposed, []);
+    const unterminatedRawAnswer = await run('local-raw-malformed', 'Show a for loop');
+    assert.equal(unterminatedRawAnswer.run.ok, true, 'an answer-only run recovers one useful body when a compact model omits the closing delimiter');
+    assert.equal(unterminatedRawAnswer.run.log, 'missing the closing envelope');
+    assert.deepEqual(unterminatedRawAnswer.changed, []);
+    assert.deepEqual(unterminatedRawAnswer.proposed, []);
 
     const repositoryAnswer = await run(
       'local-repository-answer',
@@ -1814,6 +1823,20 @@ test('Forge — a local model can answer without inventing a file, while edits a
     assert.match(prompts[8] ?? '', /THE REPOSITORY CONTAINS THESE FILES/);
     assert.match(prompts[8] ?? '', /===FILE: README\.md===/);
     assert.match(prompts[8] ?? '', /# Zeno fixture/);
+    assert.match(prompts[8] ?? '', /FILE EXCERPT IS TRUNCATED/);
+    assert.match(prompts[8] ?? '', /make factual claims only from the supplied file contents/i);
+    assert.match(prompts[8] ?? '', /do not infer broad privacy, security, or locality guarantees/i);
+
+    const exactRootManifest = await run(
+      'local-root-manifest-answer',
+      'Read package.json only and reply with its exact package name. Do not edit or create files.',
+    );
+    assert.equal(exactRootManifest.run.ok, true);
+    assert.equal(exactRootManifest.run.log, '@fixture/root [package.json]');
+    const rootManifestStart = (prompts[9] ?? '').indexOf('===FILE: package.json===');
+    const nestedManifestStart = (prompts[9] ?? '').indexOf('===FILE: packages/nested/package.json===');
+    assert.ok(rootManifestStart >= 0, 'the exact root manifest is included');
+    assert.ok(nestedManifestStart === -1 || rootManifestStart < nestedManifestStart, 'the exact path outranks same-basename workspace manifests');
 
     const lowAnswer = await run('local-low-answer', 'WRITE A for loop', 'low');
     assert.equal(lowAnswer.run.ok, true);

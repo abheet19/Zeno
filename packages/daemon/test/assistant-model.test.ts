@@ -23,7 +23,22 @@ import type { AddressInfo } from 'node:net';
 import { DEFAULT_POLICY, Kernel, nodeLedgerStore, nodeSandboxFs } from '@abheet19/zeno-kernel';
 import { CANNOT_ANSWER } from '@abheet19/zeno-assistant';
 import { createServer } from '../src/server.js';
-import { DEFAULT_ASSISTANT_MODEL, ZENO_APPROVAL_KERNEL_HELP, ZENO_CAPABILITY_HELP, isRepositoryOverviewQuestion } from '../src/routes/assistant.js';
+import {
+  ASSISTANT_MODEL_TIMEOUT_MS,
+  DEFAULT_ASSISTANT_MODEL,
+  LARGE_ASSISTANT_MODEL_TIMEOUT_MS,
+  ZENO_APPROVAL_KERNEL_HELP,
+  ZENO_CAPABILITY_HELP,
+  assistantTurnTimeoutMs,
+  isRepositoryOverviewQuestion,
+} from '../src/routes/assistant.js';
+
+test('Command keeps every model bounded and gives selected 14B models a larger cold-start window', () => {
+  assert.equal(assistantTurnTimeoutMs('qwen3:4b'), ASSISTANT_MODEL_TIMEOUT_MS);
+  assert.equal(assistantTurnTimeoutMs('qwen3:8b'), ASSISTANT_MODEL_TIMEOUT_MS);
+  assert.equal(assistantTurnTimeoutMs('qwen3:14b'), LARGE_ASSISTANT_MODEL_TIMEOUT_MS);
+  assert.equal(assistantTurnTimeoutMs('custom-32b-q4'), LARGE_ASSISTANT_MODEL_TIMEOUT_MS);
+});
 import { Stream } from '../src/stream.js';
 import { mintTokens } from '../src/tokens.js';
 import { nodeWorkDesk } from '../src/work.js';
@@ -78,12 +93,14 @@ test('ASK — the model field picks an installed local model, falls back honestl
     if (url === FAKE_OLLAMA + '/api/tags') {
       return new Response(JSON.stringify({ models: installed.map((name) => ({ name })) }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    if (url === FAKE_OLLAMA + '/api/generate') {
+    if (url === FAKE_OLLAMA + '/api/generate' || url === FAKE_OLLAMA + '/api/chat') {
       const sent = JSON.parse(String(init?.body ?? '{}')) as { model?: string; keep_alive?: unknown; options?: { num_ctx?: unknown } };
       generatedWith.push(sent.model ?? '(none)');
       keepAliveValues.push(sent.keep_alive);
       contextValues.push(sent.options?.num_ctx);
-      return new Response(JSON.stringify({ response: CANNOT_ANSWER }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify(url.endsWith('/api/chat')
+        ? { message: { content: CANNOT_ANSWER } }
+        : { response: CANNOT_ANSWER }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     return await realFetch(input, init);
   }) as typeof fetch;
