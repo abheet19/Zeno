@@ -64,6 +64,18 @@ export async function run({ daemon, page, ok }) {
     !/data-model-pill[^>]*>[\s\S]{0,200}?qwen3:8b · local/.test(shell),
     'a model name appeared before /forge/agents discovery');
 
+  // The owner sees Command Home before any async binder can finish. Its raw
+  // first frame must therefore be neutral: sample approvals, runs and counts
+  // cannot be present even briefly and then swept away later.
+  const homeShell = shell.split('<!-- ================= CHATS')[0];
+  for (const fixture of ['INGEST-12', 'wt-7f2a', '>3</dd>', '>5</dd>', '>12</dd>']) {
+    ok(`the first Command frame has no fixture "${fixture}"`, !homeShell.includes(fixture),
+      'the raw Home markup painted sample state before daemon binding');
+  }
+  ok('the first Command frame does not claim a verified ledger',
+    !/chain verified|<b>7<\/b> receipts/.test(homeShell),
+    'the raw Home markup claimed verification before /state answered');
+
   const products = ['command', 'forge', 'counsel'];
   for (const product of products) {
     await page.click(`[data-product="${product}"]`);

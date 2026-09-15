@@ -48,13 +48,10 @@ export function clip(s, n) { s = String(s || ''); return s.length > n ? s.slice(
 
    Consulting prefers-reduced-motion AFTER an explicit "0" let the OS veto the
    owner, so on a machine with reduce-motion set system-wide the field could
-   never be turned back on and simply looked broken. The system preference is
-   the DEFAULT, not the verdict. */
+   never be turned back on and simply looked broken. The field rotates on first
+   launch; the visible Reduce motion control is persistent and immediate. */
 export function motionOn() {
-  const explicit = R.getAttribute('data-reduce');
-  let systemPrefersReduced = false;
-  try { systemPrefersReduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* no matchMedia */ }
-  return fieldMotionEnabled({ explicitReduction: explicit, systemPrefersReduced });
+  return fieldMotionEnabled({ explicitReduction: R.getAttribute('data-reduce') });
 }
 
 // S.emptyNote: a truthful sentence when the field is nearly empty, set by
@@ -64,18 +61,11 @@ export const S = { motion: true, sel: null, fieldList: false, emptyNote: null };
 export const FIELD_FRAME_MS = 1000 / 30;
 export const F = { c: null, x: null, rot: 0.62, tilt: 0.34, tilt0: 0.34, drag: 0, raf: 0, lastFrame: 0, hov: null, W: 0, H: 0, mx: 0, my: 0, ro: null, init: 0, _m: 0 };
 
-/* Settle the attribute ONCE at boot from the stored choice, falling back to the
-   OS. Without this the control started life claiming aria-pressed="false" —
-   "motion is on" — on a machine where motion was in fact off, so the first
-   click was a no-op that only made the button agree with reality. */
+/* Settle the attribute once at boot from the stored owner choice. A new device
+   starts with the Standing Field moving; the owner can stop it from Settings. */
 export function bootMotion() {
   const stored = ld('mo');
-  if (stored === '0' || stored === '1') R.setAttribute('data-reduce', stored === '1' ? '0' : '1');
-  else {
-    let osReduce = false;
-    try { osReduce = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { /* none */ }
-    if (osReduce) R.setAttribute('data-reduce', '1');
-  }
+  R.setAttribute('data-reduce', stored === '0' ? '1' : '0');
   S.motion = motionOn();
 }
 

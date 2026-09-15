@@ -28,9 +28,10 @@ export function shouldAnimateField({ surface, visibilityState, fieldList, motion
     && Boolean(motion);
 }
 
-/** Resolve the canvas motion state from the explicit in-app choice and OS default. */
-export function fieldMotionEnabled({ explicitReduction, systemPrefersReduced }) {
+/** Resolve canvas motion from the explicit in-app choice. The Standing Field
+ * rotates on first launch; Reduce motion remains an immediate, persistent
+ * owner control. */
+export function fieldMotionEnabled({ explicitReduction }) {
   if (explicitReduction === '1') return false;
-  if (explicitReduction === '0') return true;
-  return !systemPrefersReduced;
+  return true;
 }

@@ -69,7 +69,7 @@ function planFromUnknown(value: unknown): ForgePlan | null {
   const goal = typeof v['goal'] === 'string' ? v['goal'].replace(/\s+/g, ' ').trim().slice(0, MAX_PLAN_ITEM_CHARS) : '';
   const steps = cleanList(v['steps'], MAX_PLAN_STEPS);
   if (steps.length === 0) return null;
-  return { goal, steps, files: cleanList(v['files'], MAX_PLAN_STEPS), risks: cleanList(v['risks'], MAX_PLAN_STEPS) };
+  return { goal, steps, files: cleanList(v['files'], 12), risks: cleanList(v['risks'], MAX_PLAN_STEPS) };
 }
 
 /** The plan as prose for a run prompt — one canonical rendering, shared by the run and the window. */
@@ -79,7 +79,7 @@ export function planText(plan: ForgePlan): string {
     plan.goal ? `Goal: ${plan.goal}` : '',
     'Steps:',
     ...plan.steps.map((s, i) => `${i + 1}. ${s}`),
-    plan.files.length ? `Files expected to change: ${plan.files.join(', ')}` : '',
+    plan.files.length ? `Files in scope: ${plan.files.join(', ')}` : '',
     plan.risks.length ? `Risks and open questions: ${plan.risks.join('; ')}` : '',
   ];
   return lines.filter((l) => l !== '').join('\n');
@@ -189,7 +189,7 @@ export async function postForgePlan(ctx: ServerCtx, req: IncomingMessage, res: S
     // Last on purpose: Ollama's Qwen3 template appends its own "/no_think"
     // switch to the END of the prompt when thinking is off, and a model copied
     // it into the goal when the owner's task sat there. It now lands here.
-    'Answer with JSON only: {"goal": one-sentence restatement of the owner task, "steps": [3 to 8 concrete steps], "files": [relative paths you expect to create or change], "risks": [risks or questions for the owner; may be empty]}.',
+    'Answer with JSON only: {"goal": one-sentence restatement of the owner task, "steps": [3 to 8 concrete steps], "files": [up to 12 relative paths you expect to inspect, create or change], "risks": [risks or questions for the owner; may be empty]}.',
     'Name only files that exist in the list above or that the task asks to create. Never invent repository contents. Output the JSON now.',
   ].filter((l) => l !== '').join(NL + NL);
   const controller = new AbortController();
@@ -204,7 +204,7 @@ export async function postForgePlan(ctx: ServerCtx, req: IncomingMessage, res: S
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         model, prompt, stream: false, think: false, format: PLAN_SCHEMA,
-        keep_alive: '60s', options: { num_ctx: 16384, num_predict: 2048 },
+        keep_alive: '60s', options: { num_ctx: 16384, num_predict: 2048, temperature: 0 },
       }),
       signal: controller.signal,
     });
@@ -234,9 +234,44 @@ export async function postForgePlan(ctx: ServerCtx, req: IncomingMessage, res: S
     const m = /\{[\s\S]*\}/.exec(withoutReasoning(text));
     if (m) { try { parsed = JSON.parse(m[0]); } catch { parsed = null; } }
   }
-  const plan = planFromUnknown(parsed);
+  let plan = planFromUnknown(parsed);
   if (plan === null) {
-    return json(res, 502, { error: { code: 'plan-unparseable', message: `${model} did not return a usable plan (no steps).`, resolve: 'Plan again with a larger model, or run without a plan.' } });
+    // A smaller retry makes local planning dependable on modest machines. The
+    // first pass saw the full bounded context; if a small model returns empty
+    // structured fields, retry with the real task and repository tree only.
+    // This remains read-only and never invents file contents.
+    const compactPrompt = [
+      'Create a READ-ONLY implementation plan. Do not edit files or run commands.',
+      `OWNER TASK:${NL}${prepared.boundedTask.prompt}`,
+      tree.length === 0 ? 'THE REPOSITORY IS EMPTY.' : `REAL REPOSITORY FILES:${NL}${tree.slice(0, 300).join(NL)}`,
+      'Return JSON only: {"goal":"one sentence","steps":["3 to 8 concrete steps"],"files":["up to 12 real relative paths in scope"],"risks":[]}.',
+    ].join(NL + NL);
+    try {
+      const retry = await fetch(ollamaEndpoint(ctx, '/api/generate'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model, prompt: compactPrompt, stream: false, think: false, format: PLAN_SCHEMA,
+          keep_alive: '60s', options: { num_ctx: 8192, num_predict: 1024, temperature: 0 },
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (retry.ok) {
+        const reply = (await retry.json()) as { response?: unknown; prompt_eval_count?: number; eval_count?: number };
+        const retryText = typeof reply.response === 'string' ? reply.response : '';
+        let retryParsed: unknown = null;
+        try { retryParsed = JSON.parse(withoutReasoning(retryText).trim()); } catch {
+          const match = /\{[\s\S]*\}/.exec(withoutReasoning(retryText));
+          if (match) { try { retryParsed = JSON.parse(match[0]); } catch { retryParsed = null; } }
+        }
+        plan = planFromUnknown(retryParsed);
+        tokensIn = (tokensIn ?? 0) + (reply.prompt_eval_count ?? 0);
+        tokensOut = (tokensOut ?? 0) + (reply.eval_count ?? 0);
+      }
+    } catch { /* the actionable error below is the same for both attempts */ }
+  }
+  if (plan === null) {
+    return json(res, 502, { error: { code: 'plan-unparseable', message: `${model} did not return a usable plan (no steps), including a compact retry.`, resolve: 'Try a larger local model, or run without a plan.' } });
   }
   const planId = `plan-${Date.now().toString(36)}-${randomUUID()}`;
   if (plans.size >= MAX_STORED_PLANS) {

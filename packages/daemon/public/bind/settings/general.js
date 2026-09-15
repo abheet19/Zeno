@@ -22,8 +22,7 @@ import {
 function readReduceMotionPref() {
   const v = zget('mo');
   if (v === '0') return true; // stored: motion OFF -> reduced
-  if (v === '1') return false; // stored: motion ON -> not reduced
-  try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+  return false; // stored motion ON, or first launch: the field rotates
 }
 
 export function bindGeneral(modal) {

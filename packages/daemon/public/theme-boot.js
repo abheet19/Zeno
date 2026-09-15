@@ -30,9 +30,9 @@
        attributes bind/settings.js uses (field.js's `zeno-mo` / `zeno-fl`,
        :root[data-reduce] / [data-flat]); this only resolves them earlier. */
     var mo = localStorage.getItem('zeno-mo');
-    var reduce = mo === '0' ? true
-      : mo === '1' ? false
-        : matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // The field is an interactive primary control, so it moves on first run.
+    // The explicit setting still stops field and interface motion immediately.
+    var reduce = mo === '0';
     root.setAttribute('data-reduce', reduce ? '1' : '0');
     root.setAttribute('data-flat', localStorage.getItem('zeno-fl') === '1' ? '1' : '0');
   } catch {

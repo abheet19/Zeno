@@ -45,21 +45,11 @@
   // ---------- CHAT MODEL: Home = live chat; Chats = history, open one to continue ----------
   let WORK_ID=9; function nextWork(){ WORK_ID=10+CHATS.length; return WORK_ID; }
   const TASK_RE=/\b(rotate|add|fix|build|create|refactor|write|implement|deploy|update|remove|rename|migrate|test|ship|change|make)\b/i;
-  const CHATS=[
-    { title:'What changed in the sandbox since my last approval?', became:'answered', when:'2m ago', turns:[
-      {who:'you', html:'<p>What changed in the sandbox since my last approval?</p>'},
-      {who:'z', html:'<details class="thinking" open><summary><b>Working…</b> read local state · 3 steps · 0.6s</summary><span>· read <span class="cite">/state</span> — 2 uncommitted files</span><span>· read <span class="cite">/forge/status</span> — 1 run applied, 1 waiting</span><span>· diffed the sandbox against the last sealed receipt</span></details><p>Two files changed since receipt <span class="cite">78f2…6ce4</span>: <b>src/App.tsx</b> (a 48-byte edit an agent applied after your approval) and <b>src/ingest.ts</b> (still uncommitted, waiting on the INGEST-12 decision). Nothing reached the network.</p>'} ]},
-    { title:'Draft a task to rotate the ingest token', became:'→ Forge · INGEST-12', when:'1h ago', turns:[
-      {who:'you', html:'<p>Draft a task to rotate the ingest token</p>'},
-      {who:'z', html:'<p>That reads as work. I drafted it as <b>INGEST-12</b> (T2) and routed it to Forge — the proposed fix is now waiting for your approval.</p>'} ]},
-    { title:"Summarize today's receipts", became:'answered', when:'3h ago', turns:[
-      {who:'you', html:"<p>Summarize today's receipts</p>"},
-      {who:'z', html:'<p>Four effects settled today, all sealed and chain-verified: one T2 write to <b>src/App.tsx</b>, one T1 Forge run that added three test files, one memory commit, and one T2 commit "scaffold the App shell".</p>'} ]}
-  ];
+  const CHATS=[];
   const chatsList=$('#chats-list'), chatsListView=$('#chats-list-view'), chatsOpen=$('#chats-open-view'), chatsTurns=$('#chats-turns'), chatsTitle=$('#chats-title'), chatsCount=$('#chats-count');
   let openChatIdx=null;
   function turnEl(t){ const d=document.createElement('div'); d.className='turn '+t.who; d.innerHTML='<div class="who">'+(t.who==='you'?'A':'Z')+'</div><div class="bt">'+t.html+'</div>'; return d; }
-  function renderChatsList(){ chatsList.innerHTML=''; chatsCount.textContent=CHATS.length;
+  function renderChatsList(){ chatsList.innerHTML=''; chatsCount.textContent=CHATS.length ? String(CHATS.length) : '';
     CHATS.forEach((c,i)=>{ const r=document.createElement('div'); r.className='lrow'; r.dataset.chat=i;
       const pill = c.became.startsWith('→') ? '<span class="pill cy"><span class="d"></span>'+esc(c.became)+'</span>' : '<span class="pill wt">'+esc(c.became)+'</span>';
       r.innerHTML='<span class="tier">'+esc(c.when)+'</span><div><div class="tt">'+esc(c.title)+'</div><div class="mm">'+c.turns.length+' turns</div></div>'+pill; chatsList.append(r); }); }

@@ -86,7 +86,7 @@ export function setupPlanFirst(S) {
       plan.goal ? `Goal: ${plan.goal}` : '',
       'Steps:',
       ...plan.steps.map((step, index) => `${index + 1}. ${step}`),
-      plan.files.length ? `Files expected to change: ${plan.files.join(', ')}` : '',
+      plan.files.length ? `Files in scope: ${plan.files.join(', ')}` : '',
       plan.risks.length ? `Risks and open questions: ${plan.risks.join('; ')}` : '',
     ];
     return `${task}\n\n${lines.filter((line) => line !== '').join('\n')}`;
@@ -212,7 +212,7 @@ export function setupPlanFirst(S) {
       });
       add(card, more);
     }
-    add(card, listBlock('Files it expects to touch', t.plan.files, 'files'), listBlock('Risks and questions', t.plan.risks, 'risks'));
+    add(card, listBlock('Files in scope', t.plan.files, 'files'), listBlock('Risks and questions', t.plan.risks, 'risks'));
     // The honesty line is the daemon's own sentence about what planning did
     // not do — shown verbatim so this file cannot overstate it.
     if (t.note) add(card, el('div', 'vsnote', t.note));

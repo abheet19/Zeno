@@ -54,9 +54,9 @@ test('the Command field consumes frames only while its visible animated canvas i
   assert.equal(shouldAnimateField({ ...active, motion: false }), false);
 });
 
-test('the owner can enable motion explicitly while an unset preference follows the OS', () => {
+test('the field rotates on first launch and the owner can explicitly reduce motion', () => {
   assert.equal(fieldMotionEnabled({ explicitReduction: null, systemPrefersReduced: false }), true);
-  assert.equal(fieldMotionEnabled({ explicitReduction: null, systemPrefersReduced: true }), false);
+  assert.equal(fieldMotionEnabled({ explicitReduction: null, systemPrefersReduced: true }), true);
   assert.equal(fieldMotionEnabled({ explicitReduction: '1', systemPrefersReduced: false }), false);
   assert.equal(fieldMotionEnabled({ explicitReduction: '0', systemPrefersReduced: true }), true);
 });
