@@ -114,7 +114,7 @@ export function isOwnerMemoryQuestion(question: string): boolean {
 }
 
 export function isRepositoryOverviewQuestion(question: string): boolean {
-  return /^(?:what(?:'s| is) (?:in|the state of) (?:the )?(?:sandbox|forge (?:workspace|project))(?: right now)?|what (?:git )?branch is (?:the )?(?:current )?(?:forge )?(?:workspace|project|sandbox) on)\s*[?!.]*$/i.test(question.trim());
+  return /^(?:what(?:'s| is) (?:in|the state of|currently active in) (?:(?:the|this) )?(?:sandbox|forge (?:workspace|project)|workspace)(?: right now)?|what (?:git )?branch is (?:the )?(?:current )?(?:forge )?(?:workspace|project|sandbox) on)\s*[?!.]*$/i.test(question.trim());
 }
 
 /**

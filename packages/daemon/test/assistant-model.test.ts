@@ -49,6 +49,7 @@ const FAKE_OLLAMA = 'http://127.0.0.1:22435';
 test('repository overview recognition is narrow and covers the Command prompts owners use', () => {
   assert.equal(isRepositoryOverviewQuestion('What is in the sandbox right now?'), true);
   assert.equal(isRepositoryOverviewQuestion('What Git branch is the current Forge project on?'), true);
+  assert.equal(isRepositoryOverviewQuestion('What is currently active in this workspace?'), true);
   assert.equal(isRepositoryOverviewQuestion('What is binary search?'), false);
 });
 
