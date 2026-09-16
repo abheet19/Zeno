@@ -22,6 +22,11 @@ export const title = 'Compare runs real models, measures real time, and keeps a 
 export const criteria = ['GAP-FORGE-REASONING', 'owner: real multi-model compare'];
 
 export async function run({ daemon, page, ok, network, Blocked }) {
+  const runBodies = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname !== '/forge/run') return;
+    try { runBodies.push(JSON.parse(request.postData() || '{}')); } catch { runBodies.push(null); }
+  });
   const host = await daemon.api('/forge/models/host');
   const installed = (host.body && Array.isArray(host.body.models) ? host.body.models : []).map((m) => m.name);
   if (installed.length < 2) {
@@ -125,6 +130,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
 
   if (picked.length === 2) {
     const before = network.filter((n) => n === 'POST /forge/run').length;
+    const beforeBodies = runBodies.length;
     await page.evaluate(() => {
       const run = document.querySelector('#mp-run');
       if (run) run.click();
@@ -150,6 +156,10 @@ export async function run({ daemon, page, ok, network, Blocked }) {
       await page.waitForTimeout(4000);
       const runs = network.filter((n) => n === 'POST /forge/run').length;
       ok('comparing actually dispatches real runs', runs > before, `POST /forge/run seen ${runs} times`);
+      const compareRuns = runBodies.slice(beforeBodies);
+      ok('compare run ids are portable worktree leaf names',
+        compareRuns.length > 0 && compareRuns.every((body) => body && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.runId || '')),
+        JSON.stringify(compareRuns.map((body) => body && body.runId)));
 
       const text = await page.evaluate(() => document.querySelector('.cmpv')?.innerText || '');
       ok('no fabricated cost is shown', !/\$\d/.test(text), text.slice(0, 200));

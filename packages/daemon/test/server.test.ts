@@ -1930,6 +1930,8 @@ test('Forge — task and run identifiers are bounded before any provider can sta
     assert.equal(huge.status, 413);
     const invalid = await post(h, '/forge/run', h.owner, { task: 'small', agentId: 'codex', runId: '../outside', hostedConfirmed: true });
     assert.equal(invalid.status, 400);
+    const windowsUnsafe = await post(h, '/forge/run', h.owner, { task: 'small', agentId: 'codex', runId: 'cmp-qwen3:14b', hostedConfirmed: true });
+    assert.equal(windowsUnsafe.status, 400, 'a run id that cannot be a Windows worktree leaf is rejected before a provider starts');
   } finally {
     await h.close();
   }

@@ -14,8 +14,14 @@ export const MAX_FORGE_EFFECTIVE_PROMPT_CHARS = 96_000;
 export const MAX_FORGE_RULE_BODY_CHARS = 24_000;
 /** Limits prompt growth and accidental paid-provider overuse. */
 export const MAX_FORGE_TASK_CHARS = 16_000;
-/** Shared by every route that accepts a caller-chosen (or caller-echoed) Forge run id. */
-export const FORGE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+/**
+ * Shared by every route that accepts a caller-chosen (or caller-echoed) Forge
+ * run id. A run id is also used as the leaf name of its disposable Windows
+ * worktree, so it must be a portable filename segment as well as a harmless
+ * identifier. In particular, a colon is valid in an abstract identifier but
+ * is a drive marker/alternate-data-stream separator on Windows.
+ */
+export const FORGE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /** Remove an explicit owner instruction that forbids one or more file mutations. */
 function stripFileEditGuard(task: string): string {

@@ -195,7 +195,11 @@ async function runOne(c, task, onDone) {
     return;
   }
 
-  const payload = { task, agentId, runId: `cmp-${m.id.replace(/[^A-Za-z0-9._:-]/g, '-')}-${Math.floor(performance.now())}` };
+  // The daemon uses a run id as the leaf of an isolated worktree. Keep this
+  // display-independent id portable: local Ollama names contain `:` (for
+  // example qwen3:14b), which Windows treats as a drive/ADS separator.
+  const safeModelId = m.id.replace(/[^A-Za-z0-9._-]/g, '-');
+  const payload = { task, agentId, runId: `cmp-${safeModelId}-${Math.floor(performance.now())}` };
   if (m.model) payload.model = m.model;
   else payload.hostedConfirmed = true; // the owner confirmed at the Compare button
 
