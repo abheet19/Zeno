@@ -38,17 +38,16 @@ between what it **proposes** and what actually **happens**.
 > for the exact boundary. The daemon itself exposes no non-loopback listening surface.
 
 > [!NOTE]
-> **Current verification (2026-09-16, `7c3c685`).** The full workspace gate is green; the
-> daemon gate alone passed **202/202** tests, and the desktop gate passed **107/107**. The complete
-> 26-flow renderer suite ran again on this exact commit: **23 passed, 0 failed, 3 blocked**. Its
-> browser-verifiable coverage includes real local-model Command answers, the animated first-run orb
-> and persisted Reduce motion setting, neutral first paint with no sample approval/run/count flash,
-> Forge planning with compact local-model recovery, run progress, editor, terminal, project explorer,
-> capability selection, all routed CTAs, approval/apply/receipt handling, Vault memory, settings,
-> stress checks, and orchestrator boundaries. The three blocks are explicit: physical Voice audio,
-> physical Counsel audio through the desktop Whisper bridge, and pairing completion with a second
-> Zeno client. These are bounded checks, not acceptance of all 196 formal criteria, a signed release,
-> provider/account matrix coverage, physical-device coverage, load/SLO proof, or WCAG certification.
+> **Current verification (2026-09-16, `d2b8124`).** The scoped package gates currently pass: Desktop
+> **112/112**, Forge **140/140**, and Skills **134/134** with two Windows symlink-fixture skips.
+> The complete 26-flow browser-renderer suite on this commit recorded **23 passed, 0 failed and 3
+> blocked** (1,057 passing checks). It covers real local-model Command answers, governed approvals and
+> receipts, Forge planning/runs/progress/editor/terminal/project selection, Command-to-Forge routing,
+> Vault memory/redaction, settings, capability setup, bounded stress, the Field's selectable nodes and
+> all 123 visible controls. The explicit blocks are real Voice audio, real Counsel transcription through
+> the installed desktop Whisper bridge, and second-client pairing. These are bounded checks, not proof
+> of native Electron visual smoothness, all 196 formal acceptance criteria, a signed release,
+> provider/account matrix coverage, physical-device coverage, capacity/SLOs or WCAG certification.
 
 <div align="center">
 
