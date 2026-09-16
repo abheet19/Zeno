@@ -194,6 +194,13 @@ export async function bindVault() {
  */
 function bindImportCard(card, onImported) {
   if (!card) return;
+  /* Live memory events re-run bindVault. Replacing an open card on every
+     event races an in-flight import: the server can accept the notes, then a
+     refresh erases the receipt-style result before the owner sees it. The card
+     owns one set of listeners for its lifetime; the note list still refreshes
+     through onImported and the live binder. */
+  if (card.dataset.zenoImportBound === '1') return;
+  card.dataset.zenoImportBound = '1';
   const wrap = el('div', null);
   wrap.appendChild(headingEl('import local memory'));
   wrap.appendChild(noteEl('Choose a local JSON, Markdown, or text file. Nothing leaves this device. JSON may be '
