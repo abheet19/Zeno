@@ -118,6 +118,18 @@ export function isRepositoryOverviewQuestion(question: string): boolean {
 }
 
 /**
+ * Plain technical concepts are not about the owner's current Zeno state.
+ * Keep them off the grounded prompt so a local fact id cannot be presented as
+ * evidence for a general answer.
+ */
+export function isStandaloneConceptQuestion(question: string): boolean {
+  const q = question.replace(/\s+/g, ' ').trim();
+  if (q === '' || needsLiveLookup(q)) return false;
+  if (/\b(?:zeno|forge|counsel|vault|approval|receipt|workspace|sandbox|project|repo(?:sitory)?|branch|memory|device|agent|task|pending|waiting|running|current|today|local state)\b/i.test(q)) return false;
+  return /^(?:what (?:is|are)|how (?:does|do)|why (?:does|do))\b/i.test(q) || /\b(?:explain|define)\b/i.test(q);
+}
+
+/**
  * The local models this machine can answer with — the same list
  * `GET /forge/agents` shows in the picker. An injected probe (the tests' fixed
  * one) is honoured; otherwise Ollama is asked directly rather than through
@@ -410,6 +422,21 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     return json(res, 200, { answer: null, cited: [], ungrounded: null, proposal: null, delegated: null, note: localModelFailureNote(requestedOrDefaultModel, error, turnTimeoutMs), modelUsed: requestedOrDefaultModel });
   }
   const modelUsed = chosen.modelUsed;
+  // A standalone concept should use the existing fact-free path. Otherwise a
+  // small model can attach a real local fact id to unrelated general prose.
+  if (isStandaloneConceptQuestion(question)) {
+    const general = await askGeneral(ctx, question, modelUsed, AbortSignal.timeout(remainingMs()));
+    return json(res, 200, {
+      answer: general,
+      general: general !== null,
+      cited: [],
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: general === null ? `The local model did not return a general answer. Try ${modelUsed} again.` : chosen.note,
+      modelUsed,
+    });
+  }
   // `note` keeps carrying truncation; a model fallback is appended to it so the
   // window shows it without a new field, and `modelUsed` names the model on
   // every reply so a picker can confirm what actually answered.

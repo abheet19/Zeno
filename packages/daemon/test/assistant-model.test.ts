@@ -31,6 +31,7 @@ import {
   ZENO_CAPABILITY_HELP,
   assistantTurnTimeoutMs,
   isRepositoryOverviewQuestion,
+  isStandaloneConceptQuestion,
 } from '../src/routes/assistant.js';
 
 test('Command keeps every model bounded and gives selected 14B models a larger cold-start window', () => {
@@ -51,6 +52,15 @@ test('repository overview recognition is narrow and covers the Command prompts o
   assert.equal(isRepositoryOverviewQuestion('What Git branch is the current Forge project on?'), true);
   assert.equal(isRepositoryOverviewQuestion('What is currently active in this workspace?'), true);
   assert.equal(isRepositoryOverviewQuestion('What is binary search?'), false);
+});
+
+test('standalone concepts stay fact-free while Zeno state questions remain grounded', () => {
+  assert.equal(isStandaloneConceptQuestion('What is a binary search tree?'), true);
+  assert.equal(isStandaloneConceptQuestion('Explain the JavaScript event loop.'), true);
+  assert.equal(isStandaloneConceptQuestion('In one short sentence, explain a binary search tree.'), true);
+  assert.equal(isStandaloneConceptQuestion('What is the current Forge branch?'), false);
+  assert.equal(isStandaloneConceptQuestion('What is waiting on me?'), false);
+  assert.equal(isStandaloneConceptQuestion('What is the latest TypeScript release?'), false);
 });
 
 test('ASK — the model field picks an installed local model, falls back honestly, and defaults when absent', async () => {
@@ -192,9 +202,11 @@ test('ASK — the model field picks an installed local model, falls back honestl
       body: JSON.stringify({ question: 'What is 2 plus 2?', model: 'llama3.1:8b' }),
     });
     assert.equal(generalQuestion.status, 200);
-    const generalPayload = (await generalQuestion.json()) as { answer?: string; general?: boolean };
-    assert.equal(generalPayload.answer, 'Four.', 'a punctuation-variant grounded refusal falls through to the general answer');
-    assert.equal(generalPayload.general, true, 'the fallback stays visibly separate from Zeno state');
+    const generalPayload = (await generalQuestion.json()) as { answer?: string; general?: boolean; cited?: unknown[]; modelUsed?: string };
+    assert.equal(generalPayload.answer, 'Four.', 'a standalone concept takes the fact-free general-answer path');
+    assert.equal(generalPayload.general, true, 'the general answer stays visibly separate from Zeno state');
+    assert.deepEqual(generalPayload.cited, [], 'a standalone concept never carries an unrelated local fact citation');
+    assert.equal(generalPayload.modelUsed, 'llama3.1:8b', 'the requested installed model answers the concept');
 
     const picked = await ask({ model: 'llama3.1:8b' });
     assert.equal(picked.modelUsed, 'llama3.1:8b', 'an installed model is the one that answers');
