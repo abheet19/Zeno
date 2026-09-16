@@ -65,6 +65,33 @@ export async function run({ daemon, page, ok }) {
   });
   ok('the field is actually painting', painted.pct > 0.5, `${painted.pct}% of sampled pixels drawn`);
 
+  // A static but painted canvas is still a broken Standing Field. Compare two
+  // sampled frames only when the owner has not selected reduced motion.
+  const frameMotion = await page.evaluate(async () => {
+    const canvas = document.querySelector('.orb-wrap canvas');
+    const sample = () => {
+      const { width, height } = canvas;
+      const pixels = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+      let hash = 2166136261;
+      const rowStep = Math.max(1, Math.floor(height / 36));
+      const columnStep = Math.max(1, Math.floor(width / 48));
+      for (let y = 0; y < height; y += rowStep) {
+        for (let x = 0; x < width; x += columnStep) {
+          const offset = (y * width + x) * 4;
+          hash ^= pixels[offset] ^ (pixels[offset + 1] << 8) ^ (pixels[offset + 2] << 16);
+          hash = Math.imul(hash, 16777619);
+        }
+      }
+      return hash >>> 0;
+    };
+    const before = sample();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const after = sample();
+    return { before, after, reduced: document.documentElement.dataset.reduce === '1' };
+  });
+  ok('the field advances between frames when motion is enabled',
+    frameMotion.reduced || frameMotion.before !== frameMotion.after,
+    JSON.stringify(frameMotion));
   // Pick a node the way a person does: a pointer press and release on it.
   const picked = await page.evaluate(async () => {
     const c = document.querySelector('.orb-wrap canvas');
