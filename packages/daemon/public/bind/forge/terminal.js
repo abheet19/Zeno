@@ -102,11 +102,15 @@ export function setupTerminal(S) {
   const lastOutputText = () => { const h = lastRun(); return h ? `${h.stdout || ''}${h.stderr || ''}` : ''; };
   const shellSel = tabsBar ? $('.vstermsel', tabsBar) : null;
   if (shellSel) {
-    // The artifact said "powershell"; the daemon runs cmd.exe (ComSpec) on
-    // Windows and $SHELL elsewhere. Say what is true instead.
+    // Name the shell a person will actually use. Calling cmd.exe "system shell"
+    // hid the one detail needed to understand why a POSIX command such as pwd fails.
     const svg = shellSel.querySelector('svg');
-    fill(shellSel, svg, document.createTextNode('system shell'));
-    shellSel.title = 'Each command runs once, in the repository root, with the system shell: cmd.exe (ComSpec) on Windows, $SHELL elsewhere.';
+    const windowsShell = /windows/i.test(navigator.userAgent) || /^win/i.test(navigator.platform || '');
+    const shellName = windowsShell ? 'Windows Command Prompt' : 'System shell';
+    fill(shellSel, svg, document.createTextNode(shellName));
+    shellSel.title = windowsShell
+      ? 'Each command runs once in the repository root with Windows Command Prompt (cmd.exe). Try: dir, cd, git status.'
+      : 'Each command runs once in the repository root with the system shell.';
   }
   // The five icon buttons before #vsp-max/#vsp-hide, in the artifact's order:
   // Launch Profile, Add Context (@), Split Terminal, Kill Terminal, More.

@@ -103,6 +103,14 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   await page.click('#forge-viewseg [data-forge-view="editor"]');
   await page.waitForFunction(() => !document.querySelector('#ide')?.classList.contains('mode-agent'));
   await page.waitForTimeout(1200);
+  const shellLabel = await page.evaluate(() => {
+    const label = document.querySelector('.vstermsel');
+    const windows = /windows/i.test(navigator.userAgent) || /^win/i.test(navigator.platform || '');
+    return label ? { text: label.textContent.trim(), title: label.title, expected: windows ? 'Windows Command Prompt' : 'System shell', windows } : null;
+  });
+  ok('the terminal names the actual system shell instead of a vague shell label',
+    shellLabel && shellLabel.text === shellLabel.expected && (!shellLabel.windows || /cmd\.exe/.test(shellLabel.title)),
+    JSON.stringify(shellLabel));
 
   for (const name of PANELS) {
     await page.click(`.vsptabs [data-vsp="${name}"]`);
