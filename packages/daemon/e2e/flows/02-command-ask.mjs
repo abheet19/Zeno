@@ -76,4 +76,26 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   if (Array.isArray(direct.body.cited) && direct.body.cited.length) {
     ok('a grounded reply shows its sources', /Sources:/.test(reply), reply.slice(-160));
   }
+
+  // Text navigation is deliberately local: it must activate the same product
+  // controls as a mouse click and never fall through to a model refusal.
+  async function textNavigation(text, product) {
+    await page.click('.seg [data-product="command"]');
+    await page.click('.nav-i[data-screen="home"]');
+    const beforeNavigationAsk = network.filter((n) => n === 'POST /assistant/ask').length;
+    await page.fill('#home-ta', text);
+    await page.click('#home-send');
+    const activated = await page.waitForFunction(
+      (name) => document.querySelector(`.seg [data-product="${name}"]`)?.getAttribute('aria-current') === 'page',
+      product,
+      { timeout: 8_000 },
+    ).then(() => true).catch(() => false);
+    const afterNavigationAsk = network.filter((n) => n === 'POST /assistant/ask').length;
+    ok(`${text} opens ${product} through the real product control`, activated);
+    ok(`${text} does not send a model request`, afterNavigationAsk === beforeNavigationAsk,
+      `assistant asks before=${beforeNavigationAsk}, after=${afterNavigationAsk}`);
+  }
+
+  await textNavigation('go to forge', 'forge');
+  await textNavigation('go to counsel', 'counsel');
 }
