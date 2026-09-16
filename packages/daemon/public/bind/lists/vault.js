@@ -2,8 +2,8 @@
  * bind/lists/vault.js — VAULT screen: real memory (recent notes, real
  * recall, proposed memories awaiting owner approval) and today's brief.
  *
- * Draws `.sbar` (search only) above a `#import-card` (the mock "import
- * preview", neutralized here — see neutralizeImportCard) and a second
+ * Draws `.sbar` (search only) above a `#import-card` (a local-file import
+ * preview) and a second
  * `.card > .row-list` of `.lrow`s. See bind/lists.js for the full endpoint
  * list this binder reads (`GET /memory`, `GET /memory?q=`, `GET
  * /memory/pending`, `POST /memory/approvals`, `GET /brief`).
@@ -17,13 +17,16 @@ export async function bindVault() {
   if (!screen) return;
 
   const importCard = document.getElementById('import-card');
-  neutralizeImportCard(importCard);
 
   const cards = $$('.card', screen);
   const listCard = cards.find((c) => c !== importCard && !c.hasAttribute('data-brief-card'));
   const rowList = listCard ? listCard.querySelector('.row-list') : null;
   const searchInput = screen.querySelector('.sbar input');
   if (!rowList) return;
+  // The import preview also uses `.row-list`; give the authoritative note list
+  // a stable semantic hook so tests and assistive integrations cannot confuse
+  // a hidden preview with the owner’s actual stored memory.
+  rowList.setAttribute('data-vault-notes', '');
 
   /* live.js re-runs this binder on every stream event, so it has to be
      idempotent — and it was not. Each run started with an empty `query` while
@@ -125,6 +128,15 @@ export async function bindVault() {
     fill(rowList, ...nodes);
   }
 
+  /* The daemon owns sanitization and persistence. This browser-only control
+     merely parses a user-selected local file, previews its shape, and makes
+     one explicit owner request. It never uploads a file or reads a path. */
+  bindImportCard(importCard, async () => {
+    notesRes = await getJSON('/memory');
+    pendingRes = await getJSON('/memory/pending');
+    render();
+  });
+
   // A live/navigation refresh must not replace already-rendered memory with a
   // transient loading row. Keep the last successful snapshot visible until
   // the new read lands; this also avoids a noticeable flash on slower disks.
@@ -173,23 +185,90 @@ export async function bindVault() {
   bindBrief(screen);
 }
 
-/** The mock `#import-card` shows a fabricated preview ("4 records…", fake
- *  rows, a fake "Approve import (3)"). There is no real import endpoint this
- *  binder was given, so rather than leave invented numbers standing behind a
- *  button a user can actually click, the card's content is replaced with an
- *  honest statement. `[data-import-cancel]` is left in place — ui.js already
- *  wires it to close the card, and that is a real effect. */
-function neutralizeImportCard(card) {
+/**
+ * Render the real local-memory importer. JSON accepts either an array or an
+ * object containing `notes`; text/Markdown becomes one note. This deliberately
+ * does not pretend to parse proprietary Claude or Codex export schemas: users
+ * can inspect the local preview and the server reports imported/skipped/redacted
+ * counts after applying the same sanitizer used for every memory write.
+ */
+function bindImportCard(card, onImported) {
   if (!card) return;
   const wrap = el('div', null);
-  wrap.appendChild(noteEl('Importing memory from another assistant is not wired to a real endpoint from this '
-    + 'button yet — nothing has been read and nothing has been written. A real import would sanitize each note '
-    + 'and route it through the same owner-approval path any other memory write uses.'));
+  wrap.appendChild(headingEl('import local memory'));
+  wrap.appendChild(noteEl('Choose a local JSON, Markdown, or text file. Nothing leaves this device. JSON may be '
+    + 'an array of notes or an object with a `notes` array; each note may contain title or description, body, tags, and kind.'));
+
+  const input = el('input', null);
+  input.type = 'file';
+  input.accept = '.json,.md,.txt,application/json,text/plain,text/markdown';
+  input.setAttribute('aria-label', 'Choose a local memory export');
+  input.style.marginTop = '10px';
+  const status = el('div', 'mm', 'No file selected.');
+  status.style.marginTop = '8px';
+  const preview = el('div', 'row-list');
+  preview.style.marginTop = '8px';
+  const actions = el('div', null);
+  actions.style.cssText = 'display:flex;gap:9px;margin-top:12px;flex-wrap:wrap';
+  const commit = el('button', 'btn p sm', 'Import locally');
+  commit.type = 'button';
+  commit.disabled = true;
   const close = el('button', 'btn g sm', 'Close');
   close.type = 'button';
-  close.setAttribute('data-import-cancel', '');
-  wrap.appendChild(close);
+  actions.append(commit, close);
+  wrap.append(input, status, preview, actions);
   fill(card, wrap);
+
+  let notes = null;
+  const clear = (message) => {
+    notes = null;
+    commit.disabled = true;
+    status.textContent = message;
+    fill(preview);
+  };
+  close.addEventListener('click', () => { card.hidden = true; });
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return clear('No file selected.');
+    if (file.size > 2 * 1024 * 1024) return clear('Choose a file smaller than 2 MB.');
+    try {
+      const text = await file.text();
+      let candidate;
+      if (/\.json$/i.test(file.name) || /^\s*[\[{]/.test(text)) {
+        const parsed = JSON.parse(text);
+        candidate = Array.isArray(parsed) ? parsed : parsed && parsed.notes;
+        if (!Array.isArray(candidate)) throw new Error('JSON needs a notes array.');
+      } else {
+        candidate = [{ title: file.name.replace(/\.[^.]+$/, '') || 'Imported note', body: text, kind: 'fact' }];
+      }
+      const valid = candidate.filter((note) => note && typeof note === 'object').slice(0, 500);
+      if (!valid.length) throw new Error('No note objects were found.');
+      notes = valid;
+      status.textContent = `${notes.length} local note${notes.length === 1 ? '' : 's'} ready. The server will sanitize and report every result.`;
+      fill(preview, ...notes.slice(0, 5).map((note) => lrowEl('import', clip(note.title || note.description || '(untitled note)', 90), 'local preview · not imported yet', null)));
+      if (notes.length > 5) preview.appendChild(noteEl(`${notes.length - 5} additional note${notes.length === 6 ? '' : 's'} not shown in this preview.`));
+      commit.disabled = false;
+    } catch (err) {
+      clear(`Could not read that file: ${err && err.message ? err.message : 'invalid content'}`);
+    }
+  });
+  commit.addEventListener('click', async () => {
+    if (!notes) return;
+    commit.disabled = true;
+    status.textContent = 'Importing locally…';
+    const result = await postJSON('/memory/import', { notes });
+    if (!result.ok) {
+      commit.disabled = false;
+      status.textContent = `Import did not run: ${result.error}`;
+      return;
+    }
+    const data = result.data || {};
+    status.textContent = `Imported ${data.imported || 0}; skipped ${data.skipped || 0}; redacted ${data.redacted || 0}.`;
+    fill(preview);
+    notes = null;
+    await onImported();
+    toast(status.textContent);
+  });
 }
 
 async function bindBrief(screen) {

@@ -39,7 +39,7 @@ const OWNER_SECRET = 'sk-ant-api03Q7wE2rT9yU4iO1pA6sD3f';
 /** The artifact's hardcoded Vault rows. If any survives, the screen is fiction. */
 const FIXTURES = ['Release gate', 'QuillBot: 54 silent-failure', '3.5 years'];
 
-const vaultRows = (page) => page.$$eval('.screen[data-screen="vault"] .row-list .lrow', (els) =>
+const vaultRows = (page) => page.$$eval('.screen[data-screen="vault"] [data-vault-notes] .lrow', (els) =>
   els.map((r) => r.textContent.replace(/\s+/g, ' ').trim()));
 
 const railVault = (page) => page.evaluate(() =>
@@ -64,12 +64,17 @@ export async function run({ daemon, page, ok }) {
   ok.eq('the vault starts empty', empty.body.notes.length, 0);
 
   await page.click('.nav-i[data-screen="vault"]');
-  await page.waitForTimeout(1200);
+  // The Vault fetch is asynchronous. Wait for its real empty-state rendering
+  // instead of assuming a fixed timeout is enough on a busy local machine.
+  await page.waitForFunction(
+    () => /empty/i.test(document.querySelector('.screen[data-screen="vault"] [data-vault-notes]')?.textContent || ''),
+    { timeout: 15_000 },
+  );
 
   const atBoot = await vaultRows(page);
   ok('no artifact sample note survives on the Vault screen',
     !FIXTURES.some((f) => atBoot.some((r) => r.includes(f))), JSON.stringify(atBoot));
-  const emptyState = await page.$eval('.screen[data-screen="vault"] .row-list', (el) => el.textContent);
+  const emptyState = await page.$eval('.screen[data-screen="vault"] [data-vault-notes]', (el) => el.textContent);
   ok('an empty vault says so, rather than showing something', /empty/i.test(emptyState), emptyState.slice(0, 160));
   ok.eq('the rail does not claim the artifact\'s 12 notes', await railVault(page), '');
   const counts = await everyVaultCount(page);
@@ -103,7 +108,7 @@ export async function run({ daemon, page, ok }) {
 
   // No reload, no navigation: the window is supposed to be live.
   const ownerShown = await page.waitForFunction(
-    () => [...document.querySelectorAll('.screen[data-screen="vault"] .row-list .lrow')]
+    () => [...document.querySelectorAll('.screen[data-screen="vault"] [data-vault-notes] .lrow')]
       .some((r) => /zeppelin release checklist/i.test(r.textContent)),
     { timeout: 15_000 },
   ).then(() => true).catch(() => false);
@@ -155,7 +160,7 @@ export async function run({ daemon, page, ok }) {
   ok.eq('the owner can forget a note', forgot.body.forgotten, true);
   ok.eq('and it is gone from the vault', (await daemon.api('/memory')).body.notes.length, 0);
   const goneFromScreen = await page.waitForFunction(
-    () => [...document.querySelectorAll('.screen[data-screen="vault"] .row-list .lrow')]
+    () => [...document.querySelectorAll('.screen[data-screen="vault"] [data-vault-notes] .lrow')]
       .every((r) => !/zeppelin release checklist/i.test(r.textContent)),
     { timeout: 15_000 },
   ).then(() => true).catch(() => false);
@@ -235,10 +240,43 @@ export async function run({ daemon, page, ok }) {
     (els) => els.filter((c) => /today.s brief/i.test(c.textContent)).length);
   ok.eq('the Vault keeps exactly one brief card through live updates', briefCards, 1);
   await page.waitForFunction(
-    () => [...document.querySelectorAll('.screen[data-screen="vault"] .row-list .lrow')]
+    () => [...document.querySelectorAll('.screen[data-screen="vault"] [data-vault-notes] .lrow')]
       .filter((r) => /Model access/.test(r.textContent)).length === 1,
     { timeout: 15_000 },
   ).catch(() => {});
   const finalRows = await vaultRows(page);
   ok.eq('and lists each stored note exactly once', finalRows.filter((r) => /Model access/.test(r)).length, 1);
+
+  // ------------------------------------------------------------- local import
+  // The UI must not leave a persuasive but dead Claude/Codex import card. Use
+  // Playwright's in-memory file fixture: it proves the browser only submits
+  // structured local content, without reading a real export or user memory.
+  await page.click('[data-import]');
+  const importInput = page.locator('#import-card input[type="file"]');
+  await importInput.setInputFiles({
+    name: 'local-memory.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ notes: [
+      { title: 'Imported preference', body: 'Keep verification evidence close to the change.', tags: ['release'], kind: 'preference' },
+      { title: 'Imported secret check', body: `Never retain this token: ${AGENT_SECRET}`, kind: 'fact' },
+    ] }), 'utf8'),
+  });
+  const importCard = page.locator('#import-card');
+  await importCard.getByText('2 local notes ready.', { exact: false }).waitFor({ timeout: 10_000 });
+  ok('the Vault previews a local structured import before writing it',
+    await importCard.locator('.lrow').count() === 2, await importCard.innerText());
+  await importCard.getByRole('button', { name: 'Import locally' }).click();
+  await importCard.getByText('Imported 2; skipped 0; redacted 1.', { exact: false }).waitFor({ timeout: 15_000 });
+  const afterImport = await daemon.api('/memory');
+  ok.eq('the owner selected import writes both valid local notes', afterImport.body.notes.length, 4);
+  const importedSecret = afterImport.body.notes.find((n) => n.title === 'Imported secret check');
+  ok('imported memory is sanitized before storage too', importedSecret
+    && !importedSecret.body.includes(AGENT_SECRET)
+    && /\[REDACTED:github-token:[0-9a-f]+\]/.test(importedSecret.body), importedSecret && importedSecret.body);
+  const importedShown = await page.waitForFunction(
+    () => [...document.querySelectorAll('.screen[data-screen="vault"] [data-vault-notes] .lrow')]
+      .some((r) => /Imported preference/.test(r.textContent)),
+    { timeout: 15_000 },
+  ).then(() => true).catch(() => false);
+  ok('the imported note appears in the live Vault without a reload', importedShown, JSON.stringify(await vaultRows(page)));
 }
