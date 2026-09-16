@@ -305,8 +305,12 @@ export function setupExplorer(S) {
   window.addEventListener('zeno:state', () => {
     clearTimeout(liveTimer);
     liveTimer = setTimeout(() => {
-      void loadStatus();
-      if (S.refreshOpenFile) void S.refreshOpenFile();
+      // A working-folder change can make the previously open relative path
+      // invalid. Load the new project first; only then refresh the current file.
+      void (async () => {
+        await loadStatus();
+        if (S.refreshOpenFile) void S.refreshOpenFile();
+      })();
     }, 250);
   });
 
