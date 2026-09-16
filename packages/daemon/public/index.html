@@ -271,6 +271,7 @@ button{font:inherit; color:inherit}
 .orb-state{font-family:var(--font-mono); font-size:9.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); text-align:center}
 .orb-flow{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-3); text-align:center}
 .orb-flow b{color:var(--ink-2); font-weight:500}
+.orb-tools{display:flex;justify-content:center;margin:7px 0 0}.orb-tools .pill{cursor:pointer}.orb-list-panel{max-width:760px;max-height:320px;margin:10px auto 0;overflow:auto;padding:10px;border:1px solid var(--rule);border-radius:14px;background:color-mix(in srgb,var(--g2) 78%,transparent)}.orb-list-panel[hidden]{display:none}.field-list{display:grid;gap:6px;list-style:none;margin:0;padding:0}.field-list li{display:grid;gap:3px}.flrow{display:grid;grid-template-columns:10px minmax(0,1fr) auto auto;align-items:center;gap:8px;width:100%;padding:9px 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--ink-1);font:inherit;text-align:left;cursor:pointer}.flrow:hover,.flrow:focus-visible,.flrow[aria-selected="true"]{border-color:var(--gl-edge);background:color-mix(in srgb,var(--cyan) 8%,var(--g3));outline:none}.field-dot{width:8px;height:8px;border:1px solid var(--ink-3);border-radius:50%}.field-l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.field-k,.field-att{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}.field-att{color:var(--amber)}.field-d{margin:0 0 0 18px;color:var(--ink-3);font-size:11px;line-height:1.35}.field-empty{margin:0;color:var(--ink-3);font-size:12px}.nodecard--inline{position:static;margin:0 0 8px}
 .greet{text-align:center; margin-top:4px}
 .greet h1{margin:0; font-family:var(--font-display); font-weight:500; font-size:clamp(28px,3.2vw,38px); letter-spacing:-.02em; line-height:1.12; text-wrap:balance}
 .greet p{margin:8px 0 0; color:var(--ink-2); font-size:15.5px}
@@ -1101,6 +1102,8 @@ button{font:inherit; color:inherit}
             <div class="hscroll" id="hscroll">
               <div id="hero-block" class="hero-block">
                 <div class="orb-wrap"><canvas id="orb" width="780" height="460" role="img" aria-label="The Standing Field: Zeno's live state as a rotating map. The gold Zeno core is the centre; nodes are agents, tickets, devices, repos, memory, meetings and models; a link is a relationship; a dashed amber link is network egress."></canvas></div>
+                <div class="orb-tools"><button id="fl-t" type="button" class="pill wt" aria-pressed="false" aria-controls="field-list-panel" title="Show the same field as a readable list">☰ list</button></div>
+                <div id="field-list-panel" class="orb-list-panel" data-mount="field-list" hidden aria-live="polite"></div>
                 <div class="orb-meta"><div class="orb-state">Reading local state…</div><div class="orb-flow"><b>question</b> → grounded answer &nbsp;·&nbsp; <b>task</b> → ticket → Forge → your approval → sealed receipt &nbsp;·&nbsp; click a node to go to it · drag to turn the field</div></div>
                 <div class="greet"><h1>Good evening, Abheet.</h1><p>Ask anything, or start a task. Nothing runs until you approve it.</p></div>
               </div>

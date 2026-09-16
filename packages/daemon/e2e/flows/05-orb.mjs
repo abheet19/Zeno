@@ -32,6 +32,29 @@ export async function run({ daemon, page, ok }) {
     canvas && canvas.attrW > 400 && canvas.attrH > 200, JSON.stringify(canvas));
   ok('a node-card host exists for a picked node', canvas && canvas.host === true);
 
+  // The visual field has a real text equivalent for keyboard and screen-reader
+  // users. This used to be dead because index.html never supplied either mount.
+  const listBefore = await page.evaluate(() => {
+    const toggle = document.querySelector('#fl-t');
+    const panel = document.querySelector('[data-mount="field-list"]');
+    return { toggle: !!toggle, panel: !!panel, pressed: toggle?.getAttribute('aria-pressed'), hidden: panel?.hidden };
+  });
+  ok('the field offers a readable List control', listBefore.toggle && listBefore.panel && listBefore.pressed === 'false' && listBefore.hidden === true, JSON.stringify(listBefore));
+  await page.click('#fl-t');
+  const listOpen = await page.evaluate(() => {
+    const panel = document.querySelector('[data-mount="field-list"]');
+    return { pressed: document.querySelector('#fl-t')?.getAttribute('aria-pressed'), hidden: panel?.hidden, rows: panel?.querySelectorAll('.flrow').length || 0 };
+  });
+  ok('List opens the same live nodes as readable rows', listOpen.pressed === 'true' && listOpen.hidden === false && listOpen.rows > 0, JSON.stringify(listOpen));
+  await page.click('[data-mount="field-list"] .flrow');
+  const listSelection = await page.evaluate(() => ({
+    selected: document.querySelector('[data-mount="field-list"] .flrow[aria-selected="true"]')?.textContent?.trim() || '',
+    card: document.querySelector('[data-mount="field-list"] .nodecard')?.textContent?.trim() || '',
+  }));
+  ok('a readable row selects a node and exposes its card in flow', listSelection.selected.length > 0 && listSelection.card.length > 20, JSON.stringify(listSelection));
+  await page.click('#fl-t');
+  ok('List returns to the rotating field', await page.evaluate(() => document.querySelector('#fl-t')?.getAttribute('aria-pressed') === 'false' && document.querySelector('[data-mount="field-list"]')?.hidden === true));
+
   // It must actually PAINT, not merely be sized.
   const painted = await page.evaluate(() => {
     const c = document.querySelector('.orb-wrap canvas');
