@@ -99,9 +99,14 @@ test('ASK — the model field picks an installed local model, falls back honestl
       generatedWith.push(sent.model ?? '(none)');
       keepAliveValues.push(sent.keep_alive);
       contextValues.push(sent.options?.num_ctx);
+      const promptText = JSON.stringify(sent);
+      const generalReply = promptText.includes('GENERAL question') ? 'Four.' : null;
+      // Mirror the harmless punctuation variation emitted by real local models.
+      const groundedReply = promptText.includes('What is 2 plus 2?') ? CANNOT_ANSWER.slice(0, -1) : CANNOT_ANSWER;
+      const reply = generalReply ?? groundedReply;
       return new Response(JSON.stringify(url.endsWith('/api/chat')
-        ? { message: { content: CANNOT_ANSWER } }
-        : { response: CANNOT_ANSWER }), { status: 200, headers: { 'content-type': 'application/json' } });
+        ? { message: { content: reply } }
+        : { response: reply }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     return await realFetch(input, init);
   }) as typeof fetch;
@@ -180,6 +185,16 @@ test('ASK — the model field picks an installed local model, falls back honestl
     assert.equal(repoOverview.status, 200);
     assert.equal(generatedWith.length, generationsBeforeRepo, 'a private repository-state question never calls a model');
     assert.equal(probeCalls, probesBeforeRepo, 'a private repository-state question is answered before hosted-agent probes');
+
+    const generalQuestion = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'What is 2 plus 2?', model: 'llama3.1:8b' }),
+    });
+    assert.equal(generalQuestion.status, 200);
+    const generalPayload = (await generalQuestion.json()) as { answer?: string; general?: boolean };
+    assert.equal(generalPayload.answer, 'Four.', 'a punctuation-variant grounded refusal falls through to the general answer');
+    assert.equal(generalPayload.general, true, 'the fallback stays visibly separate from Zeno state');
 
     const picked = await ask({ model: 'llama3.1:8b' });
     assert.equal(picked.modelUsed, 'llama3.1:8b', 'an installed model is the one that answers');

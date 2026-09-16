@@ -538,7 +538,12 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
   // model emits its conservative refusal. It is not a request to act, so use
   // the separate general prompt rather than replacing a real model answer with
   // canned product copy. General answers carry an explicit flag in the UI.
-  if (answer.trim() === CANNOT_ANSWER && intent === null) {
+  // Local models often omit the final period despite the exact prompt. The
+  // grounding checker deliberately accepts that equivalent bare refusal; use the
+  // same normalization here so a normal question reaches the general-answer
+  // fallback instead of rendering a false dead end.
+  const bareRefusal = answer.trim().replace(/[.!?]+$/, '') === CANNOT_ANSWER.replace(/[.!?]+$/, '');
+  if (bareRefusal && intent === null) {
     const general = await askGeneral(ctx, question, modelUsed, turnSignal);
     if (general !== null) {
       return json(res, 200, { answer: general, general: true, cited: [], ungrounded: null, proposal: null, delegated: null, note, modelUsed });
