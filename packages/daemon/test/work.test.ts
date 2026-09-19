@@ -39,6 +39,7 @@ import { nodeWorld } from '../src/world.js';
 
 interface WorkResponse {
   readonly items: readonly WorkItem[];
+  readonly closedItems: readonly WorkItem[];
   readonly sources: readonly { name: string; state: string; count: number | null; detail?: string; reason?: string }[];
   readonly complete: boolean;
 }
@@ -92,6 +93,12 @@ function headers(token: string | null): Record<string, string> {
 
 function addWork(h: Harness, token: string | null, body: unknown): Promise<Response> {
   return fetch(h.base + '/work', { method: 'POST', headers: headers(token), body: JSON.stringify(body) });
+}
+
+function transitionWork(h: Harness, token: string, action: 'close' | 'reopen', id: unknown): Promise<Response> {
+  return fetch(h.base + `/work/${action}`, {
+    method: 'POST', headers: headers(token), body: JSON.stringify({ id }),
+  });
 }
 
 async function getWork(h: Harness, token: string): Promise<WorkResponse> {
@@ -197,7 +204,89 @@ test('a closed item leaves the list but stays in the record', async () => {
 
     const work = await getWork(h, h.owner);
     assert.deepEqual(work.items.map((i) => i.id), ['local:2'], 'only open items are work');
+    assert.deepEqual(work.closedItems.map((i) => i.id), ['local:1'], 'completed work stays visible for reopening');
     assert.equal(backlog.list().length, 2, 'and the closed one is still on record');
+  } finally {
+    await h.close();
+  }
+});
+
+test('the OWNER can complete and reopen local work, idempotently', async () => {
+  const h = await start();
+  try {
+    await addWork(h, h.owner, { title: 'finish the real loop' });
+
+    const closed = await transitionWork(h, h.owner, 'close', 'local:1');
+    assert.equal(closed.status, 200);
+    const first = (await closed.json()) as { state: string; changed: boolean; item: WorkItem };
+    assert.equal(first.state, 'closed');
+    assert.equal(first.changed, true);
+    assert.equal(first.item.id, 'local:1');
+    const afterClose = await getWork(h, h.owner);
+    assert.deepEqual(afterClose.items, []);
+    assert.deepEqual(afterClose.closedItems.map((item) => item.id), ['local:1']);
+
+    const closedAgain = await transitionWork(h, h.owner, 'close', 'local:1');
+    assert.equal(closedAgain.status, 200);
+    const duplicate = (await closedAgain.json()) as { changed: boolean; item: WorkItem };
+    assert.equal(duplicate.changed, false, 'a repeated close is a successful no-op');
+    assert.equal(duplicate.item.updatedAt, first.item.updatedAt, 'a no-op does not create a new revision timestamp');
+
+    const reopened = await transitionWork(h, h.owner, 'reopen', 'local:1');
+    assert.equal(reopened.status, 200);
+    assert.equal(((await reopened.json()) as { changed: boolean }).changed, true);
+    const afterReopen = await getWork(h, h.owner);
+    assert.deepEqual(afterReopen.items.map((item) => item.id), ['local:1']);
+    assert.deepEqual(afterReopen.closedItems, []);
+
+    const reopenedAgain = await transitionWork(h, h.owner, 'reopen', 'local:1');
+    assert.equal(reopenedAgain.status, 200);
+    assert.equal(((await reopenedAgain.json()) as { changed: boolean }).changed, false);
+  } finally {
+    await h.close();
+  }
+});
+
+test('a PROPOSER cannot complete or reopen work directly', async () => {
+  const h = await start();
+  try {
+    await addWork(h, h.proposer, { title: 'owner decides when this is done' });
+    for (const action of ['close', 'reopen'] as const) {
+      const refused = await transitionWork(h, h.proposer, action, 'local:1');
+      assert.equal(refused.status, 403);
+      assert.equal(((await refused.json()) as { error: { code: string } }).error.code, 'owner-only');
+    }
+    assert.deepEqual((await getWork(h, h.owner)).items.map((item) => item.id), ['local:1']);
+  } finally {
+    await h.close();
+  }
+});
+
+test('completion refuses remote, unknown, and malformed ids without changing local work', async () => {
+  const h = await start((dir) => new WorkDesk(
+    new Backlog(nodeBacklogStore(backlogPathIn(dir)), systemClock),
+    feed('github:abheet19/zeno', [remoteItem()]),
+  ));
+  try {
+    await addWork(h, h.owner, { title: 'local work survives every refusal' });
+
+    const remote = await transitionWork(h, h.owner, 'close', 'github:abheet19/zeno#12');
+    assert.equal(remote.status, 409);
+    assert.equal(((await remote.json()) as { error: { code: string } }).error.code, 'remote-work-item');
+
+    const missing = await transitionWork(h, h.owner, 'close', 'local:999');
+    assert.equal(missing.status, 404);
+    assert.equal(((await missing.json()) as { error: { code: string } }).error.code, 'work-item-not-found');
+
+    for (const id of ['', 1, `local:${'9'.repeat(121)}`]) {
+      const malformed = await transitionWork(h, h.owner, 'close', id);
+      assert.equal(malformed.status, 400);
+      assert.equal(((await malformed.json()) as { error: { code: string } }).error.code, 'bad-request');
+    }
+
+    const after = await getWork(h, h.owner);
+    assert.deepEqual(after.items.map((item) => item.id), ['local:1', 'github:abheet19/zeno#12']);
+    assert.deepEqual(after.closedItems, []);
   } finally {
     await h.close();
   }

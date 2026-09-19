@@ -36,7 +36,7 @@ import { resolveOllamaBaseUrl } from './routes/ollama-lifecycle.js';
 import { isStaticish, serveShell, serveStatic, tokenFileLabel } from './routes/static.js';
 import { serveReceipts, serveState } from './routes/state.js';
 import { serveStream } from './routes/stream.js';
-import { postWork, serveWork } from './routes/work.js';
+import { postWork, postWorkTransition, serveWork } from './routes/work.js';
 import { postMemory, serveBrief, serveMemory } from './routes/memory.js';
 import { postApproval, postApprovalDecline, postPreview } from './routes/approvals.js';
 import {
@@ -359,11 +359,12 @@ export function createServer(opts: DaemonOptions): Server {
       return serveStream(ctx, req, res, ctx.runProgressStream);
     }
     // Work is READ and ADDED by either role, deliberately. Noticing that
-    // something needs doing is not deciding to do it; the line L6 draws is at
-    // /approvals, and drawing a second one here would only teach the owner that
-    // Zeno asks about things it does not need to ask about.
+    // something needs doing is not deciding to do it. Completion/reopening is
+    // different: only the owner may make that lifecycle decision below.
     if (req.method === 'GET' && path === '/work') return await serveWork(ctx, res);
     if (req.method === 'POST' && path === '/work') return await postWork(ctx, req, res);
+    if (req.method === 'POST' && path === '/work/close') return await postWorkTransition(ctx, req, res, role, 'closed');
+    if (req.method === 'POST' && path === '/work/reopen') return await postWorkTransition(ctx, req, res, role, 'open');
     if (req.method === 'GET' && path === '/memory') return serveMemory(ctx, res, url);
     // Everything under /memory/ (propose, approvals, pending, recall, context,
     // delete) is the gated module. /memory itself stays above: GET is the plain

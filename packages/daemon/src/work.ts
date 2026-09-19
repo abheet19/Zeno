@@ -26,6 +26,7 @@ import {
   nodeBacklogStore,
   systemClock,
   toWorkItem,
+  type BacklogState,
   type WorkItem,
   type WorkItemSource,
 } from '@abheet19/zeno-intake';
@@ -59,6 +60,8 @@ export interface SourceReport {
 
 export interface WorkReport {
   readonly items: readonly WorkItem[];
+  /** Closed local items remain visible so the owner can reopen them. */
+  readonly closedItems: readonly WorkItem[];
   /** One entry per source, always — including the ones that were never asked. */
   readonly sources: readonly SourceReport[];
   /**
@@ -69,6 +72,25 @@ export interface WorkReport {
    * remember to also check for a second kind of shortness will not.
    */
   readonly complete: boolean;
+}
+
+export type WorkTransitionCode = 'not-local' | 'not-found';
+
+export class WorkTransitionError extends Error {
+  constructor(
+    readonly code: WorkTransitionCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'WorkTransitionError';
+  }
+}
+
+export interface WorkTransition {
+  readonly item: WorkItem;
+  readonly state: BacklogState;
+  /** False when the requested state was already current. */
+  readonly changed: boolean;
 }
 
 function describe(err: unknown): string {
@@ -104,10 +126,41 @@ export class WorkDesk {
     return toWorkItem(this.backlog.add(title, body, labels));
   }
 
+  /** Close one local item. Remote sources remain owned by their adapters. */
+  close(id: string): WorkTransition {
+    return this.transition(id, 'closed');
+  }
+
+  /** Reopen one local item without inventing a write for an already-open item. */
+  reopen(id: string): WorkTransition {
+    return this.transition(id, 'open');
+  }
+
+  private transition(id: string, state: BacklogState): WorkTransition {
+    const wanted = id.trim();
+    if (!/^local:[1-9][0-9]*$/.test(wanted)) {
+      throw new WorkTransitionError(
+        'not-local',
+        'Only local backlog items can be completed here; remote work stays with its source.',
+      );
+    }
+    // The CLI writes this file too. Reload immediately before inspecting and
+    // appending so a stale daemon cannot overwrite a newer external revision.
+    this.backlog.reload();
+    const current = this.backlog.get(wanted);
+    if (current === null) {
+      throw new WorkTransitionError('not-found', `No local work item exists with id ${wanted}.`);
+    }
+    const changed = current.state !== state;
+    const next = state === 'closed' ? this.backlog.close(wanted) : this.backlog.reopen(wanted);
+    return { item: toWorkItem(next), state, changed };
+  }
+
   /** Every open item every source will admit to, and the truth about each source. */
   async list(): Promise<WorkReport> {
     const items: WorkItem[] = [];
-    const sources: SourceReport[] = [this.readLocal(items)];
+    const closedItems: WorkItem[] = [];
+    const sources: SourceReport[] = [this.readLocal(items, closedItems)];
     sources.push(await this.readRemote(items));
     // Whitelisted, not blacklisted. `!== 'failed'` would silently welcome every
     // state added after it — `partial` was exactly such a state — and a boolean
@@ -115,6 +168,7 @@ export class WorkDesk {
     // the failure mode this whole file is a response to.
     return {
       items,
+      closedItems,
       sources,
       complete: sources.every((s) => s.state === 'ok' || s.state === 'not-configured'),
     };
@@ -125,11 +179,14 @@ export class WorkDesk {
    * permission change — and a failure here is reported exactly like a remote
    * one rather than passed off as an empty backlog.
    */
-  private readLocal(into: WorkItem[]): SourceReport {
+  private readLocal(into: WorkItem[], closedInto: WorkItem[]): SourceReport {
     try {
       this.backlog.reload();
-      const open = this.backlog.listOpen().map(toWorkItem);
+      const all = this.backlog.list();
+      const open = all.filter((entry) => entry.state === 'open').map(toWorkItem);
+      const closed = all.filter((entry) => entry.state === 'closed').map(toWorkItem);
       into.push(...open);
+      closedInto.push(...closed);
       const damaged = this.backlog.skippedLines();
       // Unreadable lines cost items, so they are never left unsaid — and saying
       // it only in `detail` is not saying it. `detail` is prose for a human;

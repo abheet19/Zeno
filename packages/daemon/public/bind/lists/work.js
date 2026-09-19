@@ -9,7 +9,8 @@
  */
 
 import { getJSON, $$, el, fill, screenEl } from '../../bind.js';
-import { clip, plural, ageStr, gitWord, lrowEl, pillEl, emptyEl, loadingEl, unreadableEl, headingEl } from './shared.js';
+import { clip, plural, ageStr, gitWord, postJSON, toast, lrowEl, pillEl, emptyEl, loadingEl, unreadableEl, headingEl } from './shared.js';
+import { forgeWorkDetail, workTransitionAction } from './work-model.js';
 
 export async function bindWork() {
   const screen = screenEl('work');
@@ -25,6 +26,77 @@ export async function bindWork() {
   let filter = FILTER_IDS[currentFilter] || 'all';
   let workRes = null;
   let forgeRes = null;
+  const feedback = new Map();
+  const pending = new Set();
+
+  function openInForge(item) {
+    const forgeBtn = document.querySelector('.seg [data-product="forge"]');
+    if (forgeBtn) forgeBtn.click();
+    window.dispatchEvent(new CustomEvent('zeno:work-open', { detail: forgeWorkDetail(item) }));
+  }
+
+  async function transition(item, state) {
+    const action = workTransitionAction(item, state);
+    if (!action || pending.has(item.id)) return;
+    pending.add(item.id);
+    feedback.delete(item.id);
+    render();
+    const result = await postJSON(action.path, { id: item.id });
+    pending.delete(item.id);
+    if (!result.ok) {
+      feedback.set(item.id, { ok: false, text: result.error || `${action.label} failed.` });
+      toast(feedback.get(item.id).text);
+      render();
+      return;
+    }
+    const changed = result.data && result.data.changed === true;
+    feedback.set(item.id, {
+      ok: true,
+      text: action.nextState === 'closed'
+        ? (changed ? 'Marked complete.' : 'Already complete.')
+        : (changed ? 'Reopened.' : 'Already open.'),
+    });
+    toast(feedback.get(item.id).text);
+    // Move the row immediately from the transition response. This makes the
+    // owner's click visibly settle even if the reconciliation read is delayed.
+    const current = workRes && workRes.data || {};
+    const open = (Array.isArray(current.items) ? current.items : []).filter((entry) => entry.id !== item.id);
+    const closed = (Array.isArray(current.closedItems) ? current.closedItems : []).filter((entry) => entry.id !== item.id);
+    const moved = result.data && result.data.item || item;
+    if (action.nextState === 'closed') closed.push(moved); else open.push(moved);
+    const sources = (Array.isArray(current.sources) ? current.sources : []).map((source) =>
+      source && source.name === 'local' ? { ...source, count: open.filter((entry) => entry.source === 'local').length } : source);
+    workRes = { ...workRes, data: { ...current, items: open, closedItems: closed, sources } };
+    render();
+    workRes = await getJSON('/work');
+    render();
+    window.dispatchEvent(new CustomEvent('zeno:state', { detail: { source: 'work-transition', itemId: item.id } }));
+  }
+
+  function ticketRow(item, state) {
+    const age = ageStr(item.updatedAt);
+    const result = feedback.get(item.id);
+    const meta = ['from ' + (item.source || 'the backlog'), age,
+      Array.isArray(item.labels) && item.labels.length ? item.labels.join(', ') : null,
+      result ? result.text : null]
+      .filter(Boolean).join(' · ');
+    const actions = el('div', null);
+    actions.style.cssText = 'display:flex;gap:6px;align-items:center;justify-content:flex-end;flex-wrap:wrap';
+    const openBtn = el('button', 'laction cy', 'Open in Forge');
+    openBtn.type = 'button';
+    openBtn.addEventListener('click', () => openInForge(item));
+    actions.appendChild(openBtn);
+    const action = workTransitionAction(item, state);
+    if (action) {
+      const stateBtn = el('button', 'laction', pending.has(item.id) ? action.pendingLabel : action.label);
+      stateBtn.type = 'button';
+      stateBtn.disabled = pending.has(item.id);
+      stateBtn.addEventListener('click', () => void transition(item, state));
+      actions.appendChild(stateBtn);
+    }
+    if (result && !result.ok) actions.title = result.text;
+    return lrowEl(clip(item.id || 'item', 18), clip(item.title || '(untitled)', 90), meta, actions);
+  }
 
   function render() {
     if (!workRes) { fill(listEl, loadingEl('Reading your backlog and the workspace…')); return; }
@@ -32,6 +104,7 @@ export async function bindWork() {
 
     const data = workRes.data || {};
     const items = Array.isArray(data.items) ? data.items : [];
+    const closedItems = Array.isArray(data.closedItems) ? data.closedItems : [];
     const sources = Array.isArray(data.sources) ? data.sources : [];
     const forgeData = forgeRes && forgeRes.ok ? (forgeRes.data || {}) : null;
     const changed = forgeData && Array.isArray(forgeData.changed) ? forgeData.changed : [];
@@ -43,26 +116,21 @@ export async function bindWork() {
     const nodes = [];
 
     if (showTickets) {
-      const matched = q ? items.filter((it) => {
+      const matches = (it) => {
         const hay = [it.title, it.source, Array.isArray(it.labels) ? it.labels.join(' ') : ''].join(' ').toLowerCase();
         return hay.includes(q);
-      }) : items;
-      if (filter === 'all' && items.length) nodes.push(headingEl('tickets · ' + matched.length));
-      if (items.length === 0) {
+      };
+      const matched = q ? items.filter(matches) : items;
+      const matchedClosed = q ? closedItems.filter(matches) : closedItems;
+      if (items.length || closedItems.length) nodes.push(headingEl('open · ' + matched.length));
+      if (items.length === 0 && closedItems.length === 0) {
         nodes.push(emptyEl('No tickets in the backlog.', 'The daemon read your backlog and it is empty.'));
-      } else if (matched.length === 0) {
+      } else if (matched.length === 0 && matchedClosed.length === 0) {
         nodes.push(emptyEl('No ticket matches that.', 'The search ran over your backlog and none matched.'));
       } else {
-        matched.forEach((it) => {
-          const age = ageStr(it.updatedAt);
-          const meta = ['from ' + (it.source || 'the backlog'), age,
-            Array.isArray(it.labels) && it.labels.length ? it.labels.join(', ') : null]
-            .filter(Boolean).join(' · ');
-          const openBtn = el('button', 'laction cy', 'Open in Forge');
-          openBtn.type = 'button';
-          openBtn.setAttribute('data-product-go', 'forge');
-          nodes.push(lrowEl(clip(it.id || 'item', 18), clip(it.title || '(untitled)', 90), meta, openBtn));
-        });
+        matched.forEach((it) => nodes.push(ticketRow(it, 'open')));
+        if (closedItems.length) nodes.push(headingEl('completed · ' + matchedClosed.length));
+        matchedClosed.forEach((it) => nodes.push(ticketRow(it, 'closed')));
       }
     }
 

@@ -102,6 +102,7 @@ export function setupSession(S) {
     sessionSeq += 1;
     return {
       id: `s${sessionSeq}`, title: null, chat: [], runs: [], lastProposed: [],
+      workItemId: null,
       agentId: 'local', model: '', effort: 'medium', autoRoute: true, memoryEnabled: true,
       running: false, planning: false, pendingHosted: null, compareRunMode: 'parallel',
       createdAt: Date.now(), updatedAt: Date.now(),
@@ -156,7 +157,7 @@ export function setupSession(S) {
 
   function renderSessionHeader(session) {
     S.sessionsChanged(null); // every state change comes through here: persist + repaint the rail
-    if (sTitle) sTitle.textContent = session.title || 'New session';
+    if (sTitle) sTitle.textContent = [session.workItemId, session.title || 'New session'].filter(Boolean).join(' · ');
     if (sStatus) {
       const tone = session.running || session.planning ? 'cy' : session.pendingHosted ? 'am' : 'wt';
       sStatus.className = `pill ${tone}`;
@@ -542,6 +543,30 @@ export function setupSession(S) {
       if (forgeBtn) forgeBtn.click();
       const session = startNewSession();
       void sendTask(session, task);
+    });
+  }
+
+  /* Work -> Forge opens (or returns to) the session bound to that stable work
+     id and pre-fills the task. Opening context never starts an agent by itself. */
+  if (!window.__zenoWorkOpenWired) {
+    window.__zenoWorkOpenWired = true;
+    window.addEventListener('zeno:work-open', (e) => {
+      const detail = e && e.detail || {};
+      const workItemId = typeof detail.workItemId === 'string' ? detail.workItemId.trim() : '';
+      const task = typeof detail.task === 'string' ? detail.task.trim() : '';
+      if (!workItemId || !task) return;
+      const existing = S.sessions.findIndex((session) => session.workItemId === workItemId);
+      const session = existing >= 0 ? (S.openSession(existing), S.sessions[existing]) : startNewSession();
+      session.workItemId = workItemId;
+      if (!session.title) session.title = task.split(/\r?\n/, 1)[0].slice(0, 80);
+      renderSessionHeader(session);
+      renderChat(session);
+      const ta = $('#s-ta');
+      if (ta && !session.chat.length) {
+        ta.value = task;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.focus();
+      }
     });
   }
 

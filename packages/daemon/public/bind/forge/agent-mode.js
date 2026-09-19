@@ -62,7 +62,7 @@ export function setupAgentMode(S) {
   // ---- persistence -------------------------------------------------------
   function serialize(s) {
     return {
-      id: s.id, title: s.title, createdAt: s.createdAt, updatedAt: s.updatedAt,
+      id: s.id, title: s.title, workItemId: s.workItemId, createdAt: s.createdAt, updatedAt: s.updatedAt,
       agentId: s.agentId, model: s.model, effort: s.effort, autoRoute: s.autoRoute, memoryEnabled: s.memoryEnabled,
       runs: s.runs, lastProposed: s.lastProposed,
       chat: s.chat.map((t) => (typeof t.log === 'string' && t.log.length > MAX_LOG_CHARS ? { ...t, log: `${t.log.slice(0, MAX_LOG_CHARS)}\n…[log clipped for local history]` } : t)),
@@ -82,6 +82,7 @@ export function setupAgentMode(S) {
       const s = makeSession();
       Object.assign(s, {
         title: typeof r.title === 'string' ? r.title : null,
+        workItemId: typeof r.workItemId === 'string' ? r.workItemId : null,
         createdAt: Number(r.createdAt) || Date.now(), updatedAt: Number(r.updatedAt) || Date.now(),
         agentId: r.agentId || 'local', model: r.model || '', effort: r.effort || 'medium',
         autoRoute: r.autoRoute !== false, memoryEnabled: r.memoryEnabled !== false,
@@ -113,14 +114,14 @@ export function setupAgentMode(S) {
     const rows = [];
     S.sessions.forEach((s, i) => {
       const title = s.title || 'New session';
-      if (q && !title.toLowerCase().includes(q) && !s.chat.some((t) => typeof t.text === 'string' && t.text.toLowerCase().includes(q))) return;
+      if (q && !title.toLowerCase().includes(q) && !String(s.workItemId || '').toLowerCase().includes(q) && !s.chat.some((t) => typeof t.text === 'string' && t.text.toLowerCase().includes(q))) return;
       const st = sessionState(s, heldHashes);
       const b = el('button', 'dvsess');
       b.type = 'button';
       b.dataset.agOpen = String(i);
       b.classList.toggle('on', i === S.activeIdx);
       const dvst = el('span', 'dvst');
-      add(dvst, el('b', null, title), el('span', null, `${relTime(s.updatedAt || s.createdAt)} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}`));
+      add(dvst, el('b', null, title), el('span', null, `${s.workItemId ? `${s.workItemId} · ` : ''}${relTime(s.updatedAt || s.createdAt)} · ${s.runs.length} run${s.runs.length === 1 ? '' : 's'}`));
       const pill = el('span', `pill ${st.tone} ag-state`, st.word);
       add(b, el('span', `dvdot ${st.cls}`), dvst, pill);
       b.addEventListener('click', () => S.openSession(i));

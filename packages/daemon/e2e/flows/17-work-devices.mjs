@@ -34,12 +34,15 @@ export const id = 'work-devices';
 export const title = 'Work shows the real backlog and names unasked sources; Devices shows the real mesh';
 export const criteria = [
   'work: POST /work stores, GET /work lists',
+  'work: owner can complete and reopen a local item from the screen',
+  'work: Open in Forge carries the stable work id and task without starting a run',
   'work: an unconfigured source is never rendered as "nothing to do"',
   'devices: the screen shows the real device and pairing state',
   'devices: pairing cannot be completed without a second device (BLOCKED)',
 ];
 
 const WORK_TITLE = 'E2E: rotate the staging credential';
+const WORK_BODY = 'The staging token is older than the rotation window.';
 
 /** Reload and wait for the binders to settle, the way openWindow does. */
 async function reload(page) {
@@ -71,7 +74,7 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   // --- a write lands in the daemon's state, not just in the response
   const added = await daemon.api('/work', {
     method: 'POST',
-    body: JSON.stringify({ title: WORK_TITLE, body: 'The staging token is older than the rotation window.', labels: ['e2e', 'chore'] }),
+    body: JSON.stringify({ title: WORK_TITLE, body: WORK_BODY, labels: ['e2e', 'chore'] }),
   });
   ok.eq('POST /work accepts a backlog item', added.status, 200);
   ok.eq('and answers with the stored item', added.body.item.title, WORK_TITLE);
@@ -121,6 +124,61 @@ export async function run({ daemon, page, ok, network, Blocked }) {
   const railWork = await page.evaluate(() =>
     document.querySelector('.rail .nav-i[data-screen="work"] .ct')?.textContent || '');
   ok.eq('the rail count is the real backlog size, not the artifact’s 5', railWork, '1');
+
+  /* ---- completion is an owner action, reversible from the same screen ---- */
+
+  let ticket = page.locator('#work-list .lrow').filter({ hasText: WORK_TITLE });
+  const closeResponsePromise = page.waitForResponse((response) => response.url().endsWith('/work/close'));
+  await ticket.getByRole('button', { name: 'Mark complete' }).click();
+  const closeResponse = await closeResponsePromise;
+  const closeBody = await closeResponse.json().catch(() => null);
+  ok.eq('the Work CTA received a successful close response', closeResponse.status(), 200);
+  ok('the close response reports a real state change', closeBody?.changed === true && closeBody?.state === 'closed', JSON.stringify(closeBody));
+  const closeSettled = await page.waitForFunction((title) => {
+    const row = [...document.querySelectorAll('#work-list .lrow')].find((node) => node.textContent.includes(title));
+    const toast = document.getElementById('toast');
+    return !!row && /Marked complete/.test(toast?.textContent || '') && !![...row.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Reopen');
+  }, WORK_TITLE, { timeout: 5_000 }).then(() => true, () => false);
+  const closeUi = await page.evaluate((title) => {
+    const row = [...document.querySelectorAll('#work-list .lrow')].find((node) => node.textContent.includes(title));
+    return { row: row?.textContent || '', toast: document.getElementById('toast')?.textContent || '', bind: window.__zenoBind };
+  }, WORK_TITLE);
+  ok('the Work screen moves the row to completed and gives clear feedback', closeSettled, JSON.stringify(closeUi));
+  if (!closeSettled) throw new Error(`close succeeded but the Work screen did not settle: ${JSON.stringify(closeUi)}`);
+  const completed = await daemon.api('/work');
+  ok.eq('Mark complete removed the item from open work in the daemon', completed.body.items.length, 0);
+  ok('and kept it visible as completed work that can be reopened',
+    completed.body.closedItems.some((item) => item.id === added.body.item.id), JSON.stringify(completed.body.closedItems));
+  ok('the renderer made the completion request', network.includes('POST /work/close'), JSON.stringify(network.slice(-10)));
+
+  ticket = page.locator('#work-list .lrow').filter({ hasText: WORK_TITLE });
+  await ticket.getByRole('button', { name: 'Reopen' }).click();
+  await page.waitForFunction((title) => {
+    const row = [...document.querySelectorAll('#work-list .lrow')].find((node) => node.textContent.includes(title));
+    const toast = document.getElementById('toast');
+    return !!row && /Reopened/.test(toast?.textContent || '') && !![...row.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Mark complete');
+  }, WORK_TITLE);
+  const reopened = await daemon.api('/work');
+  ok('Reopen restored the same stable item id', reopened.body.items.some((item) => item.id === added.body.item.id),
+    JSON.stringify(reopened.body.items));
+  ok.eq('and removed it from completed work', reopened.body.closedItems.length, 0);
+  ok('the renderer made the reopen request', network.includes('POST /work/reopen'), JSON.stringify(network.slice(-10)));
+
+  /* ---- Work carries its stable id and task context into Forge ------------ */
+
+  ticket = page.locator('#work-list .lrow').filter({ hasText: WORK_TITLE });
+  await ticket.getByRole('button', { name: 'Open in Forge' }).click();
+  await page.waitForFunction(() => document.querySelector('.product[data-product="forge"]')?.classList.contains('on'));
+  const forgeContext = await page.evaluate(() => ({
+    title: document.getElementById('s-title')?.textContent || '',
+    draft: document.getElementById('s-ta')?.value || '',
+  }));
+  ok('Forge names the originating work item', forgeContext.title.includes(added.body.item.id), forgeContext.title);
+  ok.eq('Forge pre-fills the real title and body without starting an agent', forgeContext.draft, `${WORK_TITLE}\n\n${WORK_BODY}`);
+  ok('opening context alone did not POST a Forge run', !network.includes('POST /forge/run'), JSON.stringify(network.slice(-12)));
+
+  // Return to Command for the Devices half of this flow.
+  await page.click('.seg [data-product="command"]');
 
   /* ==================================================================
    * DEVICES — the real mesh, and an honest account of what is missing
