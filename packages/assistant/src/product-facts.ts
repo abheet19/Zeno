@@ -7,7 +7,7 @@
  * the UI can distinguish product documentation from generated prose.
  */
 
-export const PRODUCT_FACTS_VERSION = '2026-09-20.1';
+export const PRODUCT_FACTS_VERSION = '2026-09-20.2';
 
 export interface ProductAnswer {
   readonly answer: string;
@@ -26,7 +26,7 @@ const FACTS: readonly ProductFact[] = [
     id: 'z-command',
     names: ['command'],
     source: `Zeno product facts ${PRODUCT_FACTS_VERSION}: Command`,
-    text: 'Command is Zeno’s local control plane. It answers from current Zeno state and selected local-model knowledge, recalls owner-approved Vault memory, opens product surfaces, and shows approvals and signed receipts. A task request can be handed to Forge, but Command cannot approve its own proposal or bypass the kernel.',
+    text: 'Command is Zeno’s local control plane. It answers from current Zeno state and selected local-model knowledge, recalls owner-approved Vault memory, opens product surfaces, and shows approvals and signed receipts. A task request can be handed to Forge or started through Forge’s own governed run path, but Command cannot approve an agent proposal or bypass the kernel.',
   },
   {
     id: 'z-forge',
@@ -54,14 +54,20 @@ const FACTS: readonly ProductFact[] = [
   },
 ];
 
-const PRODUCT_QUESTION = /^(?:(?:what|who) (?:is|are)|how (?:does|do)|explain|describe|tell me about)\s+(?:the\s+)?(?:zeno(?:'s)?\s+)?(command|forge|counsel|vault|memory|voice|whisper|microphone)(?:\s+(?:work|works|do|does))?\s*[?!.]*$/i;
+const PRODUCT_INTENT = /^(?:(?:what|who)\s+(?:is|are|does|do)|how\s+(?:does|do)|explain|describe|tell\s+me\s+about)\b/i;
+const PRODUCT_NAME = /\b(command|forge|counsel|vault|memory|voice|whisper|microphone)\b/gi;
 
 /** Return a bounded product answer, or null for every non-product question. */
 export function answerProductQuestion(question: string): ProductAnswer | null {
-  const match = PRODUCT_QUESTION.exec(question.replace(/\s+/g, ' ').trim());
-  if (match === null) return null;
-  const name = (match[1] ?? '').toLowerCase();
-  const fact = FACTS.find((candidate) => candidate.names.includes(name));
-  if (fact === undefined) return null;
-  return { answer: `${fact.text} [${fact.id}]`, cited: [{ id: fact.id, source: fact.source }] };
+  const normalized = question.replace(/\s+/g, ' ').trim();
+  if (!PRODUCT_INTENT.test(normalized)) return null;
+
+  const names = [...normalized.matchAll(PRODUCT_NAME)].map((match) => (match[1] ?? '').toLowerCase());
+  const facts = FACTS.filter((candidate) => candidate.names.some((name) => names.includes(name)));
+  if (facts.length === 0) return null;
+
+  return {
+    answer: facts.map((fact) => `${fact.text} [${fact.id}]`).join('\n\n'),
+    cited: facts.map((fact) => ({ id: fact.id, source: fact.source })),
+  };
 }

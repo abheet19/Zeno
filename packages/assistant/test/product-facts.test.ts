@@ -19,9 +19,17 @@ test('all product surfaces are recognized without matching ordinary questions', 
   assert.equal(answerProductQuestion('Open Forge'), null);
 });
 
+test('compound product questions explain every named surface and their boundary', () => {
+  const result = answerProductQuestion('What does Forge do, and how does it relate to Command?');
+  assert.ok(result);
+  assert.match(result.answer, /Command is Zeno’s local control plane/);
+  assert.match(result.answer, /Forge is Zeno’s governed coding workspace/);
+  assert.match(result.answer, /started through Forge’s own governed run path/);
+  assert.deepEqual(result.cited.map((citation) => citation.id), ['z-command', 'z-forge']);
+});
+
 test('product facts state limitations instead of promoting unverified capabilities', () => {
   assert.match(answerProductQuestion('What is Counsel?')?.answer ?? '', /must be verified/);
   assert.match(answerProductQuestion('What is Voice?')?.answer ?? '', /Browser mode has no local speech bridge/);
   assert.match(answerProductQuestion('What is Vault?')?.answer ?? '', /context, not authority/);
 });
-
