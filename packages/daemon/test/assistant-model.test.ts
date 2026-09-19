@@ -174,6 +174,20 @@ test('ASK — the model field picks an installed local model, falls back honestl
     assert.equal(kernelPayload.delegated, null, 'a product-definition question never delegates');
     assert.equal(generatedWith.length, generationsBeforeHelp, 'the product definition never asks a model to guess');
 
+    const forge = await realFetch(base + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },
+      body: JSON.stringify({ question: 'What is Forge?', model: 'llama3.1:8b' }),
+    });
+    assert.equal(forge.status, 200);
+    const forgePayload = (await forge.json()) as { answer?: string; cited?: { id: string }[]; delegated?: unknown; modelUsed?: string | null };
+    assert.match(forgePayload.answer ?? '', /bounded repository context/);
+    assert.match(forgePayload.answer ?? '', /local Ollama path is currently a single bounded/);
+    assert.deepEqual(forgePayload.cited?.map((citation) => citation.id), ['z-forge']);
+    assert.equal(forgePayload.delegated, null);
+    assert.equal(forgePayload.modelUsed, null);
+    assert.equal(generatedWith.length, generationsBeforeHelp, 'a product question never asks a model to invent Forge');
+
     const emptyMemory = await realFetch(base + '/assistant/ask', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-zeno-token': tokens.owner },

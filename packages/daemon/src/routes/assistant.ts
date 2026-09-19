@@ -40,6 +40,7 @@
 import { hostname } from 'node:os';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
+  answerProductQuestion,
   buildAssistantPrompt,
   buildGeneralPrompt,
   buildSnapshot,
@@ -296,6 +297,20 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
     return json(res, 200, {
       answer: ZENO_APPROVAL_KERNEL_HELP,
       cited: [],
+      ungrounded: null,
+      proposal: null,
+      delegated: null,
+      note: null,
+      modelUsed: null,
+      help: true,
+    });
+  }
+
+  const productAnswer = answerProductQuestion(question);
+  if (productAnswer !== null) {
+    return json(res, 200, {
+      answer: productAnswer.answer,
+      cited: productAnswer.cited,
       ungrounded: null,
       proposal: null,
       delegated: null,

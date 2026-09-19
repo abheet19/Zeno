@@ -75,6 +75,12 @@ export { buildGeneralPrompt } from './general-prompt.js';
 export { needsLiveLookup } from './browse-need.js';
 
 export {
+  answerProductQuestion,
+  PRODUCT_FACTS_VERSION,
+  type ProductAnswer,
+} from './product-facts.js';
+
+export {
   parseIntent,
   fallbackDelegation,
   normalizeRelPath,

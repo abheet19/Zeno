@@ -120,6 +120,7 @@ test('every source file is present and readable — the scan below is not vacuou
     'intent.ts',
     'invisible-chars.ts',
     'path-safety.ts',
+    'product-facts.ts',
     'prompt.ts',
     'snapshot.ts',
   ]);
