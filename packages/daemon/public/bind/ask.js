@@ -305,6 +305,30 @@ function seedForgeComposer(task) {
   return true;
 }
 
+/**
+ * A local task that the daemon marked `ready` should behave like the owner
+ * asked: move to Forge and run it. The event lands on Forge's existing
+ * session path, so isolation, tests, proposal creation, stale-state checks,
+ * approvals and receipts remain exactly the same as pressing Forge Send.
+ */
+function runReadyTaskInForge(payload) {
+  const d = payload && payload.delegated;
+  if (!d || d.ready !== true || d.started === true || d.needsConfirm === true
+      || typeof d.task !== 'string' || !d.task.trim()) return false;
+  const forgeBtn = document.querySelector('.seg [data-product="forge"]');
+  if (!forgeBtn) return false;
+  forgeBtn.click();
+  // Dispatch immediately after the product switch. A deferred animation-frame
+  // callback can be throttled indefinitely when the Electron/browser window
+  // is occluded or backgrounded, which left an accepted Command task stranded
+  // before Forge ever saw it. Forge's listener is already installed by the
+  // time the owner can submit from Command and owns the complete governed run.
+  window.dispatchEvent(new CustomEvent('zeno:command-run', {
+    detail: { task: d.task, agentId: d.agentId, model: d.model },
+  }));
+  return true;
+}
+
 function openForgeRegistryEntry(kind, id) {
   const forge = document.querySelector('.seg [data-product="forge"]');
   if (forge) forge.click();
@@ -440,7 +464,9 @@ function answerBody(payload) {
       run.addEventListener('click', () => {
         const forgeBtn = document.querySelector('.seg [data-product="forge"]');
         if (forgeBtn) forgeBtn.click();
-        window.dispatchEvent(new CustomEvent('zeno:command-run', { detail: { task: d.task } }));
+        window.dispatchEvent(new CustomEvent('zeno:command-run', {
+          detail: { task: d.task, agentId: d.agentId, model: d.model },
+        }));
       });
       a.append(run);
 
@@ -619,7 +645,9 @@ function wire({ ta, send, turns, thread, onFirstTurn, commands }) {
           b.append(msg);
         }));
       } else {
-        turns.append(turn('z', (b) => b.append(...answerBody(payload))));
+        if (!runReadyTaskInForge(payload)) {
+          turns.append(turn('z', (b) => b.append(...answerBody(payload))));
+        }
       }
     } catch (err) {
       pending.remove();

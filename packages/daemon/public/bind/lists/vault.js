@@ -38,6 +38,10 @@ export async function bindVault() {
   let hitsRes = null;
   let pendingRes = null;
   let searchTimer = null;
+  // Live state refreshes rebuild rows. Keep the owner's expanded notes open
+  // across those refreshes instead of collapsing them under their cursor.
+  const expandedNotes = screen._zenoVaultExpanded || new Set();
+  screen._zenoVaultExpanded = expandedNotes;
   // Every bind/search owns a monotonically increasing generation. A slower
   // recall for an older query may finish after a newer one; only the current
   // generation is allowed to paint the list.
@@ -53,7 +57,31 @@ export async function bindVault() {
       score != null ? 'score ' + score : null,
       Array.isArray(matched) && matched.length ? 'matched: ' + matched.join(', ') : null,
     ].filter(Boolean).join(' · ');
-    return lrowEl('memory', clip(n.title || n.id || '(untitled note)', 90), meta, null);
+    const id = String(n.id || n.title || n.body || 'memory');
+    const fullTitle = String(n.title || n.id || '(untitled note)');
+    const body = String(n.body || 'This memory has no additional body text.');
+    const toggle = el('button', 'btn g sm', expandedNotes.has(id) ? 'Collapse' : 'Expand');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', expandedNotes.has(id) ? 'true' : 'false');
+    const row = lrowEl('memory', clip(fullTitle, 90), meta, toggle);
+    const detail = el('div', 'vault-memory-detail');
+    detail.textContent = body;
+    detail.hidden = !expandedNotes.has(id);
+    const middle = row.children[1];
+    if (middle) middle.appendChild(detail);
+    const setOpen = (open) => {
+      detail.hidden = !open;
+      toggle.textContent = open ? 'Collapse' : 'Expand';
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) expandedNotes.add(id); else expandedNotes.delete(id);
+    };
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(detail.hidden);
+    });
+    row.addEventListener('click', () => setOpen(detail.hidden));
+    return row;
   }
 
   async function approvePending(actionHash, btn) {

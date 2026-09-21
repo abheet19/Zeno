@@ -21,7 +21,7 @@ import { CANNOT_ANSWER } from './prompt.js';
  * actually asked for.
  */
 const IMPERATIVE_VERBS = new Set([
-  'add', 'create', 'make', 'build', 'implement', 'write', 'fix', 'refactor',
+  'add', 'create', 'make', 'build', 'design', 'architect', 'implement', 'write', 'fix', 'refactor',
   'rename', 'update', 'remove', 'delete', 'run', 'test', 'open', 'check',
   'list', 'scaffold', 'wire', 'install', 'generate', 'setup', 'configure',
   'debug', 'optimize', 'migrate', 'port', 'upgrade', 'downgrade', 'document',

@@ -287,8 +287,6 @@
      field-sizing:content covers new Chrome; this is the fallback everywhere
      else, capped so a long paste scrolls instead of swallowing the pane. */
   function autosize(t){ if(!t) return;
-    // Once the owner drags the resize handle, their height wins — stop managing it.
-    if(t.dataset.userSized) return;
     const viewportCap=Math.round(innerHeight*0.4);
     // Respect the component's real CSS cap. Previously Command's CSS stopped at
     // 160px while this code compared overflow against ~40vh, so medium/long
@@ -305,20 +303,9 @@
     t.style.height=Math.min(want, cap)+'px';
     // Only show a scrollbar once the text genuinely exceeds the cap; otherwise a
     // short box renders native up/down arrows and hides the wrapped line.
-    t.style.overflowY = want > cap ? 'auto' : 'hidden'; }
+    t.style.overflowY = want > cap ? 'scroll' : 'hidden'; }
   document.addEventListener('input', (e)=>{ const t=e.target; if(t && t.tagName==='TEXTAREA') autosize(t); }, true);
   document.querySelectorAll('textarea').forEach(autosize);
-  // A drag on the native resize handle changes offsetHeight without an input
-  // event; observe it so the autosizer yields to the owner's chosen height.
-  if (window.ResizeObserver) {
-    const ro = new ResizeObserver((entries) => {
-      for (const en of entries) {
-        const t = en.target;
-        if (document.activeElement === t && !t.dataset.autoH) t.dataset.userSized = '1';
-      }
-    });
-    document.querySelectorAll('.composer textarea, .ag-composer textarea').forEach((t) => ro.observe(t));
-  }
 
   syncLayout('sess', true); // boot Forge with the editor + the agent panel's first-run state (#s-empty)
   // extensions install (governed: shows as a held effect)

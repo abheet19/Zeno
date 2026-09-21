@@ -35,9 +35,10 @@ when detail would otherwise be duplicated.
    [the early roadmap](32-big-picture-and-roadmap.md), [the build plan](33-BUILD-PLAN.md), and status
    snapshots `34`, `38`–`42` contain historical or target-state material.
 
-The interactive files in `docs/23`, `docs/28` and `docs/30` are design/LLD artifacts. The GIFs under
-`docs/demos/` carry their own provenance; the Forge GIF shows an earlier approval policy and must not
-be presented as the current workflow.
+The interactive files in `docs/23`, `docs/28` and `docs/30` are design/LLD artifacts. Media under
+`docs/media/` and `docs/demos/` carries its own provenance. The current unified reel and Forge GIF
+use a disposable repository and the current owner-review path; the focused legacy clips remain
+evidence of the narrow policy behavior named beside each one.
 
 ## Runtime architecture
 

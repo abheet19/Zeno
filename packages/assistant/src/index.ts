@@ -89,3 +89,5 @@ export {
   type ProposeWriteIntent,
   type DelegateIntent,
 } from './intent.js';
+
+export { isActionableRequest } from './actionable-request.js';

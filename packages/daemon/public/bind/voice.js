@@ -169,7 +169,9 @@ function agentLabel(agentId) {
 
 /** "Build me a slugify utility" starts a PROCESS, never an effect: plan first
  * (starts nothing), then only a LOCAL agent may begin from a spoken sentence
- * alone — a hosted one still waits behind a click this file cannot make. */
+ * alone — a hosted one still waits behind a click this file cannot make. The
+ * local task is handed to Forge's own session path, so the owner sees the
+ * selected model, plan, tools, live progress, proposals and verification. */
 async function delegateTask(intent) {
   if (!token()) { reply('This window cannot delegate — it has no owner token.'); return; }
   setState('thinking');
@@ -184,21 +186,10 @@ async function delegateTask(intent) {
   }
   if (!delegated.ready) { reply(delegated.note || 'There is no agent available to run this. Nothing was started.'); return; }
 
-  setState('thinking');
-  const run = await postJSON('/delegate', { task: intent.task, agentId: 'local' });
-  if (!run.ok) { reply(`The run failed: ${run.error || 'unknown error'}. Nothing was applied.`); return; }
-  const done = run.data && run.data.delegated;
-  if (!done || !done.started) { reply((done && done.note) || 'The run did not start, and nothing happened.'); return; }
-  window.dispatchEvent(new CustomEvent('zeno:state', { detail: { source: 'voice-delegate' } }));
-  const proposed = Array.isArray(done.proposed) ? done.proposed.length : 0;
-  if (proposed > 0) {
-    const many = proposed === 1 ? '' : 's';
-    reply(done.ok === false
-      ? `The run did not finish after producing ${proposed} file proposal${many}. Open Command to review what was held and what policy already recorded.`
-      : `${proposed} change${many} produced. Routine low-risk edits may already be recorded; anything risky or sensitive is waiting in Command.`);
-  } else {
-    reply(`No changes were proposed. ${done.note ? String(done.note) : 'The agent finished without changing any file.'}`);
-  }
+  reply(`Opening Forge and running this on ${delegated.model || 'the local model'}. File effects still wait behind Zeno's policy and approval boundary.`);
+  window.dispatchEvent(new CustomEvent('zeno:command-run', {
+    detail: { task: intent.task, agentId: delegated.agentId, model: delegated.model },
+  }));
 }
 
 /** A spoken "what's pending / what have you done / verify the chain" gets a

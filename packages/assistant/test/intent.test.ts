@@ -414,7 +414,7 @@ test('a non-empty, non-refusal answer suppresses the fallback even for "add"', (
 
 test('leading verbs from the owner\'s own list are all recognised', () => {
   const verbs = [
-    'add', 'create', 'make', 'build', 'implement', 'write', 'fix', 'refactor',
+    'add', 'create', 'make', 'build', 'design', 'architect', 'implement', 'write', 'fix', 'refactor',
     'rename', 'update', 'remove', 'delete', 'run', 'test', 'open', 'check',
     'list', 'scaffold', 'wire', 'install',
   ];

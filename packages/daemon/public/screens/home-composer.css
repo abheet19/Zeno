@@ -31,7 +31,12 @@
   flex:1; resize:none; border:0; background:none; color:var(--ink); font:inherit;
   font-size:17px; padding:15px 8px 13px; max-height:160px; outline:none; line-height:1.45;
   overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable;
+  scrollbar-width:thin; scrollbar-color:var(--rule-2) transparent;
 }
+.composer textarea::-webkit-scrollbar{width:8px}
+.composer textarea::-webkit-scrollbar-track{background:transparent}
+.composer textarea::-webkit-scrollbar-thumb{background:var(--rule-2);border-radius:8px}
+.composer textarea::-webkit-scrollbar-thumb:hover{background:var(--ink-3)}
 .composer textarea::placeholder{ color:var(--ink-3); }
 
 /* Home's full-size icon buttons. index.html's shared .cbtn stays the 32px

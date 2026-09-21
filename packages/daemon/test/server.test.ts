@@ -2524,3 +2524,23 @@ test('ASK — an answer that delegates comes back with the delegation beside it'
     await h.close();
   }
 });
+
+test('ASK — an imperative build request bypasses chat and is ready for Forge', async () => {
+  const h = await startWith(probe(['qwen3:8b'], false));
+  try {
+    const task = 'Build shipment delay classifier';
+    const res = await post(h, '/assistant/ask', h.owner, { question: task });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { answer: string; modelUsed: unknown; delegated: { ready?: boolean; started: boolean; task: string; agentId: string | null; model: string | null } };
+    assert.equal(body.answer, 'This is a task. Handing it to Forge.');
+    assert.equal(body.modelUsed, null, 'a work instruction never asks the chat model for prose');
+    assert.equal(body.delegated.ready, true);
+    assert.equal(body.delegated.started, false, 'Command plans; Forge owns the run');
+    assert.equal(body.delegated.task, task);
+    assert.equal(body.delegated.agentId, 'local');
+    assert.equal(body.delegated.model, 'qwen3:8b');
+    assert.equal(h.kernel.receipts().length, 0);
+  } finally {
+    await h.close();
+  }
+});

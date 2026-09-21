@@ -49,6 +49,7 @@ import {
   describeTruncation,
   fallbackDelegation,
   groundReply,
+  isActionableRequest,
   needsLiveLookup,
   parseIntent,
   type SnapshotTier,
@@ -59,7 +60,7 @@ import { json, readJson, str } from './http.js';
 import { ensureOllama, installedLocalModels } from './ollama-lifecycle.js';
 import { withoutReasoning } from './forge-local-model.js';
 import { proposeFileWrite, pruneDriftedHeld } from './approvals.js';
-import { resolveDelegation, type Delegated } from './delegate.js';
+import { planDelegation, resolveDelegation, type Delegated } from './delegate.js';
 import { probeAgents } from './delegate-probe.js';
 import { searchNeosapienMemories } from './neosapien.js';
 
@@ -350,6 +351,24 @@ export async function postAssistantAsk(ctx: ServerCtx, req: IncomingMessage, res
       ungrounded: null,
       proposal: null,
       delegated: null,
+      note: null,
+      modelUsed: null,
+    });
+  }
+
+  // A direct owner instruction is work, not a question for the chat model to
+  // improvise an answer to. Decide the Forge route before Ollama is touched.
+  // `planDelegation` starts nothing: the window uses `ready` to switch to
+  // Forge and invoke Forge's normal governed run path, where generated files
+  // are proposals and still require the owner's approval.
+  if (isActionableRequest(question)) {
+    const delegated = await planDelegation(ctx, question, role);
+    return json(res, 200, {
+      answer: 'This is a task. Handing it to Forge.',
+      cited: [],
+      ungrounded: null,
+      proposal: null,
+      delegated,
       note: null,
       modelUsed: null,
     });

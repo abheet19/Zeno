@@ -628,6 +628,26 @@ export async function run({ daemon, page, ok, network, Blocked }) {
     ok('and it took the real /work route',
       wake.net.some((n) => n === 'POST /work'), JSON.stringify([...new Set(wake.net)].slice(0, 24)));
 
+    // A spoken build request must use the same visible Forge session as a
+    // typed Command task. The local provider may start because its outputs are
+    // still proposals; hosted work continues to require a click.
+    const inventory = await daemon.api('/forge/agents?passive=1');
+    const localModels = Array.isArray(inventory.body?.localModels) ? inventory.body.localModels : [];
+    if (localModels.length > 0) {
+      await wake.page.evaluate(() => window.__voice.say(
+        'Zeno, build a small food quality incident triage system with tests'));
+      const openedForge = await wake.page.waitForFunction(
+        () => document.querySelector('.product.on[data-product]')?.getAttribute('data-product') === 'forge',
+        { timeout: 8_000 },
+      ).then(() => true).catch(() => false);
+      await wake.page.waitForTimeout(800);
+      ok('a spoken build request opens the visible Forge product', openedForge);
+      ok('voice first asks the real delegation planner which provider may run',
+        wake.net.some((n) => n === 'POST /delegate'), JSON.stringify([...new Set(wake.net)]));
+      ok('the accepted local task then uses Forge routing, not a hidden voice-only runner',
+        wake.net.some((n) => n === 'POST /forge/route'), JSON.stringify([...new Set(wake.net)]));
+    }
+
     // --- (e) DISARM: off means off, now — not at the next restart.
     const t0 = Date.now();
     await wake.page.evaluate(`{ const t = ${TOGGLE_EXPR}; t.click(); }`);

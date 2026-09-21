@@ -1,5 +1,18 @@
 # Demos
 
+The README now opens with one continuous product reel:
+
+| | What it shows |
+|---|---|
+| [`../media/zeno-reel.mp4`](../media/zeno-reel.mp4) | The crisp 60 fps recording: a real proposal arrives in Command, the owner reviews and approves it, the signed receipt lands, Forge opens the same disposable repository and runs the classifier, and Counsel finishes on its explicit-consent screen. |
+| [`../media/zeno-demo.gif`](../media/zeno-demo.gif) | The smaller looping preview embedded in the repository README. |
+
+Generate both with `node tools/capture-reel60.mjs` after `npm run build`. The script records
+Playwright video from a clean daemon and disposable Git fixture, then uses ffmpeg to encode the MP4
+and README GIF. It deletes the temporary Zeno state and fixture when it finishes.
+
+The four focused GIFs below remain useful because they make one policy property readable at a time.
+
 Four recordings of Zeno doing the thing it exists to do.
 
 **Every frame is a real screenshot of the real product.** The recorder starts a daemon, proposes
@@ -34,7 +47,7 @@ not start serves no window, so there is no page to screenshot; and signature ver
 of a terminal that never existed. This repo's own doctrine is that a panel which invents a passing
 run is worse than an absent panel. The same rule applies to its README.
 
-## Re-recording
+## Re-recording the focused clips
 
 ```powershell
 npm install                    # playwright is a devDependency

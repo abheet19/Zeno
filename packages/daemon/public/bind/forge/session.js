@@ -532,7 +532,8 @@ export function setupSession(S) {
   if (!window.__zenoCommandRunWired) {
     window.__zenoCommandRunWired = true;
     window.addEventListener('zeno:command-run', (e) => {
-      const task = e && e.detail && typeof e.detail.task === 'string' ? e.detail.task.trim() : '';
+      const detail = e && e.detail || {};
+      const task = typeof detail.task === 'string' ? detail.task.trim() : '';
       if (!task) return;
       /* Switch to Forge here, not only in the ask.js button that usually fires
          this — the event must be self-contained so ANY caller (a future voice
@@ -542,6 +543,14 @@ export function setupSession(S) {
       const forgeBtn = document.querySelector('.seg [data-product="forge"]');
       if (forgeBtn) forgeBtn.click();
       const session = startNewSession();
+      // Command and voice already made a deterministic provider decision.
+      // Preserve it across the handoff so a local-ready request cannot be
+      // re-routed to a hosted provider after the owner approves its plan.
+      if (['local', 'claude-code', 'codex'].includes(detail.agentId)) {
+        session.autoRoute = false;
+        session.agentId = detail.agentId;
+        if (typeof detail.model === 'string') session.model = detail.model;
+      }
       void sendTask(session, task);
     });
   }
