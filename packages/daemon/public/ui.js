@@ -34,8 +34,6 @@
   function grp(sel){ $$(sel).forEach(b=> b.addEventListener('click', ()=>{ b.parentElement.querySelectorAll('[aria-current]').forEach(x=>x.removeAttribute('aria-current')); b.setAttribute('aria-current','page'); })); }
   grp('.filterpill'); grp('.segsm button');
   $$('.toggle').forEach(t=>{ if(t.id==='rm-toggle') return; const f=()=> t.setAttribute('aria-checked', t.getAttribute('aria-checked')==='true'?'false':'true'); t.addEventListener('click',f); t.addEventListener('keydown',e=>{ if(e.key===' '||e.key==='Enter'){ e.preventDefault(); f(); } }); });
-  $$('.composer textarea').forEach(t=> t.addEventListener('input', ()=>{ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,160)+'px'; }));
-
   // Receipts: click a row to open its detail
   document.addEventListener('click', e=>{ const r=e.target.closest('[data-toggle-detail]'); if(!r) return; const d=r.nextElementSibling; if(d&&d.classList.contains('rdetail')) d.hidden=!d.hidden; });
   // Vault import preview
@@ -291,7 +289,12 @@
   function autosize(t){ if(!t) return;
     // Once the owner drags the resize handle, their height wins — stop managing it.
     if(t.dataset.userSized) return;
-    const cap=Math.round(innerHeight*0.4);
+    const viewportCap=Math.round(innerHeight*0.4);
+    // Respect the component's real CSS cap. Previously Command's CSS stopped at
+    // 160px while this code compared overflow against ~40vh, so medium/long
+    // prompts were clipped with overflow:hidden and had no scrollbar.
+    const cssMax=parseFloat(getComputedStyle(t).maxHeight);
+    const cap=Number.isFinite(cssMax) ? Math.min(viewportCap,cssMax) : viewportCap;
     // An EMPTY textarea has a one-line scrollHeight, so measuring it collapses the
     // box below a placeholder that wraps — which is what was clipping "…/ for
     // actions". With no value, drop the inline height and let CSS min-height show

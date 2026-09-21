@@ -30,6 +30,7 @@
 .composer textarea{
   flex:1; resize:none; border:0; background:none; color:var(--ink); font:inherit;
   font-size:17px; padding:15px 8px 13px; max-height:160px; outline:none; line-height:1.45;
+  overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable;
 }
 .composer textarea::placeholder{ color:var(--ink-3); }
 
