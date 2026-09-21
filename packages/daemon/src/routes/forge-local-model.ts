@@ -337,7 +337,7 @@ export async function runLocalModel(
   const targets = new Set<string>();
   for (const m of blocks) {
     const rel = (m[1] ?? '').trim();
-    const content = m[2] ?? '';
+    const content = stripWholeFileMarkdownFence(m[2] ?? '');
     let abs: string;
     try {
       abs = jail(ctx.forgeFs, worktree, rel);
@@ -368,4 +368,15 @@ export async function runLocalModel(
     return { ...base, ...metrics, ok: false, log: '', note: 'The model produced no writable file edits in the expected format. Try a clearer task or a larger model.' };
   }
   return { ...base, ...metrics, ok: true, log: visibleBlocks.join(NL + NL) };
+}
+
+/**
+ * Compact models sometimes wrap an entire requested file in the Markdown
+ * fence they would use in chat. The FILE envelope is already the transport
+ * boundary, so remove exactly one outer fence while preserving every byte of
+ * an unfenced body and any fences that are part of the file itself.
+ */
+export function stripWholeFileMarkdownFence(content: string): string {
+  const fenced = /^```[ \t]*(?:[A-Za-z0-9_.+-]+)?[ \t]*\r?\n([\s\S]*?)\r?\n```[ \t]*$/.exec(content);
+  return fenced ? (fenced[1] ?? '') : content;
 }

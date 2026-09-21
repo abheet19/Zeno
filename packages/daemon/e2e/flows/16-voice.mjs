@@ -644,8 +644,10 @@ export async function run({ daemon, page, ok, network, Blocked }) {
       ok('a spoken build request opens the visible Forge product', openedForge);
       ok('voice first asks the real delegation planner which provider may run',
         wake.net.some((n) => n === 'POST /delegate'), JSON.stringify([...new Set(wake.net)]));
-      ok('the accepted local task then uses Forge routing, not a hidden voice-only runner',
-        wake.net.some((n) => n === 'POST /forge/route'), JSON.stringify([...new Set(wake.net)]));
+      ok('the accepted local task enters Forge planning with the provider decision preserved',
+        wake.net.some((n) => n === 'POST /forge/plan')
+          && !wake.net.some((n) => n === 'POST /forge/route'),
+        JSON.stringify([...new Set(wake.net)]));
     }
 
     // --- (e) DISARM: off means off, now — not at the next restart.
