@@ -19,12 +19,14 @@
 
 import { $, $$, el, fill, authHeaders } from '../bind.js';
 import { setupCommandMenu } from './command-menu.js';
+import { modelCapabilityProfile, scoreLabel } from './forge/modelprofiles.js';
 
 const COMMAND_MODEL_KEY = 'zeno.command.model';
 let commandModel = null;
 let commandRegistryCommands = [];
 let commandRegistryRefreshBound = false;
 let commandModelMenu = null;
+let commandModelDetail = null;
 
 function preferredCommandModel(models) {
   return models.find((model) => model === 'qwen3:8b')
@@ -48,8 +50,46 @@ function paintCommandModel(model) {
 }
 
 function closeCommandModelMenu() {
+  if (commandModelDetail) commandModelDetail.remove();
+  commandModelDetail = null;
   if (commandModelMenu) commandModelMenu.remove();
   commandModelMenu = null;
+}
+
+function showCommandModelDetail(model, row) {
+  if (commandModelDetail) commandModelDetail.remove();
+  const profile = modelCapabilityProfile('local', model);
+  const card = el('div', 'mpd');
+  card.setAttribute('role', 'note');
+  card.setAttribute('aria-label', `${model} relative capability profile`);
+  const head = el('div', 'mpd-h');
+  head.append(el('b', null, model));
+  const meta = el('div', 'mpd-m');
+  meta.append(el('span', null, 'on this machine'));
+  const strengths = el('div', 'mpd-str');
+  for (const [label, score] of [['Code', profile.code], ['Reasoning', profile.reasoning], ['Speed', profile.speed]]) {
+    const strengthRow = el('div');
+    const bar = el('i');
+    bar.style.setProperty('--w', `${score}%`);
+    bar.setAttribute('role', 'meter');
+    bar.setAttribute('aria-label', `${label}: ${scoreLabel(score)}`);
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-valuenow', String(score));
+    strengthRow.append(document.createTextNode(label), bar, el('span', null, scoreLabel(score)));
+    strengths.append(strengthRow);
+  }
+  const note = el('div', 'mpd-priv');
+  note.append(el('span', null, profile.note));
+  card.append(head, meta, strengths, note);
+  document.body.append(card);
+  const rowBox = row.getBoundingClientRect();
+  const menuBox = commandModelMenu.getBoundingClientRect();
+  const width = 330;
+  const left = menuBox.left > width + 16 ? menuBox.left - width - 8 : menuBox.right + 8;
+  card.style.left = `${Math.min(Math.max(8, left), window.innerWidth - width - 8)}px`;
+  card.style.top = `${Math.min(Math.max(8, rowBox.top - 24), window.innerHeight - card.offsetHeight - 8)}px`;
+  commandModelDetail = card;
 }
 
 async function chooseCommandModel() {
@@ -85,6 +125,8 @@ async function chooseCommandModel() {
     name.append(el('span', null, 'Ollama · stays on this machine'));
     const tag = el('span', 'mt loc', model === commandModel ? 'selected' : 'available');
     row.append(icon, name, tag);
+    row.addEventListener('mouseenter', () => showCommandModelDetail(model, row));
+    row.addEventListener('focus', () => showCommandModelDetail(model, row));
     row.addEventListener('click', () => {
       commandModel = model;
       try { localStorage.setItem(COMMAND_MODEL_KEY, model); } catch { /* private storage unavailable */ }

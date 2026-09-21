@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { modelCapabilityProfile, scoreLabel } from '../public/bind/forge/modelprofiles.js';
 
@@ -37,4 +38,18 @@ test('unknown future models stay visible with a neutral profile', () => {
     summary: 'Code balanced · reasoning balanced · speed balanced',
     note: 'Curated relative guidance — not a live benchmark or quality guarantee.',
   });
+});
+
+test('the live picker appends each label, meter, and qualitative value to its row', async () => {
+  const source = await readFile(new URL('../public/bind/forge/modelpicker.js', import.meta.url), 'utf8');
+  assert.match(source, /const row = el\('div'\)/);
+  assert.match(source, /add\(row, document\.createTextNode\(label\), bar, el\('span', null, scoreLabel\(score\)\)\)/);
+  assert.match(source, /add\(strengths, row\)/);
+});
+
+test('Command uses the same profile source and complete strength rows', async () => {
+  const source = await readFile(new URL('../public/bind/ask.js', import.meta.url), 'utf8');
+  assert.match(source, /modelCapabilityProfile\('local', model\)/);
+  assert.match(source, /strengthRow\.append\(document\.createTextNode\(label\), bar, el\('span', null, scoreLabel\(score\)\)\)/);
+  assert.match(source, /row\.addEventListener\('mouseenter', \(\) => showCommandModelDetail\(model, row\)\)/);
 });

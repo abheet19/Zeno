@@ -146,6 +146,7 @@ export function setupModelPicker(S) {
     add(meta, el('span', null, model.where === 'local' ? 'on this machine' : 'hosted provider'));
     const strengths = el('div', 'mpd-str');
     for (const [label, score] of [['Code', profile.code], ['Reasoning', profile.reasoning], ['Speed', profile.speed]]) {
+      const row = el('div');
       const bar = document.createElement('i');
       bar.style.setProperty('--w', `${score}%`);
       bar.setAttribute('role', 'meter');
@@ -153,7 +154,8 @@ export function setupModelPicker(S) {
       bar.setAttribute('aria-valuemin', '0');
       bar.setAttribute('aria-valuemax', '100');
       bar.setAttribute('aria-valuenow', String(score));
-      add(strengths, el('div', null, label, bar, el('span', null, scoreLabel(score))));
+      add(row, document.createTextNode(label), bar, el('span', null, scoreLabel(score)));
+      add(strengths, row);
     }
     const note = el('div', 'mpd-priv'); add(note, el('span', null, profile.note));
     add(card, head, meta, strengths, note);
