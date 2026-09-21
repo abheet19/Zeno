@@ -182,7 +182,7 @@ export async function bindVault() {
     searchInput.addEventListener('input', onInput);
   }
 
-  bindBrief(screen);
+  await bindBrief(screen);
 }
 
 /**
@@ -301,10 +301,24 @@ async function bindBrief(screen) {
     pbody.appendChild(card);
   }
   if (!body) return;
-  fill(body, loadingEl('Reading the brief…'));
+
+  /* Live state events can arrive in bursts. Keep the last complete brief on
+     screen while refreshing instead of replacing it with a loading row. Each
+     read owns a generation so an older, slower response cannot overwrite a
+     newer one and make the relative ages appear to jump backwards. */
+  const generation = Number(body.dataset.zenoBriefGeneration || 0) + 1;
+  body.dataset.zenoBriefGeneration = String(generation);
+  const hasSnapshot = body.dataset.zenoBriefRendered === '1';
+  if (!hasSnapshot) fill(body, loadingEl('Reading the brief…'));
 
   const res = await getJSON('/brief');
-  if (!res.ok) { fill(body, unreadableEl('The brief', res.error)); return; }
+  if (Number(body.dataset.zenoBriefGeneration) !== generation || !body.isConnected) return;
+  /* A transient refresh failure should not erase a good snapshot. The owner
+     still sees the last successful brief; first-load failures remain clear. */
+  if (!res.ok) {
+    if (!hasSnapshot) fill(body, unreadableEl('The brief', res.error));
+    return;
+  }
 
   const b = (res.data && res.data.brief) || {};
   const sources = Array.isArray(b.sources) ? b.sources : [];
@@ -315,10 +329,14 @@ async function bindBrief(screen) {
   });
 
   const nodes = [];
-  nodes.push(noteEl((b.status === 'complete' ? 'Complete — every source answered.' : 'Partial — at least one source could not be reached.')
-    + (b.at ? ' Built ' + (ageStr(b.at) || String(b.at)) + '.' : '')));
+  /* `b.at` is the request time, not the time memory changed. Showing it as a
+     build age made an unchanged brief say "Built just now" on every refresh. */
+  nodes.push(noteEl(b.status === 'complete'
+    ? 'Complete — every source answered.'
+    : 'Partial — at least one source could not be reached.'));
   if (items.length) items.forEach((i) => nodes.push(lrowEl('brief', clip(i.text || '', 110), [i.source, i.age].filter(Boolean).join(' · '), null)));
   else nodes.push(emptyEl('The brief has nothing in it.', 'Every source answered and none had anything to report.'));
   if (missing.length) nodes.push(emptyEl(missing.length + ' source(s) could not be reached:', missing.join(', ')));
   fill(body, ...nodes);
+  body.dataset.zenoBriefRendered = '1';
 }
