@@ -11,6 +11,7 @@ import {
   $, $$, el, fill, getJSON,
 } from '../../bind.js';
 import { add, setTrailingText } from './dom.js';
+import { modelCapabilityProfile, scoreLabel } from './modelprofiles.js';
 
 const GB = 1024 * 1024 * 1024;
 
@@ -127,11 +128,44 @@ export function setupModelPicker(S) {
     });
   });
 
-  let mpEl = null, mpAnchor = null;
+  let mpEl = null, mpAnchor = null, mpDetailEl = null;
   const CMP = new Set();
   let mpMode = 'single';
-  function closeMp() { if (mpEl) { mpEl.remove(); mpEl = null; } mpAnchor = null; }
+  function closeModelDetail() { if (mpDetailEl) { mpDetailEl.remove(); mpDetailEl = null; } }
+  function closeMp() { closeModelDetail(); if (mpEl) { mpEl.remove(); mpEl = null; } mpAnchor = null; }
   document.addEventListener('click', (e) => { if (mpEl && !mpEl.contains(e.target)) closeMp(); });
+
+  function showModelDetail(model, row) {
+    closeModelDetail();
+    const profile = modelCapabilityProfile(model.agentId, model.model);
+    const card = el('div', 'mpd');
+    card.setAttribute('role', 'note');
+    card.setAttribute('aria-label', `${model.name} relative capability profile`);
+    const head = el('div', 'mpd-h'); add(head, el('b', null, model.name));
+    const meta = el('div', 'mpd-m');
+    add(meta, el('span', null, model.where === 'local' ? 'on this machine' : 'hosted provider'));
+    const strengths = el('div', 'mpd-str');
+    for (const [label, score] of [['Code', profile.code], ['Reasoning', profile.reasoning], ['Speed', profile.speed]]) {
+      const bar = document.createElement('i');
+      bar.style.setProperty('--w', `${score}%`);
+      bar.setAttribute('role', 'meter');
+      bar.setAttribute('aria-label', `${label}: ${scoreLabel(score)}`);
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.setAttribute('aria-valuenow', String(score));
+      add(strengths, el('div', null, label, bar, el('span', null, scoreLabel(score))));
+    }
+    const note = el('div', 'mpd-priv'); add(note, el('span', null, profile.note));
+    add(card, head, meta, strengths, note);
+    document.body.appendChild(card);
+    const rowBox = row.getBoundingClientRect();
+    const pickerBox = mpEl.getBoundingClientRect();
+    const width = 330;
+    const left = pickerBox.left > width + 16 ? pickerBox.left - width - 8 : pickerBox.right + 8;
+    card.style.left = `${Math.min(Math.max(8, left), window.innerWidth - width - 8)}px`;
+    card.style.top = `${Math.min(Math.max(8, rowBox.top - 24), window.innerHeight - card.offsetHeight - 8)}px`;
+    mpDetailEl = card;
+  }
 
   /** The one-line verdict under the VRAM bar: whether the locally-selected
    *  models are estimated to fit this GPU's usable budget, and how many
@@ -261,6 +295,7 @@ export function setupModelPicker(S) {
 
   function renderMpList() {
     if (!mpEl) return;
+    closeModelDetail();
     const session = S.sessions[S.activeIdx] || S.draftSession;
     const list = mpEl.querySelector('.mp-list');
     const foot = mpEl.querySelector('.mp-foot');
@@ -335,7 +370,13 @@ export function setupModelPicker(S) {
       const mn = el('span', 'mn'); add(mn, document.createTextNode(m.name), el('span', null, m.sub || ''));
       const tierText = !m.available ? (m.reason || 'unavailable') : m.where === 'local' ? 'free · on-device' : 'T3 egress';
       add(b, dot, mn, el('span', `mt ${m.available ? (m.where === 'local' ? 'loc' : 'eg') : ''}`.trim(), tierText));
+      const profile = modelCapabilityProfile(m.agentId, m.model);
+      b.title = `${profile.summary}. ${profile.note}`;
       if (!m.available) { b.disabled = true; b.title = m.reason || 'unavailable'; }
+      if (m.available) {
+        b.addEventListener('mouseenter', () => showModelDetail(m, b));
+        b.addEventListener('focus', () => showModelDetail(m, b));
+      }
       b.addEventListener('click', () => {
         if (!m.available) return;
         if (mpMode === 'compare') {
